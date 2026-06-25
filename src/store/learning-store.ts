@@ -170,6 +170,10 @@ interface LearningStore {
   isFetchingReview: boolean;
   isSubmittingReview: boolean;
   reviewLastQuality: number | null;
+  // Cards re-queued once this session due to a lapse (quality=0). Tracked so a
+  // card the user truly can't recall doesn't loop forever — each card gets at
+  // most ONE second chance per review session (standard Anki "leech" guard).
+  lapsedCardIds: Set<string>;
 
   // Stats state
   stats: LearningStats | null;
@@ -314,6 +318,7 @@ const initialState = {
   isFetchingReview: false,
   isSubmittingReview: false,
   reviewLastQuality: null as number | null,
+  lapsedCardIds: new Set<string>() as Set<string>,
   notesContent: '',
   notesPanelOpen: false,
   isSavingNotes: false,
@@ -1164,6 +1169,7 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       reviewStats: { forgot: 0, hard: 0, good: 0, easy: 0 },
       reviewLastQuality: null,
       reviewQueue: [],
+      lapsedCardIds: new Set(),
     });
     try {
       const res = await fetch(`/api/sessions/${currentSessionId}/cards/review?limit=50`);
@@ -1231,14 +1237,34 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
     } catch (e) {
       console.error('submitReview error:', e);
     } finally {
-      // Advance to next card
+      // Advance to next card. On a lapse (quality=0), re-queue the card once
+      // so it reappears at the end of this session — standard SM-2 "relearn
+      // immediately" behavior. Each card gets at most one re-queue per session
+      // (lapsedCardIds guard) to prevent infinite loops on truly-forgotten cards.
       const bucket = quality === 0 ? 'forgot' : quality === 2 ? 'hard' : quality === 4 ? 'good' : 'easy';
-      set((s) => ({
-        reviewStats: { ...s.reviewStats, [bucket]: s.reviewStats[bucket] + 1 },
-        reviewIndex: s.reviewIndex + 1,
-        reviewFlipped: false,
-        isSubmittingReview: false,
-      }));
+      set((s) => {
+        const nextStats = { ...s.reviewStats, [bucket]: s.reviewStats[bucket] + 1 };
+        // Re-queue logic: only on FORGOT, and only if not already re-queued.
+        if (quality === 0 && !s.lapsedCardIds.has(card.id)) {
+          const newLapsed = new Set(s.lapsedCardIds);
+          newLapsed.add(card.id);
+          return {
+            reviewStats: nextStats,
+            // Append the same card object to the END of the queue.
+            reviewQueue: [...s.reviewQueue, card],
+            lapsedCardIds: newLapsed,
+            reviewIndex: s.reviewIndex + 1,
+            reviewFlipped: false,
+            isSubmittingReview: false,
+          };
+        }
+        return {
+          reviewStats: nextStats,
+          reviewIndex: s.reviewIndex + 1,
+          reviewFlipped: false,
+          isSubmittingReview: false,
+        };
+      });
     }
   },
 
@@ -1250,6 +1276,7 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
     reviewLastQuality: null,
     isSubmittingReview: false,
     isFetchingReview: false,
+    lapsedCardIds: new Set(),
   }),
 
   // ── Reset ─────────────────────────────────────────────────────────────────

@@ -73,6 +73,7 @@ db/*.db-journal
 keep-server.sh
 daemonize.py
 Caddyfile
+watchdog.py
 
 # Backup files
 *.bak

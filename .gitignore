@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -73,7 +74,14 @@ db/*.db-journal
 keep-server.sh
 daemonize.py
 Caddyfile
+Caddyfile.mindguide
 watchdog.py
+
+# Sandbox dev orchestration scripts (z.ai code sandbox internal)
+.zscripts/
+
+# Local QA screenshots & dev snapshots (regenerated on demand, not source)
+/download/
 
 # Backup files
 *.bak

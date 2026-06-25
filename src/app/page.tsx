@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import { MotionConfig } from 'framer-motion';
+import { MotionConfig, motion, AnimatePresence } from 'framer-motion';
 import { useLearningStore } from '@/store/learning-store';
 import { usePreferences } from '@/store/preferences-store';
 import { Sidebar } from '@/components/learning/sidebar';
 import { MainContent } from '@/components/learning/main-content';
-import { FeatureView } from '@/components/learning/feature-views';
+import { FeatureView, pageVariants } from '@/components/learning/feature-views';
 import { SettingsPanel } from '@/components/learning/display-panel';
 import { SettingsView } from '@/components/learning/settings-view';
 import { MoreFeaturesPanel } from '@/components/learning/create-new-panel';
@@ -21,6 +21,7 @@ export default function Page() {
     fetchSessions,
     fetchStats,
     activeFeatureView,
+    activeFeatureViewDir,
     settingsPanelOpen,
     setSettingsPanelOpen,
     settingsViewOpen,
@@ -83,6 +84,12 @@ export default function Page() {
   // Determine if sidebar should be shown
   const showSidebar = displayMode !== 'full' && sidebarOpen;
 
+  // viewDir comes from the store — see `activeFeatureViewDir` in
+  // learning-store.ts. The store computes it atomically inside
+  // setActiveFeatureView, so this component just reads it without any
+  // setState-in-effect cascades (the lint-clean way to track derived state
+  // from a store action).
+
   return (
     // MotionConfig: when the user disables 动态效果, force framer-motion into
     // reduced-motion mode app-wide. This strips transform/layout/scale springs
@@ -97,8 +104,50 @@ export default function Page() {
 
         {/* Main content area */}
         <div className="relative flex flex-1 flex-col overflow-hidden">
-          {/* Feature views or main content */}
-          {activeFeatureView ? <FeatureView /> : <MainContent />}
+          {/* ── Page-level view transition ────────────────────────────────────
+              AnimatePresence mode="wait" + custom={viewDir} + key={activeFeatureView || 'main'}
+              is the SINGLE owner of the welcome ↔ feature transition.
+
+              Bug context (anim-refine-003): previously this was
+                `{activeFeatureView ? <FeatureView /> : <MainContent />}`
+              with NO AnimatePresence wrapper. React's commit phase
+              synchronously unmounted whichever branch was leaving,
+              destroying its internal AnimatePresence before framer-motion
+              could fire the exit variant. The exit animation therefore
+              never ran — the user saw "instant switch" with zero frames.
+
+              Fix: hoist AnimatePresence here so it persists across
+              activeFeatureView changes. Each branch is a motion.div with
+              key + variants + initial/animate/exit. The `key` includes
+              the feature id so feature-to-feature switches ALSO animate
+              (the wrapper remounts). */}
+          <AnimatePresence mode="wait" custom={activeFeatureViewDir}>
+            {activeFeatureView ? (
+              <motion.div
+                key={`feature-${activeFeatureView}`}
+                custom={activeFeatureViewDir}
+                variants={pageVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative flex h-full flex-1 flex-col"
+              >
+                <FeatureView />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="main"
+                custom={activeFeatureViewDir}
+                variants={pageVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative flex h-full flex-1 flex-col"
+              >
+                <MainContent />
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Course Panel (floating, inside main area) */}
           <CoursePanel />

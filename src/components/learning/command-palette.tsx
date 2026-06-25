@@ -338,11 +338,15 @@ export function CommandPalette() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.22, ease: [0.4, 0, 1, 1] }}
+          // EXIT EASING (anim-refine-003): ease-out so the palette visibly
+          // fades from frame 1 (no dead-time window).
+          transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
         >
-          {/* Backdrop */}
+          {/* Backdrop — solid dark overlay (no backdrop-blur to avoid the
+              124ms main-thread stall on close that backdrop-filter teardown
+              causes — see settings-view.tsx comment + worklog anim-refine-003). */}
           <div
-            className="absolute inset-0 bg-neutral-100/70 backdrop-blur-sm dark:bg-neutral-950/70"
+            className="absolute inset-0 bg-neutral-100/80 dark:bg-neutral-950/80"
             onClick={close}
           />
 
@@ -351,7 +355,13 @@ export function CommandPalette() {
             initial={{ opacity: 0, y: -12, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.99 }}
-            transition={{ type: 'spring', stiffness: 320, damping: 28, mass: 0.8 }}
+            // Per-property exit: opacity fast (ease-out), transform springy
+            // (anim-refine-003 — no dead-time window before visible motion).
+            transition={{
+              opacity: { duration: 0.16, ease: [0.16, 1, 0.3, 1] },
+              y: { type: 'spring', stiffness: 320, damping: 28, mass: 0.8 },
+              scale: { type: 'spring', stiffness: 320, damping: 28, mass: 0.8 },
+            }}
             className="relative w-[min(560px,92vw)] overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
           >
             {/* Input row */}

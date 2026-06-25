@@ -42,7 +42,17 @@ const panelVariants = {
     opacity: 1, y: 0, scale: 1,
     transition: { type: 'spring', stiffness: 320, damping: 26, mass: 0.8 },
   },
-  exit: { opacity: 0, y: -4, scale: 0.98, transition: { duration: 0.2, ease: [0.4, 0, 1, 1] } },
+  // EXIT EASING (anim-refine-003): opacity leads with ease-out so the panel
+  // visibly fades from frame 1; scale + y keep ease-in for the "receding
+  // upward" metaphor. Eliminates the dead-time window before visible motion.
+  exit: {
+    opacity: 0, y: -4, scale: 0.98,
+    transition: {
+      opacity: { duration: 0.16, ease: [0.16, 1, 0.3, 1] },
+      y: { duration: 0.18, ease: [0.4, 0, 1, 1] },
+      scale: { duration: 0.16, ease: [0.4, 0, 1, 1] },
+    },
+  },
 };
 
 const itemVariants = {

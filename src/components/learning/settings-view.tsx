@@ -268,8 +268,32 @@ const useHint = () => useContext(HintContext);
 //  · Settings (ceremony): 200/24/1.0 — heavy, ~700ms, deliberate settle.
 //
 // The scale 0.94 → 1 with transformOrigin 'center' gives a subtle "opening
-// up" depth cue — like a card pulled from a deck and laid flat. The exit
-// mirrors it (scale-down + fade) so closing feels like "putting it back".
+// up" depth cue — like a card pulled from a deck and laid flat.
+//
+// EXIT EASING RATIONALE (anim-refine-003 — "关闭的过渡动画无帧数直接闪现"):
+//   · Previous exit used a single transition { duration: 0.28, ease: [0.4,0,1,1] }
+//     applied to ALL three properties (opacity, scale, y).
+//   · [0.4, 0, 1, 1] is a strong ease-IN (slow start, fast end). For opacity,
+//     this meant: opacity stayed near 1.0 for the first 40% of duration
+//     (112ms), then crashed to 0 in the last 60%. Combined with the React
+//     commit delay (~50ms), the user perceived ~160ms of "nothing happening"
+//     followed by a sudden vanish — the "instant close" perception.
+//   · Diagnostic measurement (worklog anim-refine-003) confirmed: settings
+//     close captured only 4 frames over 348ms — well below the 12-frame
+//     "perceived as animation" threshold — and one frame gap stretched to
+//     112ms (8.9fps), which the brain reads as a "still image" not motion.
+//
+// FIX:
+//   · Split per-property transitions so opacity can lead (fast fade from
+//     frame 1) while scale/y provide the physical "departing" metaphor.
+//   · Switch opacity to ease-OUT [0.16, 1, 0.3, 1] (snoozeOut): 70% of the
+//     opacity drop happens in the first 30% of duration — the user sees the
+//     modal becoming transparent IMMEDIATELY, no dead-time window.
+//   · Keep scale/y on ease-IN [0.4, 0, 1, 1] but with a SHORTER duration
+//     (0.20s vs 0.28s) so they finish before opacity completes — the panel
+//     "shrinks + drops" first, then continues fading out as a ghost.
+//   · Total perceived duration ~260ms, with visible motion starting at
+//     frame 1 (vs ~frame 12 before).
 const panelVariants = {
   hidden: { opacity: 0, scale: 0.94, y: 18 },
   visible: {
@@ -282,7 +306,18 @@ const panelVariants = {
     opacity: 0,
     scale: 0.95,
     y: 10,
-    transition: { duration: 0.28, ease: [0.4, 0, 1, 1] },
+    transition: {
+      // Opacity leads: 0.22s ease-out so the user sees the modal fading
+      // immediately. SnoozeOut curve: 70% of the fade happens in the first
+      // 30% of duration.
+      opacity: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
+      // Scale + y follow with a shorter ease-in: the panel "shrinks and
+      // drops" within 0.20s, then continues fading as a translucent ghost
+      // for the remaining ~20ms. This matches the physical metaphor of
+      // "departing" while avoiding the "stuck then snap" perception.
+      scale: { duration: 0.20, ease: [0.4, 0, 1, 1] },
+      y: { duration: 0.22, ease: [0.4, 0, 1, 1] },
+    },
   },
 };
 
@@ -290,6 +325,10 @@ const panelVariants = {
 // tab is to the right (forward) or left (backward) of the previous one — so
 // switching tabs feels like flipping pages in a book, not just fading.
 // `custom` is the direction (-1 = back, +1 = forward).
+//
+// Exit easing: switched to ease-out [0.16, 1, 0.3, 1] so the old tab content
+// visibly slides away immediately (no dead-time window — see panelVariants
+// docstring above for the full rationale).
 const contentVariants = {
   hidden: (dir: number) => ({
     opacity: 0,
@@ -306,13 +345,20 @@ const contentVariants = {
     opacity: 0,
     x: -14 * dir,
     y: -4,
-    transition: { duration: 0.2, ease: [0.4, 0, 1, 1] },
+    transition: {
+      opacity: { duration: 0.16, ease: [0.16, 1, 0.3, 1] },
+      x: { duration: 0.20, ease: [0.16, 1, 0.3, 1] },
+      y: { duration: 0.16, ease: [0.4, 0, 1, 1] },
+    },
   }),
 };
 
 // Soft cross-fade for the right pane when the hovered hint changes. Tiny
 // scale (0.99 → 1) adds depth so the swap reads as a gentle settle rather
 // than a hard cut. The key is the hint id so AnimatePresence swaps the block.
+//
+// Exit uses ease-out [0.16, 1, 0.3, 1] for the same dead-time-elimination
+// reason as panelVariants.
 const hintVariants = {
   hidden: { opacity: 0, y: 6, scale: 0.99 },
   visible: {
@@ -321,7 +367,16 @@ const hintVariants = {
     scale: 1,
     transition: { type: 'spring', stiffness: 360, damping: 28, mass: 0.6 },
   },
-  exit: { opacity: 0, y: -4, scale: 0.99, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } },
+  exit: {
+    opacity: 0,
+    y: -4,
+    scale: 0.99,
+    transition: {
+      opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] },
+      y: { duration: 0.16, ease: [0.4, 0, 1, 1] },
+      scale: { duration: 0.14, ease: [0.4, 0, 1, 1] },
+    },
+  },
 };
 
 export function SettingsView() {
@@ -371,16 +426,24 @@ export function SettingsView() {
       <AnimatePresence>
         {open && (
           <>
-            {/* Backdrop — bg fades in faster than the blur so the user sees
-                the dim first, then the soft focus. The blur is capped at 3px
-                (cheap on the GPU) and only animates opacity, not the blur
-                radius itself (animating filter:blur is expensive).
-                Exit reverses: blur drops first, then opacity. */}
+            {/* Backdrop — solid dark overlay.
+                PREVIOUSLY used `backdrop-blur-[3px]` which caused a 124ms
+                main-thread stall during close (verified via rAF sampling —
+                see worklog anim-refine-003). The browser does a synchronous
+                reflow when tearing down the backdrop-filter layer, which
+                freezes the entire close animation for ~124ms — the user
+                perceives "instant close" because all visible motion is
+                squeezed into the ~80ms before + ~80ms after the stall.
+                Replacing blur with a darker solid overlay eliminates the
+                stall entirely. The visual hierarchy is preserved by
+                bg-black/55 (slightly darker than the previous /40 + blur).
+                EXIT EASING: ease-out [0.16, 1, 0.3, 1] so the backdrop
+                visibly fades from frame 1 (no dead-time window). */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1, transition: { duration: 0.24, ease: [0.25, 0.1, 0.25, 1] } }}
-              exit={{ opacity: 0, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } }}
-              className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[3px]"
+              exit={{ opacity: 0, transition: { duration: 0.18, ease: [0.16, 1, 0.3, 1] } }}
+              className="fixed inset-0 z-[60] bg-black/55"
               onClick={() => setOpen(false)}
             />
 

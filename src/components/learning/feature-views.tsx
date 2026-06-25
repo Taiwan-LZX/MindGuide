@@ -2,6 +2,62 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// ─── Page-level entry/exit variants ─────────────────────────────────────────
+// OWNED BY page.tsx — this is the animation boundary for the welcome ↔ feature
+// transition. (Previously lived inside FeatureView, but page.tsx's
+// `{activeFeatureView ? <FeatureView /> : <MainContent />}` synchronously
+// unmounted FeatureView before AnimatePresence could fire exit — see
+// /home/z/my-project/worklog.md "anim-refine-003" for the full diagnosis.)
+//
+// Direction semantics:
+//   dir = +1  → forward (welcome → feature, or feature → different feature)
+//   dir = -1  → backward (feature → welcome)
+//
+// Easing rationale (post user-feedback "关闭的过渡动画无帧数直接闪现"):
+//   · Exit previously used ease-in [0.4, 0, 1, 1] which keeps opacity near 1
+//     for the first 40% of duration. Combined with ~50ms React commit delay,
+//     users saw 195ms of "nothing happening" then a sudden vanish — the
+//     "instant close" perception.
+//   · Switched exit to ease-out [0.16, 1, 0.3, 1] (snoozeOut): visible motion
+//     starts in the very first frame, then gently trails off. The user
+//     immediately sees the panel leaving, eliminating the dead-time window.
+//   · Entry keeps spring physics — overshoot + settle reads as "arriving".
+//   · Per-property transition split: opacity fades slightly faster than
+//     transform, so the user perceives "fading out while drifting away"
+//     instead of "transform completing then opacity cutting".
+
+export const pageVariants = {
+  hidden: (dir: number) => ({
+    opacity: 0,
+    x: 28 * dir,
+    scale: 0.97,
+  }),
+  visible: {
+    opacity: 1,
+    x: 0,
+    scale: 1,
+    transition: {
+      type: 'spring' as const,
+      stiffness: 220,
+      damping: 26,
+      mass: 0.9,
+    },
+  },
+  exit: (dir: number) => ({
+    opacity: 0,
+    x: -22 * dir,
+    scale: 0.98,
+    transition: {
+      // Split per-property so opacity leads (perceptible fade from frame 1)
+      // and transform follows with a slight ease-out trail.
+      opacity: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
+      x: { duration: 0.26, ease: [0.16, 1, 0.3, 1] },
+      scale: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
+    },
+  }),
+};
+
 import {
   ArrowLeft,
   Plus,
@@ -52,33 +108,15 @@ import { formatInterval } from '@/lib/sm2';
 // `custom` is the direction: +1 = forward (entering a feature), -1 = backward
 // (returning to welcome). The exit mirrors the entry direction so the old
 // view leaves the opposite way.
-const pageVariants = {
-  hidden: (dir: number) => ({
-    opacity: 0,
-    x: 28 * dir,
-    scale: 0.97,
-  }),
-  visible: {
-    opacity: 1,
-    x: 0,
-    scale: 1,
-    transition: {
-      type: 'spring',
-      stiffness: 220,
-      damping: 26,
-      mass: 0.9,
-    },
-  },
-  exit: (dir: number) => ({
-    opacity: 0,
-    x: -22 * dir,
-    scale: 0.98,
-    transition: {
-      duration: 0.3,
-      ease: [0.4, 0, 1, 1],
-    },
-  }),
-};
+//
+// NOTE: pageVariants now lives at the top of this file (exported) and is
+// consumed by page.tsx's AnimatePresence. The FeatureView component below
+// no longer owns an AnimatePresence — page.tsx does. This fixes the
+// "feature view back-exit never animates" bug documented in worklog.md
+// anim-refine-003: previously, page.tsx's
+//   `{activeFeatureView ? <FeatureView /> : <MainContent />}`
+// synchronously unmounted FeatureView (and its internal AnimatePresence)
+// before framer-motion could fire the exit variant.
 
 const itemVariants = {
   hidden: { opacity: 0, y: 14 },
@@ -95,50 +133,28 @@ const itemVariants = {
   }),
 };
 
-// ─── Feature View Router ─────────────────────────────────────────────────────
-// Tracks the previous activeFeatureView in a ref so we can compute the
-// transition direction: forward (null → feature, or feature → different
-// feature) = +1; backward (feature → null) = -1. The direction is passed as
-// `custom` to pageVariants so the entry/exit x-push matches user intent.
+// ─── Feature View (pure content) ───────────────────────────────────────────
+// Page-level entry/exit animations are owned by page.tsx's AnimatePresence
+// (see `pageVariants` exported above). This component just renders the
+// currently-active feature's content. The activeFeatureView key on the
+// wrapping motion.div in page.tsx ensures feature-to-feature switches also
+// animate (the wrapper unmounts + remounts with a new key).
 
 export function FeatureView() {
   const { activeFeatureView } = useLearningStore();
   const scrollRef = React.useRef<HTMLDivElement>(null);
-  const prevViewRef = React.useRef<string | null>(null);
-  const [dir, setDir] = React.useState<1 | -1>(1);
-
-  React.useEffect(() => {
-    const prev = prevViewRef.current;
-    // Forward: entering a feature from welcome, or switching features.
-    // Backward: returning to welcome from a feature.
-    const nextDir = prev !== null && activeFeatureView === null ? -1 : 1;
-    setDir(nextDir);
-    prevViewRef.current = activeFeatureView;
-  }, [activeFeatureView]);
 
   return (
-    <AnimatePresence mode="wait" custom={dir}>
-      {activeFeatureView && (
-        <motion.div
-          key={activeFeatureView}
-          custom={dir}
-          variants={pageVariants}
-          initial="hidden"
-          animate="visible"
-          exit="exit"
-          className="relative flex h-full flex-1 flex-col"
-        >
-          <ScrollProgress targetRef={scrollRef} />
-          {/* PDF import removed during cleanup */}
-          {activeFeatureView === 'tasks' && <TaskPlannerView scrollRef={scrollRef} />}
-          {activeFeatureView === 'cards' && <LearningCardsView scrollRef={scrollRef} />}
-          {activeFeatureView === 'achievements' && <AchievementsView scrollRef={scrollRef} />}
-          {activeFeatureView === 'stats' && <StatsView scrollRef={scrollRef} />}
-          {activeFeatureView === 'graph' && <KnowledgeGraphView scrollRef={scrollRef} />}
-          {activeFeatureView === 'notes' && <NotesView />}
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <div className="relative flex h-full flex-1 flex-col">
+      <ScrollProgress targetRef={scrollRef} />
+      {/* PDF import removed during cleanup */}
+      {activeFeatureView === 'tasks' && <TaskPlannerView scrollRef={scrollRef} />}
+      {activeFeatureView === 'cards' && <LearningCardsView scrollRef={scrollRef} />}
+      {activeFeatureView === 'achievements' && <AchievementsView scrollRef={scrollRef} />}
+      {activeFeatureView === 'stats' && <StatsView scrollRef={scrollRef} />}
+      {activeFeatureView === 'graph' && <KnowledgeGraphView scrollRef={scrollRef} />}
+      {activeFeatureView === 'notes' && <NotesView />}
+    </div>
   );
 }
 

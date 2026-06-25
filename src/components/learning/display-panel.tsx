@@ -49,13 +49,28 @@ const panelVariants: Variants = {
   },
   // Exit "recedes" toward the trigger (top-right). The small scale-down + y
   // up + opacity fade combo makes it read as "going back inside the dot"
-  // rather than "vanishing". duration 0.22 is short enough to not block the
-  // next intent, long enough to register.
+  // rather than "vanishing".
+  //
+  // EXIT EASING (anim-refine-003 — "关闭的过渡动画无帧数直接闪现"):
+  //   · Previous: single { duration: 0.22, ease: [0.4, 0, 1, 1] } for all 3
+  //     properties. Strong ease-in meant opacity stayed near 1 for the first
+  //     ~88ms (40% of 220ms) — combined with React commit delay, the user
+  //     saw ~130ms of "nothing happening" then a sudden vanish.
+  //   · Now: split per-property. Opacity uses ease-OUT [0.16, 1, 0.3, 1] so
+  //     the menu visibly fades from frame 1. Scale + y keep ease-IN for the
+  //     "receding into the trigger dot" metaphor but with shorter duration
+  //     (0.18s) so they finish before opacity fully fades.
+  //   · Total perceived duration ~200ms, with visible motion starting at
+  //     frame 1 (vs ~frame 7 before).
   exit: {
     opacity: 0,
     scale: 0.92,
     y: -8,
-    transition: { duration: 0.22, ease: [0.4, 0, 1, 1] },
+    transition: {
+      opacity: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
+      scale: { duration: 0.18, ease: [0.4, 0, 1, 1] },
+      y: { duration: 0.20, ease: [0.4, 0, 1, 1] },
+    },
   },
 };
 
@@ -219,11 +234,13 @@ export function SettingsPanel() {
       {settingsPanelOpen && (
         <>
           {/* Backdrop — transparent click-catcher. Fades in/out so the click
-              target doesn't pop. */}
+              target doesn't pop.
+              EXIT EASING (anim-refine-003): ease-out [0.16, 1, 0.3, 1] so the
+              backdrop visibly fades from frame 1 (no dead-time window). */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1, transition: { duration: 0.18, ease: [0.25, 0.1, 0.25, 1] } }}
-            exit={{ opacity: 0, transition: { duration: 0.14, ease: [0.4, 0, 1, 1] } }}
+            exit={{ opacity: 0, transition: { duration: 0.16, ease: [0.16, 1, 0.3, 1] } }}
             className="fixed inset-0 z-[49]"
             onClick={() => setSettingsPanelOpen(false)}
           />

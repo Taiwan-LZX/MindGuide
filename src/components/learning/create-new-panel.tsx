@@ -67,13 +67,24 @@ const popoverVariants: Variants = {
   // was too subtle to read as "going back inside" — bumped to 0.93 so the
   // recession is perceptible. y:14 + opacity 0 = drops down + fades out,
   // matching the bottom-left transformOrigin.
+  //
+  // EXIT EASING (anim-refine-003):
+  //   · Previous: single { duration: 0.26, ease: [0.4, 0, 1, 1] } for all 3
+  //     properties. Strong ease-in meant opacity stayed near 1 for the first
+  //     ~104ms — user perceived "nothing happening" then a sudden vanish.
+  //   · Now: split per-property. Opacity uses ease-OUT [0.16, 1, 0.3, 1] so
+  //     the panel visibly fades from frame 1 (no dead-time window). Scale
+  //     and y keep ease-IN for the "falling away" physical metaphor, but
+  //     finish in 0.22s (vs 0.26s) so they complete before opacity fully
+  //     fades — the panel "shrinks + drops" first, then ghost-fades out.
   exit: {
     opacity: 0,
     y: 14,
     scale: 0.93,
     transition: {
-      duration: 0.26,
-      ease: [0.4, 0, 1, 1],
+      opacity: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
+      scale: { duration: 0.22, ease: [0.4, 0, 1, 1] },
+      y: { duration: 0.24, ease: [0.4, 0, 1, 1] },
     },
   },
 };

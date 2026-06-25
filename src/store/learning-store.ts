@@ -132,6 +132,13 @@ interface LearningStore {
   settingsViewOpen: boolean;
   createNewPanelOpen: boolean;
   activeFeatureView: string | null;
+  // Direction of the last activeFeatureView transition:
+  //   +1 = forward (welcome → feature, or feature → different feature)
+  //   -1 = backward (feature → welcome)
+  // Computed atomically inside setActiveFeatureView so page.tsx's AnimatePresence
+  // can read it without setState-in-effect cascades. See anim-refine-003 in
+  // worklog.md for the full rationale.
+  activeFeatureViewDir: 1 | -1;
 
   // Feature state
   tasks: Array<{ id: string; title: string; done: boolean; priority: number; order: number; createdAt: string }>;
@@ -287,6 +294,7 @@ const initialState = {
   settingsViewOpen: false,
   createNewPanelOpen: false,
   activeFeatureView: null as string | null,
+  activeFeatureViewDir: 1 as 1 | -1,
   tasks: [] as Array<{ id: string; title: string; done: boolean; priority: number; order: number; createdAt: string }>,
   cards: [] as Array<{
     id: string;
@@ -918,7 +926,13 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
   setSettingsViewOpen: (open: boolean) => set({ settingsViewOpen: open }),
   setCreateNewPanelOpen: (open: boolean) => set({ createNewPanelOpen: open }),
   setActiveFeatureView: (view: string | null) => {
-    set({ activeFeatureView: view, createNewPanelOpen: false });
+    // Compute transition direction atomically with the view change so
+    // page.tsx's AnimatePresence can read it without setState-in-effect.
+    // Backward = we had a feature and now we don't (going back to welcome).
+    // Forward = entering a feature from welcome, or switching features.
+    const prev = get().activeFeatureView;
+    const dir: 1 | -1 = prev !== null && view === null ? -1 : 1;
+    set({ activeFeatureView: view, activeFeatureViewDir: dir, createNewPanelOpen: false });
     // Pre-fetch stats when entering stats or achievements view
     if (view === 'stats' || view === 'achievements') {
       get().fetchStats();

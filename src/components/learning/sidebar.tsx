@@ -70,7 +70,14 @@ const sessionVariants = {
     opacity: 0,
     x: -20,
     scale: 0.95,
-    transition: { duration: 0.22, ease: [0.4, 0, 1, 1] },
+    // EXIT EASING (anim-refine-003): opacity leads with ease-out so the
+    // session row visibly fades from frame 1; x + scale keep ease-in for the
+    // "sliding out to the left" metaphor.
+    transition: {
+      opacity: { duration: 0.16, ease: [0.16, 1, 0.3, 1] },
+      x: { duration: 0.20, ease: [0.4, 0, 1, 1] },
+      scale: { duration: 0.18, ease: [0.4, 0, 1, 1] },
+    },
   },
 };
 

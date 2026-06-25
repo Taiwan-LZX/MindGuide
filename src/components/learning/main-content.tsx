@@ -57,10 +57,16 @@ const streamingBubbleVariants = {
     y: 0,
     transition: { type: 'spring', stiffness: 320, damping: 28, mass: 0.7 },
   },
+  // EXIT EASING (anim-refine-003): split per-property so opacity leads with
+  // ease-out — the streaming bubble visibly fades from frame 1 instead of
+  // sitting at full opacity for ~80ms then vanishing.
   exit: {
     opacity: 0,
     y: -4,
-    transition: { duration: 0.2, ease: [0.4, 0, 1, 1] },
+    transition: {
+      opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] },
+      y: { duration: 0.18, ease: [0.4, 0, 1, 1] },
+    },
   },
 };
 
@@ -502,7 +508,7 @@ function SimpleChatInput({
               opacity: 1,
               transition: { type: 'spring', stiffness: 500, damping: 28, mass: 0.6 },
             }}
-            exit={{ scale: 0.85, opacity: 0, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } }}
+            exit={{ scale: 0.85, opacity: 0, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
             whileTap={{
               scale: 0.92,
               transition: { type: 'spring', stiffness: 600, damping: 25 },
@@ -522,7 +528,7 @@ function SimpleChatInput({
               opacity: 1,
               transition: { type: 'spring', stiffness: 500, damping: 28, mass: 0.6 },
             }}
-            exit={{ scale: 0.85, opacity: 0, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } }}
+            exit={{ scale: 0.85, opacity: 0, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
             whileTap={{
               scale: 0.92,
               transition: { type: 'spring', stiffness: 600, damping: 25 },

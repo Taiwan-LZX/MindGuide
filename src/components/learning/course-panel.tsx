@@ -45,11 +45,20 @@ const panelVariants = {
   // Exit slides back toward the right edge (where the drawer came from).
   // transformOrigin: 'right' set inline on the panel so scale-down also
   // recedes rightward — the two cues agree directionally.
+  //
+  // EXIT EASING (anim-refine-003): split per-property. Opacity uses ease-OUT
+  // so the drawer visibly fades from frame 1 (no dead-time window). Scale + x
+  // keep ease-IN for the "sliding back into the right edge" metaphor but
+  // finish slightly before opacity completes.
   exit: {
     opacity: 0,
     scale: 0.96,
     x: 24,
-    transition: { duration: 0.26, ease: [0.4, 0, 1, 1] },
+    transition: {
+      opacity: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
+      scale: { duration: 0.22, ease: [0.4, 0, 1, 1] },
+      x: { duration: 0.24, ease: [0.4, 0, 1, 1] },
+    },
   },
 };
 
@@ -93,10 +102,15 @@ const collapsibleVariants = {
     opacity: 1,
     transition: { ...spring },
   },
+  // Collapsing: opacity drops fast (ease-out) so the user sees the collapse
+  // start immediately; height uses ease-in so it accelerates closed.
   collapsed: {
     height: 0,
     opacity: 0,
-    transition: { duration: 0.25, ease: [0.4, 0, 1, 1] },
+    transition: {
+      height: { duration: 0.22, ease: [0.4, 0, 1, 1] },
+      opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] },
+    },
   },
 };
 
@@ -293,7 +307,7 @@ export function CoursePanel() {
                         key="generate-btn"
                         initial={{ opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 8, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } }}
+                        exit={{ opacity: 0, y: 8, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
                         whileHover={{
                           scale: 1.02,
                           transition: { type: 'spring', stiffness: 400, damping: 22 },

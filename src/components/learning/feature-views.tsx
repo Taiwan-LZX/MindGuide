@@ -82,6 +82,11 @@ import {
   Layers3,
   ListChecks,
   Sparkles,
+  FileText,
+  Upload,
+  Loader2,
+  File,
+  Network,
 } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 // PDFImportView removed during cleanup — feature replaced with notes editor
@@ -150,10 +155,10 @@ export function FeatureView() {
       {/* PDF import removed during cleanup */}
       {activeFeatureView === 'tasks' && <TaskPlannerView scrollRef={scrollRef} />}
       {activeFeatureView === 'cards' && <LearningCardsView scrollRef={scrollRef} />}
-      {activeFeatureView === 'achievements' && <AchievementsView scrollRef={scrollRef} />}
-      {activeFeatureView === 'stats' && <StatsView scrollRef={scrollRef} />}
+      {activeFeatureView === 'progress' && <ProgressView scrollRef={scrollRef} />}
       {activeFeatureView === 'graph' && <KnowledgeGraphView scrollRef={scrollRef} />}
       {activeFeatureView === 'notes' && <NotesView />}
+      {activeFeatureView === 'materials' && <MaterialsView scrollRef={scrollRef} />}
     </div>
   );
 }
@@ -167,10 +172,10 @@ export function FeatureView() {
 const FEATURE_SECTION_NUMBER: Record<string, string> = {
   tasks: '01',
   cards: '02',
-  achievements: '03',
-  stats: '04',
-  graph: '05',
-  notes: '06',
+  progress: '03',
+  graph: '04',
+  notes: '05',
+  materials: '06',
 };
 
 function FeatureHeader({ title, icon: Icon, color }: { title: string; icon: React.ElementType; color: string }) {
@@ -740,7 +745,15 @@ function LearningCardsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEl
   );
 }
 
-// ─── 4. Achievements View ──────────────────────────────────────────────────
+// ─── 4. Progress View (merged: achievements + stats) ────────────────────────
+//
+// Formerly two separate views (Achievements + Stats). Merged because:
+//   · Both consumed the same /api/stats feed
+//   · Metrics overlapped (streak, card mastery appeared in both)
+//   · Learners had to switch views to see related info
+// The merged view stacks: [achievements summary + list] then [stats grid +
+// review progress + weekly activity] — motivational layer on top, analytical
+// layer below. One cognitive context, one scroll.
 
 const achievementIcons: Record<string, React.ElementType> = {
   message: MessageSquare,
@@ -751,10 +764,9 @@ const achievementIcons: Record<string, React.ElementType> = {
   layers: Layers,
 };
 
-function AchievementsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
-  const { achievements, stats, fetchStats, isLoadingStats } = useLearningStore();
+function ProgressView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
+  const { achievements, stats, fetchStats, isLoadingStats, weeklyActivity } = useLearningStore();
 
-  // Fetch fresh stats on mount (achievements are derived from real DB data)
   React.useEffect(() => {
     fetchStats();
   }, [fetchStats]);
@@ -764,16 +776,26 @@ function AchievementsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEle
     ? Math.round((unlockedCount / achievements.length) * 100)
     : 0;
 
+  const statsCards = [
+    { label: '学习会话', value: stats?.sessions ?? 0, icon: BookOpen, color: 'text-neutral-700 dark:text-neutral-200' },
+    { label: '对话轮数', value: stats?.messages ?? 0, icon: MessageSquare, color: 'text-neutral-700 dark:text-neutral-200' },
+    { label: '知识点', value: stats?.knowledgeNodes ?? 0, icon: Layers, color: 'text-neutral-700 dark:text-neutral-200', sub: `${stats?.masteredKnowledge ?? 0} 已掌握` },
+    { label: '学习时长', value: stats?.learningTimeLabel ?? '0m', icon: Clock, color: 'text-neutral-700 dark:text-neutral-200' },
+  ];
+
+  const maxWeekly = Math.max(1, ...(weeklyActivity?.map(d => d.count) || [1]));
+
   return (
     <>
-      <FeatureHeader title="成就系统" icon={Trophy} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
+      <FeatureHeader title="学习进度" icon={Trophy} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
       <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
         <div className="mx-auto max-w-[600px] px-6 py-5">
-          {/* Summary with circular progress */}
+
+          {/* ─── Achievements summary + list ─────────────────────────────── */}
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-5 rounded-xl border border-neutral-200/70 bg-neutral-50/60 p-4 dark:border-neutral-800/70 dark:bg-neutral-900/50"
+            className="mb-3 rounded-xl border border-neutral-200/70 bg-neutral-50/60 p-4 dark:border-neutral-800/70 dark:bg-neutral-900/50"
           >
             <div className="flex items-center gap-4">
               <div className="relative flex h-14 w-14 items-center justify-center">
@@ -805,7 +827,7 @@ function AchievementsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEle
           </motion.div>
 
           {/* Achievement list */}
-          <div className="space-y-2">
+          <div className="mb-6 space-y-2">
             <AnimatePresence initial={false}>
               {achievements.length === 0 && (
                 <EmptyState icon={Trophy} title="加载中" description="正在获取成就数据..." />
@@ -863,15 +885,163 @@ function AchievementsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEle
               })}
             </AnimatePresence>
           </div>
+
+          {/* ─── Section divider: stats below ─────────────────────────────── */}
+          <div className="mb-4 flex items-center gap-3">
+            <span className="font-serif text-[11px] tabular-nums text-neutral-400 dark:text-neutral-500">§ 统计</span>
+            <div className="h-px flex-1 bg-neutral-100 dark:bg-neutral-800" />
+          </div>
+
+          {/* Streak hero */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-5 rounded-xl border border-neutral-200/70 bg-neutral-50/60 p-5 dark:border-neutral-800/70 dark:bg-neutral-900/50"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[11px] uppercase tracking-wider text-neutral-400 dark:text-neutral-500">当前连续学习</p>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <motion.span
+                    initial={{ scale: 0.5, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ delay: 0.15, type: 'spring', stiffness: 200, damping: 18 }}
+                    className="text-[32px] font-bold leading-none text-neutral-900 dark:text-neutral-100"
+                  >
+                    {stats?.currentStreak ?? 0}
+                  </motion.span>
+                  <span className="text-[13px] text-neutral-500 dark:text-neutral-400">天</span>
+                </div>
+                <p className="mt-1.5 text-[11px] text-neutral-400">
+                  {(stats?.currentStreak ?? 0) >= 3 ? '保持下去' : '继续学习来培养习惯'}
+                </p>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Stats grid */}
+          <div className="mb-6 grid grid-cols-2 gap-3">
+            {statsCards.map((s, i) => (
+              <motion.div
+                key={s.label}
+                custom={i}
+                variants={itemVariants}
+                initial="hidden"
+                animate="visible"
+                className="group relative overflow-hidden rounded-xl border border-neutral-100 bg-white p-4 transition-all hover:border-neutral-200 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-50 transition-colors group-hover:bg-neutral-100 dark:bg-neutral-800 dark:group-hover:bg-neutral-700">
+                    <s.icon className={`h-5 w-5 ${s.color}`} />
+                  </div>
+                  {'sub' in s && s.sub && (
+                    <span className="rounded-full border border-neutral-200 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600 dark:border-neutral-700 dark:text-neutral-400">
+                      {s.sub}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2.5">
+                  <p className="text-[20px] font-semibold tabular-nums text-neutral-900 dark:text-neutral-100">{s.value}</p>
+                  <p className="text-[11px] text-neutral-400">{s.label}</p>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Review progress (SM-2 cards + tasks) */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
+            className="mb-6 rounded-xl border border-neutral-100 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-3.5 w-3.5 text-neutral-400" />
+                <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">复习进度</p>
+              </div>
+              {(stats?.dueCards ?? 0) > 0 && (
+                <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-[10px] font-medium text-white dark:bg-neutral-100 dark:text-neutral-900">
+                  {stats?.dueCards} 张待复习
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-5">
+              <ReviewRing
+                mastered={stats?.masteredCards ?? 0}
+                total={stats?.totalCards ?? 0}
+              />
+              <div className="flex-1 space-y-2.5">
+                <ReviewBar label="已掌握" value={stats?.masteredCards ?? 0} total={stats?.totalCards ?? 0} tone="mature" />
+                <ReviewBar label="待复习" value={stats?.dueCards ?? 0} total={stats?.totalCards ?? 0} tone="due" />
+                <ReviewBar label="已复习" value={stats?.reviewedCards ?? 0} total={stats?.totalCards ?? 0} tone="young" />
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-3 gap-3 border-t border-neutral-100 pt-4 dark:border-neutral-800">
+              <MiniStat icon={Layers3} label="卡片总数" value={stats?.totalCards ?? 0} />
+              <MiniStat icon={GaugeIcon} label="平均 Ease" value={(stats?.avgEase ?? 2.5).toFixed(2)} />
+              <MiniStat icon={ListChecks} label="任务完成" value={`${stats?.doneTasks ?? 0}/${stats?.totalTasks ?? 0}`} />
+            </div>
+          </motion.div>
+
+          {/* Weekly activity */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: 0.25 } }}
+            className="rounded-xl border border-neutral-100 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">本周学习活动</p>
+              <span className="text-[11px] text-neutral-400">
+                {isLoadingStats ? '加载中...' : `共 ${weeklyActivity?.reduce((s, d) => s + d.count, 0) ?? 0} 条消息`}
+              </span>
+            </div>
+            <div className="flex items-end justify-between gap-2 px-2">
+              {(weeklyActivity && weeklyActivity.length > 0 ? weeklyActivity : [
+                { label: '一', count: 0 }, { label: '二', count: 0 }, { label: '三', count: 0 },
+                { label: '四', count: 0 }, { label: '五', count: 0 }, { label: '六', count: 0 }, { label: '日', count: 0 },
+              ]).map((day, i) => {
+                const heightPct = Math.max(4, (day.count / maxWeekly) * 100);
+                const isToday = i === 6;
+                return (
+                  <motion.div
+                    key={i}
+                    initial={{ scaleY: 0 }}
+                    animate={{ scaleY: 1 }}
+                    transition={{ delay: 0.3 + i * 0.05, duration: 0.4 }}
+                    className="flex flex-1 flex-col items-center gap-1.5"
+                    style={{ transformOrigin: 'bottom' }}
+                  >
+                    <div className="relative flex w-full flex-col justify-end" style={{ height: '80px' }}>
+                      <motion.div
+                        className={`w-full rounded-md transition-colors ${
+                          day.count > 0
+                            ? (isToday ? 'bg-neutral-800 dark:bg-neutral-200' : 'bg-neutral-300 dark:bg-neutral-600')
+                            : 'bg-neutral-100 dark:bg-neutral-800'
+                        }`}
+                        style={{ height: `${heightPct}%` }}
+                      >
+                        {day.count > 0 && (
+                          <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[9px] font-medium text-neutral-500 dark:text-neutral-400 tabular-nums">
+                            {day.count}
+                          </span>
+                        )}
+                      </motion.div>
+                    </div>
+                    <span className={`text-[10px] ${isToday ? 'font-bold text-neutral-900 dark:text-neutral-100' : 'text-neutral-400'}`}>{day.label}</span>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </motion.div>
         </div>
       </div>
     </>
   );
 }
 
-// ─── 5. Stats View ───────────────────────────────────────────────────────────
-
-// ─── Stats view helper components ──────────────────────────────────────────
+// ─── Progress view helper components ─────────────────────────────────────────
 
 // A gauge icon (lucide doesn't export "Gauge" in all versions; alias Activity)
 const GaugeIcon = BarChart3;
@@ -966,208 +1136,6 @@ function MiniStat({
   );
 }
 
-function StatsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
-  const { stats, weeklyActivity, fetchStats, isLoadingStats } = useLearningStore();
-
-  React.useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
-
-  const statsCards = [
-    { label: '学习会话', value: stats?.sessions ?? 0, icon: BookOpen, color: 'text-neutral-700 dark:text-neutral-200' },
-    { label: '对话轮数', value: stats?.messages ?? 0, icon: MessageSquare, color: 'text-neutral-700 dark:text-neutral-200' },
-    { label: '知识点', value: stats?.knowledgeNodes ?? 0, icon: Layers, color: 'text-neutral-700 dark:text-neutral-200', sub: `${stats?.masteredKnowledge ?? 0} 已掌握` },
-    { label: '学习时长', value: stats?.learningTimeLabel ?? '0m', icon: Clock, color: 'text-neutral-700 dark:text-neutral-200' },
-  ];
-
-  // Compute weekly activity max for bar scaling
-  const maxWeekly = Math.max(1, ...(weeklyActivity?.map(d => d.count) || [1]));
-
-  return (
-    <>
-      <FeatureHeader title="学习统计" icon={BarChart3} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
-      <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="mx-auto max-w-[600px] px-6 py-5">
-          {/* Hero metric: current streak */}
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-5 rounded-xl border border-neutral-200/70 bg-neutral-50/60 p-5 dark:border-neutral-800/70 dark:bg-neutral-900/50"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[11px] uppercase tracking-wider text-neutral-400 dark:text-neutral-500">当前连续学习</p>
-                <div className="mt-1 flex items-baseline gap-1.5">
-                  <motion.span
-                    initial={{ scale: 0.5, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    transition={{ delay: 0.15, type: 'spring', stiffness: 200, damping: 18 }}
-                    className="text-[32px] font-bold leading-none text-neutral-900 dark:text-neutral-100"
-                  >
-                    {stats?.currentStreak ?? 0}
-                  </motion.span>
-                  <span className="text-[13px] text-neutral-500 dark:text-neutral-400">天</span>
-                </div>
-                <p className="mt-1.5 text-[11px] text-neutral-400">
-                  {(stats?.currentStreak ?? 0) >= 3 ? '保持下去' : '继续学习来培养习惯'}
-                </p>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Stats grid */}
-          <div className="mb-6 grid grid-cols-2 gap-3">
-            {statsCards.map((s, i) => (
-              <motion.div
-                key={s.label}
-                custom={i}
-                variants={itemVariants}
-                initial="hidden"
-                animate="visible"
-                className="group relative overflow-hidden rounded-xl border border-neutral-100 bg-white p-4 transition-all hover:border-neutral-200 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-50 transition-colors group-hover:bg-neutral-100 dark:bg-neutral-800 dark:group-hover:bg-neutral-700">
-                    <s.icon className={`h-5 w-5 ${s.color}`} />
-                  </div>
-                  {'sub' in s && s.sub && (
-                    <span className="rounded-full border border-neutral-200 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600 dark:border-neutral-700 dark:text-neutral-400">
-                      {s.sub}
-                    </span>
-                  )}
-                </div>
-                <div className="mt-2.5">
-                  <p className="text-[20px] font-semibold tabular-nums text-neutral-900 dark:text-neutral-100">{s.value}</p>
-                  <p className="text-[11px] text-neutral-400">{s.label}</p>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-
-          {/* ─── Review progress (SM-2 cards + tasks) ─────────────────────────── */}
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
-            className="mb-6 rounded-xl border border-neutral-100 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-3.5 w-3.5 text-neutral-400" />
-                <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">复习进度</p>
-              </div>
-              {(stats?.dueCards ?? 0) > 0 && (
-                <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-[10px] font-medium text-white dark:bg-neutral-100 dark:text-neutral-900">
-                  {stats?.dueCards} 张待复习
-                </span>
-              )}
-            </div>
-
-            {/* Mastery ring + breakdown */}
-            <div className="flex items-center gap-5">
-              {/* Circular progress — mastered / total */}
-              <ReviewRing
-                mastered={stats?.masteredCards ?? 0}
-                total={stats?.totalCards ?? 0}
-              />
-
-              {/* Breakdown bars */}
-              <div className="flex-1 space-y-2.5">
-                <ReviewBar
-                  label="已掌握"
-                  value={stats?.masteredCards ?? 0}
-                  total={stats?.totalCards ?? 0}
-                  tone="mature"
-                />
-                <ReviewBar
-                  label="待复习"
-                  value={stats?.dueCards ?? 0}
-                  total={stats?.totalCards ?? 0}
-                  tone="due"
-                />
-                <ReviewBar
-                  label="已复习"
-                  value={stats?.reviewedCards ?? 0}
-                  total={stats?.totalCards ?? 0}
-                  tone="young"
-                />
-              </div>
-            </div>
-
-            {/* Footer mini-stats */}
-            <div className="mt-4 grid grid-cols-3 gap-3 border-t border-neutral-100 pt-4 dark:border-neutral-800">
-              <MiniStat
-                icon={Layers3}
-                label="卡片总数"
-                value={stats?.totalCards ?? 0}
-              />
-              <MiniStat
-                icon={GaugeIcon}
-                label="平均 Ease"
-                value={(stats?.avgEase ?? 2.5).toFixed(2)}
-              />
-              <MiniStat
-                icon={ListChecks}
-                label="任务完成"
-                value={`${stats?.doneTasks ?? 0}/${stats?.totalTasks ?? 0}`}
-              />
-            </div>
-          </motion.div>
-
-          {/* Weekly activity (real data from /api/stats) */}
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0, transition: { delay: 0.25 } }}
-            className="rounded-xl border border-neutral-100 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">本周学习活动</p>
-              <span className="text-[11px] text-neutral-400">
-                {isLoadingStats ? '加载中...' : `共 ${weeklyActivity?.reduce((s, d) => s + d.count, 0) ?? 0} 条消息`}
-              </span>
-            </div>
-            <div className="flex items-end justify-between gap-2 px-2">
-              {(weeklyActivity && weeklyActivity.length > 0 ? weeklyActivity : [
-                { label: '一', count: 0 }, { label: '二', count: 0 }, { label: '三', count: 0 },
-                { label: '四', count: 0 }, { label: '五', count: 0 }, { label: '六', count: 0 }, { label: '日', count: 0 },
-              ]).map((day, i) => {
-                const heightPct = Math.max(4, (day.count / maxWeekly) * 100);
-                const isToday = i === 6; // last bucket is "today"
-                return (
-                  <motion.div
-                    key={i}
-                    initial={{ scaleY: 0 }}
-                    animate={{ scaleY: 1 }}
-                    transition={{ delay: 0.3 + i * 0.05, duration: 0.4 }}
-                    className="flex flex-1 flex-col items-center gap-1.5"
-                    style={{ transformOrigin: 'bottom' }}
-                  >
-                    <div className="relative flex w-full flex-col justify-end" style={{ height: '80px' }}>
-                      <motion.div
-                        className={`w-full rounded-md transition-colors ${
-                          day.count > 0
-                            ? (isToday ? 'bg-neutral-800 dark:bg-neutral-200' : 'bg-neutral-300 dark:bg-neutral-600')
-                            : 'bg-neutral-100 dark:bg-neutral-800'
-                        }`}
-                        style={{ height: `${heightPct}%` }}
-                      >
-                        {day.count > 0 && (
-                          <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[9px] font-medium text-neutral-500 dark:text-neutral-400 tabular-nums">
-                            {day.count}
-                          </span>
-                        )}
-                      </motion.div>
-                    </div>
-                    <span className={`text-[10px] ${isToday ? 'font-bold text-neutral-900 dark:text-neutral-100' : 'text-neutral-400'}`}>{day.label}</span>
-                  </motion.div>
-                );
-              })}
-            </div>
-          </motion.div>
-        </div>
-      </div>
-    </>
-  );
-}
 
 // ─── 6. Knowledge Graph View ───────────────────────────────────────────────
 
@@ -1229,6 +1197,238 @@ function NotesView() {
     <>
       <FeatureHeader title="学习笔记" icon={StickyNote} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
       <TiptapEditor />
+    </>
+  );
+}
+
+// ─── 8. Materials View (file import / knowledge base) ──────────────────────
+//
+// Personality note: this view is *not* a list of items to consume — it's a
+// workspace where the learner feeds the AI. The drag-and-drop zone is the
+// primary affordance, so it gets the most visual weight on empty state. Once
+// materials exist, they become a reference library: a quiet list with
+// inline-rename, delete, and a clear "how this is used" footer.
+//
+// The extracted-text indicator (charCount) matters because the learner needs
+// to know whether a file was actually parsed or just stored as metadata —
+// PDFs and images show 0 chars (we don't parse them in v1), text files show
+// their real count.
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function MaterialsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
+  const {
+    materials,
+    isLoadingMaterials,
+    isUploadingMaterials,
+    currentSessionId,
+    fetchMaterials,
+    uploadMaterials,
+    deleteMaterial,
+  } = useLearningStore();
+
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [isDragOver, setIsDragOver] = React.useState(false);
+  const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [editValue, setEditValue] = React.useState('');
+
+  React.useEffect(() => {
+    if (currentSessionId) fetchMaterials(currentSessionId);
+  }, [currentSessionId, fetchMaterials]);
+
+  const handleFiles = React.useCallback((files: FileList | File[]) => {
+    if (!currentSessionId) return;
+    const arr = Array.from(files);
+    if (arr.length > 0) void uploadMaterials(currentSessionId, arr);
+  }, [currentSessionId, uploadMaterials]);
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFiles(e.dataTransfer.files);
+    }
+  };
+
+  const startEdit = (id: string, currentTitle: string) => {
+    setEditingId(id);
+    setEditValue(currentTitle);
+  };
+
+  const commitEdit = () => {
+    if (editingId && editValue.trim()) {
+      void useLearningStore.getState().updateMaterialTitle(editingId, editValue.trim());
+    }
+    setEditingId(null);
+    setEditValue('');
+  };
+
+  const totalChars = materials.reduce((s, m) => s + (m.charCount || 0), 0);
+
+  return (
+    <>
+      <FeatureHeader title="文件导入" icon={FileText} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
+      <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="mx-auto max-w-[600px] px-6 py-5">
+
+          {/* ─── Drop zone / upload affordance ────────────────────────────── */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-5"
+          >
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+              onDragLeave={() => setIsDragOver(false)}
+              onDrop={onDrop}
+              className={`flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-8 text-center transition-colors ${
+                isDragOver
+                  ? 'border-neutral-400 bg-neutral-50 dark:border-neutral-500 dark:bg-neutral-800/50'
+                  : 'border-neutral-200 bg-white hover:border-neutral-300 hover:bg-neutral-50/50 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:border-neutral-600 dark:hover:bg-neutral-800/30'
+              }`}
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                {isUploadingMaterials ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <Upload className="h-5 w-5" />
+                )}
+              </div>
+              <div>
+                <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-200">
+                  {isUploadingMaterials ? '正在导入…' : '拖拽文件到此处，或点击选择'}
+                </p>
+                <p className="mt-0.5 text-[11px] text-neutral-400">
+                  支持 txt / md / csv / json / 代码 / HTML 等，单文件 ≤ 5 MB
+                </p>
+              </div>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) handleFiles(e.target.files);
+                e.target.value = ''; // allow re-selecting the same file
+              }}
+            />
+          </motion.div>
+
+          {/* ─── How this is used (info card) ────────────────────────────── */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: 0.08 } }}
+            className="mb-5 rounded-xl border border-neutral-100 bg-neutral-50/60 p-4 dark:border-neutral-800 dark:bg-neutral-900/40"
+          >
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                <FileText className="h-3.5 w-3.5" />
+              </div>
+              <div className="flex-1 text-[12px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+                导入的学习资料会作为本会话的<span className="font-medium text-neutral-700 dark:text-neutral-300">知识库</span>：
+                AI 对话时会引用其中的概念与术语，课程生成会基于这些资料定制课时内容。
+              </div>
+            </div>
+          </motion.div>
+
+          {/* ─── Materials list ───────────────────────────────────────────── */}
+          {isLoadingMaterials && materials.length === 0 ? (
+            <EmptyState icon={FileText} title="加载中" description="正在获取已导入的文件…" />
+          ) : materials.length === 0 ? (
+            <EmptyState
+              icon={File}
+              title="还没有导入文件"
+              description="拖拽或点击上方区域上传学习资料，AI 将基于这些内容进行定制化教学"
+            />
+          ) : (
+            <>
+              {/* Summary bar */}
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-[12px] font-medium text-neutral-600 dark:text-neutral-400">
+                  {materials.length} 个文件 · {formatBytes(materials.reduce((s, m) => s + (m.size || 0), 0))}
+                </p>
+                <span className="text-[11px] text-neutral-400 tabular-nums">
+                  {totalChars.toLocaleString()} 字符已索引
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                <AnimatePresence initial={false}>
+                  {materials.map((m, i) => (
+                    <motion.div
+                      key={m.id}
+                      custom={i}
+                      variants={itemVariants}
+                      initial="hidden"
+                      animate="visible"
+                      exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.18 } }}
+                      layout
+                      className="group flex items-center gap-3 rounded-xl border border-neutral-100 bg-white p-3.5 transition-colors hover:border-neutral-200 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700"
+                    >
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                        <File className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        {editingId === m.id ? (
+                          <input
+                            autoFocus
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onBlur={commitEdit}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+                              if (e.key === 'Escape') { setEditingId(null); setEditValue(''); }
+                            }}
+                            className="w-full rounded border border-neutral-300 bg-white px-1.5 py-0.5 text-[13px] font-medium text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
+                          />
+                        ) : (
+                          <button
+                            onClick={() => startEdit(m.id, m.title || m.filename)}
+                            className="block w-full truncate text-left text-[13px] font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-200 dark:hover:text-neutral-50"
+                            title="点击重命名"
+                          >
+                            {m.title || m.filename}
+                          </button>
+                        )}
+                        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-neutral-400">
+                          <span className="truncate">{m.filename}</span>
+                          <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                          <span className="tabular-nums">{formatBytes(m.size)}</span>
+                          {m.charCount > 0 ? (
+                            <>
+                              <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                              <span className="tabular-nums text-neutral-500 dark:text-neutral-400">{m.charCount.toLocaleString()} 字</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                              <span className="text-amber-600 dark:text-amber-500">未提取文本</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => void deleteMaterial(m.id)}
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-300 opacity-0 transition-all hover:bg-neutral-100 hover:text-neutral-600 group-hover:opacity-100 dark:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+                        aria-label="删除"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </>
   );
 }

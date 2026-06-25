@@ -63,7 +63,8 @@ const TEACHING_SYSTEM_PROMPT = `你是一位资深的教育者和学习导师，
 
 function buildMessageContext(
   userMessages: Array<{ role: string; content: string; type?: string }>,
-  knowledgeNodes: Array<{ title: string; content: string; category?: string; mastered: boolean }>
+  knowledgeNodes: Array<{ title: string; content: string; category?: string; mastered: boolean }>,
+  materials: Array<{ title: string; filename: string; content: string }> = []
 ) {
   const contextParts: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
 
@@ -95,6 +96,28 @@ function buildMessageContext(
     contextParts.push({
       role: 'system',
       content: knowledgeContext,
+    });
+  }
+
+  // ─── Knowledge base: learner-imported materials ──────────────────────────
+  //
+  // Inject imported study materials as additional system context so the
+  // Socratic tutor can reference them. Budget-capped to 20k chars (smaller
+  // than the course generator's 30k — dialogue needs room for history).
+  if (materials.length > 0) {
+    const KB_BUDGET = 20_000;
+    let used = 0;
+    const snippets: string[] = [];
+    for (const m of materials) {
+      if (used >= KB_BUDGET) break;
+      const remaining = KB_BUDGET - used;
+      const slice = m.content.slice(0, remaining);
+      snippets.push(`### ${m.title || m.filename}\n${slice}`);
+      used += slice.length;
+    }
+    contextParts.push({
+      role: 'system',
+      content: `## 学习者导入的学习资料\n\n学习者已导入以下学习资料。在对话中，如果问题涉及这些资料覆盖的内容，应基于资料中的具体概念、术语、定义来引导，而不是泛泛讲解。\n\n${snippets.join('\n\n---\n\n')}`,
     });
   }
 
@@ -176,7 +199,15 @@ export async function POST(req: NextRequest) {
 
     // Prepare messages for AI
     const zai = await ZAI.create();
-    const messageHistory = buildMessageContext(historyMessages || [], knowledgeNodes || []);
+
+    // Fetch learner-imported materials for this session (knowledge base)
+    const materials = await db.learningMaterial.findMany({
+      where: { sessionId, status: 'ready', charCount: { gt: 0 } },
+      select: { title: true, filename: true, content: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const messageHistory = buildMessageContext(historyMessages || [], knowledgeNodes || [], materials);
 
     // Real streaming: SDK returns the upstream ReadableStream when stream:true
     const upstream = (await zai.chat.completions.create({

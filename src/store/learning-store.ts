@@ -99,6 +99,19 @@ export interface LearningStats {
   doneTasks: number;
 }
 
+export interface LearningMaterial {
+  id: string;
+  sessionId: string;
+  filename: string;
+  fileType: string;
+  size: number;
+  title: string | null;
+  charCount: number;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ─── Store Interface ────────────────────────────────────────────────────────
 
 interface LearningStore {
@@ -194,6 +207,11 @@ interface LearningStore {
   isSavingNotes: boolean;
   notesSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
 
+  // Materials (file import / knowledge base) state
+  materials: LearningMaterial[];
+  isLoadingMaterials: boolean;
+  isUploadingMaterials: boolean;
+
   // Actions - Sessions
   fetchSessions: () => Promise<void>;
   createSession: (title: string, topic?: string) => Promise<LearningSession | null>;
@@ -225,6 +243,12 @@ interface LearningStore {
 
   // Actions - Stats
   fetchStats: () => Promise<void>;
+
+  // Actions - Materials (file import / knowledge base)
+  fetchMaterials: (sessionId: string) => Promise<void>;
+  uploadMaterials: (sessionId: string, files: File[]) => Promise<void>;
+  deleteMaterial: (id: string) => Promise<void>;
+  updateMaterialTitle: (id: string, title: string) => Promise<void>;
 
   // Actions - UI
   setSidebarOpen: (open: boolean) => void;
@@ -338,6 +362,9 @@ const initialState = {
   weeklyActivity: [] as WeeklyActivityItem[],
   isLoadingStats: false,
   achievements: [] as Achievement[],
+  materials: [] as LearningMaterial[],
+  isLoadingMaterials: false,
+  isUploadingMaterials: false,
 };
 
 // ─── Notes Save Debounce Tracker ────────────────────────────────────────────
@@ -429,6 +456,7 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       notesSaveStatus: 'idle',
       tasks: [],
       cards: [],
+      materials: [],
     });
     await Promise.all([
       get().fetchMessages(id),
@@ -438,6 +466,7 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       get().fetchNotes(id),
       get().fetchTasks(id),
       get().fetchCards(id),
+      get().fetchMaterials(id),
     ]);
   },
 
@@ -917,6 +946,123 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
     }
   },
 
+  // ── Materials (file import / knowledge base) ───────────────────────────────
+
+  fetchMaterials: async (sessionId: string) => {
+    set({ isLoadingMaterials: true });
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/materials`);
+      if (!res.ok) { console.error('fetchMaterials failed:', res.status); return; }
+      const data = await res.json();
+      set({ materials: (data.materials || []) as LearningMaterial[] });
+    } catch (error) {
+      console.error('Failed to fetch materials:', error);
+    } finally {
+      set({ isLoadingMaterials: false });
+    }
+  },
+
+  uploadMaterials: async (sessionId: string, files: File[]) => {
+    if (files.length === 0) return;
+    set({ isUploadingMaterials: true });
+    try {
+      const formData = new FormData();
+      for (const f of files) formData.append('files', f);
+      const res = await fetch(`/api/sessions/${sessionId}/materials`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!res.ok) {
+        console.error('uploadMaterials failed:', res.status);
+        try {
+          const { toast } = await import('@/hooks/use-toast');
+          toast({
+            title: '文件导入失败',
+            description: `服务器返回 ${res.status}`,
+            variant: 'destructive',
+          });
+        } catch {}
+        return;
+      }
+      const data = await res.json();
+      // Merge newly created materials into the list. The API may also return
+      // error stubs (id: null) for oversized files — filter those out.
+      const created = (data.materials || []).filter((m: any) => m && m.id);
+      const errored = (data.materials || []).filter((m: any) => m && !m.id);
+      if (created.length > 0) {
+        set((s) => ({ materials: [...created, ...s.materials] }));
+      }
+      if (errored.length > 0) {
+        try {
+          const { toast } = await import('@/hooks/use-toast');
+          for (const e of errored) {
+            toast({
+              title: `${e.filename} 跳过`,
+              description: e.error || '不支持的文件',
+              variant: 'destructive',
+            });
+          }
+        } catch {}
+      }
+      if (created.length > 0) {
+        try {
+          const { toast } = await import('@/hooks/use-toast');
+          toast({
+            title: `已导入 ${created.length} 个文件`,
+            description: 'AI 对话与课程生成将基于这些资料定制',
+            duration: 4000,
+            className:
+              'border-neutral-200 bg-white text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100',
+          });
+        } catch {}
+      }
+    } catch (error) {
+      console.error('Failed to upload materials:', error);
+    } finally {
+      set({ isUploadingMaterials: false });
+    }
+  },
+
+  deleteMaterial: async (id: string) => {
+    // Optimistic removal — if the server delete fails, we refetch to restore.
+    set((s) => ({ materials: s.materials.filter((m) => m.id !== id) }));
+    try {
+      const res = await fetch(`/api/materials/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        console.error('deleteMaterial failed:', res.status);
+        const { currentSessionId } = get();
+        if (currentSessionId) await get().fetchMaterials(currentSessionId);
+      }
+    } catch (error) {
+      console.error('Failed to delete material:', error);
+      const { currentSessionId } = get();
+      if (currentSessionId) await get().fetchMaterials(currentSessionId);
+    }
+  },
+
+  updateMaterialTitle: async (id: string, title: string) => {
+    // Optimistic update
+    set((s) => ({
+      materials: s.materials.map((m) => (m.id === id ? { ...m, title } : m)),
+    }));
+    try {
+      const res = await fetch(`/api/materials/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) {
+        console.error('updateMaterialTitle failed:', res.status);
+        const { currentSessionId } = get();
+        if (currentSessionId) await get().fetchMaterials(currentSessionId);
+      }
+    } catch (error) {
+      console.error('Failed to update material title:', error);
+      const { currentSessionId } = get();
+      if (currentSessionId) await get().fetchMaterials(currentSessionId);
+    }
+  },
+
   // ── UI ────────────────────────────────────────────────────────────────────
 
   setSidebarOpen: (open: boolean) => set({ sidebarOpen: open }),
@@ -933,9 +1079,14 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
     const prev = get().activeFeatureView;
     const dir: 1 | -1 = prev !== null && view === null ? -1 : 1;
     set({ activeFeatureView: view, activeFeatureViewDir: dir, createNewPanelOpen: false });
-    // Pre-fetch stats when entering stats or achievements view
-    if (view === 'stats' || view === 'achievements') {
+    // Pre-fetch stats when entering the progress (stats+achievements) view
+    if (view === 'progress') {
       get().fetchStats();
+    }
+    // Pre-fetch materials when entering the materials view
+    if (view === 'materials') {
+      const sid = get().currentSessionId;
+      if (sid) get().fetchMaterials(sid);
     }
   },
 

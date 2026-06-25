@@ -20,13 +20,14 @@ model LearningSession {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  messages       LearningMessage[]
-  knowledgeNodes KnowledgeNode[]
-  references     Reference[]
-  notes          Note?
-  courseModules  CourseModule[]
-  tasks          Task[]
-  cards          Card[]
+  messages         LearningMessage[]
+  knowledgeNodes   KnowledgeNode[]
+  references       Reference[]
+  notes            Note?
+  courseModules    CourseModule[]
+  tasks            Task[]
+  cards            Card[]
+  materials        LearningMaterial[]
 }
 
 // Individual messages in the learning dialogue
@@ -122,6 +123,26 @@ model Task {
   order     Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// Per-session learning material uploaded by the learner (PDF, markdown, text,
+// code, etc.). The extracted text content is stored alongside metadata so the
+// course generator / AI dialogue can use it as a knowledge base without
+// re-parsing the file each time.
+model LearningMaterial {
+  id          String   @id @default(cuid())
+  sessionId   String
+  filename    String                          // original file name, e.g. "linear-algebra-notes.pdf"
+  fileType    String   @default("text/plain") // MIME type
+  size        Int      @default(0)            // bytes
+  title       String?                          // learner-editable display title (defaults to filename)
+  content     String   @default("")           // extracted plain text (truncated to ~50k chars)
+  charCount   Int      @default(0)            // length of extracted content
+  status      String   @default("ready")      // uploading | ready | error
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 }

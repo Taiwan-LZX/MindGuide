@@ -18,19 +18,33 @@ import {
   Network,
   ChevronRight,
   StickyNote,
+  FileText,
 } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 import { MouseFollowTooltip } from '@/components/learning/mouse-follow-tooltip';
 
 // ─── Feature definitions ──────────────────────────────────────────────────
+//
+// §3 "学习进度" merges the former "成就系统" and "学习统计" into a single
+// entry. Rationale: both views were derived from the same /api/stats feed
+// and presented overlapping metrics (streak appears in both; card mastery
+// ring appears in stats while achievements track it as a threshold). Splitting
+// them forced the learner to switch views to see related information. The
+// merged view keeps achievements on top (the motivational layer) and stats
+// below (the analytical layer) — one cognitive context, one scroll.
+//
+// §6 "文件导入" is new — the learner's knowledge base entry point. Imported
+// materials (text, markdown, code, notes) feed into both /api/chat (Socratic
+// tutor references them) and /api/course/generate (course is customized to
+// the imported content).
 
 const features = [
   { id: 'tasks', label: '任务规划', description: '制定学习计划，分解学习目标，追踪完成进度', icon: ListChecks, shortcut: '1' },
   { id: 'cards', label: '学习卡片', description: '创建闪卡，通过主动回忆和间隔重复强化记忆', icon: CreditCard, shortcut: '2' },
-  { id: 'achievements', label: '成就系统', description: '解锁学习成就徽章，持续获得激励反馈', icon: Trophy, shortcut: '3' },
-  { id: 'stats', label: '学习统计', description: '可视化学习数据和时间分布，量化进步轨迹', icon: BarChart3, shortcut: '4' },
-  { id: 'graph', label: '知识图谱', description: '构建知识网络图，发现概念间的关联与层级', icon: Network, shortcut: '5' },
-  { id: 'notes', label: '学习笔记', description: '使用富文本编辑器记录学习笔记，支持公式、代码和高亮', icon: StickyNote, shortcut: '6' },
+  { id: 'progress', label: '学习进度', description: '成就徽章与学习统计：连续学习、知识点掌握、复习进度、本周活动', icon: Trophy, shortcut: '3' },
+  { id: 'graph', label: '知识图谱', description: '构建知识网络图，发现概念间的关联与层级', icon: Network, shortcut: '4' },
+  { id: 'notes', label: '学习笔记', description: '使用富文本编辑器记录学习笔记，支持公式、代码和高亮', icon: StickyNote, shortcut: '5' },
+  { id: 'materials', label: '文件导入', description: '导入学习资料构建知识库，AI 对话与课程生成将基于这些资料定制', icon: FileText, shortcut: '6' },
 ];
 
 // ─── Animation Variants ────────────────────────────────────────────────────

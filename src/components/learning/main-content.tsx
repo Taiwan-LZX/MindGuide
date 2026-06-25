@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MoreVertical, BookOpen, GraduationCap, Send, Square } from 'lucide-react';
+import { MoreVertical, BookOpen, GraduationCap, Send, Square, ArrowDown } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 import { KnowledgeInline } from '@/components/learning/knowledge-inline';
 import { MarkdownRenderer, CopyAllButton } from '@/components/learning/markdown-renderer';
@@ -127,7 +127,7 @@ export function MainContent() {
 
   // ── Chat view ──
   return (
-    <div className="flex h-full flex-1 flex-col">
+    <div className="relative flex h-full flex-1 flex-col">
       {/* Chat header */}
       <div className="relative z-[41] flex h-14 shrink-0 items-center justify-between border-b border-neutral-200 px-6 dark:border-neutral-800">
         <div className="min-w-0">
@@ -181,7 +181,11 @@ export function MainContent() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto custom-scrollbar"
+      >
         <div className="mx-auto max-w-[720px] px-6 py-4">
           <AnimatePresence>
             {messages.length === 0 && !isStreaming && (
@@ -307,6 +311,25 @@ export function MainContent() {
           <div ref={bottomRef} />
         </div>
       </div>
+
+      {/* Scroll-to-bottom button — appears when the user has scrolled up */}
+      <AnimatePresence>
+        {showScrollBottom && (
+          <motion.button
+            initial={{ opacity: 0, y: 8, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.9 }}
+            transition={{ duration: 0.18, ease: [0.25, 0.1, 0.25, 1] }}
+            onClick={scrollToBottom}
+            whileHover={{ scale: 1.06 }}
+            whileTap={{ scale: 0.94 }}
+            className="absolute bottom-[92px] left-1/2 z-30 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-neutral-200 bg-white/95 text-neutral-500 shadow-sm backdrop-blur-sm transition-colors hover:text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/95 dark:text-neutral-300 dark:hover:text-neutral-100"
+            aria-label="滚动到最新消息"
+          >
+            <ArrowDown className="h-4 w-4" />
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* Simple Chat Input */}
       <div className="shrink-0 border-t border-neutral-200/50 px-6 pb-6 pt-4">

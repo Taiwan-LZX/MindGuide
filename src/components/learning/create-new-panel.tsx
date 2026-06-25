@@ -13,6 +13,7 @@ import {
   StickyNote,
 } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
+import { MouseFollowTooltip } from '@/components/learning/mouse-follow-tooltip';
 
 // ─── Feature definitions ──────────────────────────────────────────────────
 
@@ -74,21 +75,31 @@ function FeatureRow({
   feature,
   index,
   onClick,
+  boundaryRef,
 }: {
   feature: (typeof features)[number];
   index: number;
   onClick: () => void;
+  boundaryRef?: React.RefObject<HTMLElement>;
 }) {
   return (
-    <motion.button
-      custom={index}
-      variants={rowVariants}
-      initial="hidden"
-      animate="visible"
-      onClick={onClick}
-      title={feature.description}
-      className="group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left"
+    <MouseFollowTooltip
+      boundaryRef={boundaryRef}
+      maxWidth={240}
+      content={
+        <span className="block text-neutral-600 dark:text-neutral-300">
+          {feature.description}
+        </span>
+      }
     >
+      <motion.button
+        custom={index}
+        variants={rowVariants}
+        initial="hidden"
+        animate="visible"
+        onClick={onClick}
+        className="group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left"
+      >
       {/* Soft highlight layer — fades + scales in on hover, spring for smooth follow */}
       <motion.span
         aria-hidden
@@ -135,6 +146,7 @@ function FeatureRow({
         <ChevronRight className="h-3.5 w-3.5 text-neutral-300 transition-colors duration-200 group-hover:text-neutral-500 dark:text-neutral-600 dark:group-hover:text-neutral-400" />
       </motion.span>
     </motion.button>
+    </MouseFollowTooltip>
   );
 }
 
@@ -219,6 +231,7 @@ export function MoreFeaturesPanel() {
                 key={feature.id}
                 feature={feature}
                 index={i + 1}
+                boundaryRef={panelRef}
                 onClick={() => setActiveFeatureView(feature.id)}
               />
             ))}

@@ -285,3 +285,77 @@ GET /api/sessions/[id]/messages 200 in 55ms  (re-fetch after AI response)
 - `src/components/learning/tiptap-editor.tsx` — 保存状态中性化
 - `src/app/api/chat/route.ts` — 系统提示词禁用 emoji
 - `src/store/learning-store.ts` — 成就 toast 中性化
+
+---
+
+## 第四轮迭代 — 鼠标跟随提示框 + 滚动到底部按钮 (用户反馈驱动)
+
+### 触发与判断
+用户反馈：「在更多功能那里，鼠标移动上去不要等那么多秒才会弹出来，直接鼠标放在上面就会有一个提示框跟随鼠标移动，相应的逻辑在这个原先的基础上增加这一项功能就行，其他的位置相应的布局都已经有了，只要根据一定的跟随功能以及单个模块的边界」
+
+核心诉求：
+1. 原生 `title` 属性的浏览器提示框有 1~2 秒延迟、不跟随鼠标、外观生硬 → 需要替换
+2. 悬停时**立即**显示自定义提示框，且**跟随鼠标移动**
+3. 在原有点击展开面板的逻辑之上**增加**此功能（不破坏既有交互）
+4. 提示框需尊重**单个模块的边界**（不溢出所属模块）
+
+### 已完成的修改
+
+**1. 新建可复用组件 `src/components/learning/mouse-follow-tooltip.tsx`**
+- `<MouseFollowTooltip content={...} boundaryRef={...}>` 包裹任意子元素
+- **立即显示**（`delay=0` 默认），无原生 title 延迟
+- **跟随鼠标**：`onMouseMove` + `requestAnimationFrame` 节流更新位置
+- **边界尊重**：`boundaryRef` 指定模块边界（默认视口）；位置自动翻转（右→左、下→上）并 clamp 到边界内（4px 内缩）
+- **Portal 渲染**：通过 `createPortal(..., document.body)` 渲染到 body，避免被 framer-motion `transform` 祖先（scale/translate）固定为相对定位
+- **SSR 安全**：用 `useSyncExternalStore` 检测客户端挂载（无 setState-in-effect，lint 通过）
+- **首帧修正**：挂载后 `useEffect` 测量真实尺寸 + 用 `cursorRef` 重新计算位置，修正首帧估算
+- **包装层**：用 `<span className="contents">`（display:contents）包裹子元素，不生成盒子、不影响任何 flex/grid/block 布局
+- 学术风样式：`rounded-md border bg-white/95 px-2.5 py-1.5 text-[11.5px] shadow-sm backdrop-blur-sm`，与全局黑白论文风一致
+
+**2. 应用到「更多功能」触发按钮 (`sidebar.tsx`)**
+- 移除原生 `title` 属性
+- 包裹 `<MouseFollowTooltip>`，内容：「展开功能面板 · 任务规划 / 学习卡片 / 成就 / 统计 / 知识图谱 / 笔记」
+- 由于 span.contents 不接收 `space-y-1.5` 的 margin，给按钮补 `mt-1.5` 保持与上方「创建新主题」的间距
+
+**3. 应用到折叠侧边栏图标按钮 (`sidebar.tsx` CollapsedSidebar)**
+- 三个图标按钮（课程 / 更多功能 / 搜索）分别包裹 `<MouseFollowTooltip>`，移除原生 `title`
+- span.contents 不影响 flex 列布局（子元素直接成为 flex item，`mb-1.5` 间距保留）
+
+**4. 应用到「更多功能」面板内的功能行 (`create-new-panel.tsx`)**
+- `FeatureRow` 接收 `boundaryRef`（传入面板 `panelRef`），包裹 `<MouseFollowTooltip>` 显示该行的 `description`
+- 移除 `motion.button` 上的原生 `title={feature.description}`
+- 提示框 clamp 在面板边界内（240px 宽），尊重「单个模块的边界」
+
+**5. 完成上轮遗留的「滚动到底部」按钮 (`main-content.tsx`)**
+- 上轮已添加 `showScrollBottom` state、`scrollContainerRef`、`handleScroll`、`scrollToBottom` 但未接线 → 本轮补全
+- 滚动容器加 `ref={scrollContainerRef} onScroll={handleScroll}`
+- 根容器加 `relative`，在消息区下方添加 `AnimatePresence` 包裹的圆形按钮（`ArrowDown` 图标）
+- 用户向上滚动超过 200px 时淡入按钮，点击平滑滚动到底部并自动隐藏
+
+### 验证结果
+- `bun run lint` ✅ 零错误零警告
+- agent-browser + VLM 端到端验证：
+  - 悬停「更多功能」触发按钮：提示框**立即出现**（无延迟），内容正确，位于按钮右侧，自定义样式（非原生浏览器 tooltip）✅
+  - 打开面板后悬停「任务规划」行：提示框显示「制定学习计划，分解学习目标，追踪完成进度」，**位于面板边界内**（不溢出），自定义样式 ✅
+  - 首页 Welcome 视图：布局完整无破损，品牌与按钮可见 ✅
+  - 会话视图：header / 消息列表 / 输入框渲染正确 ✅
+  - 滚动到底部按钮：向上滚动后淡入圆形下箭头按钮，点击后平滑滚动到底部（`dist: 0, atBottom: true`）并自动消失 ✅
+- dev.log 无运行时错误
+
+### 当前项目状态
+- Dev server 稳定运行 (PID 7381, port 3000)
+- 交互层：原生 title 全部替换为鼠标跟随提示框（立即 + 跟随 + 边界尊重）
+- 论文风学术 UI 保持一致（黑白灰 + 衬线 + 边框）
+- 真流式 SSE + 思考气泡 + 成就 toast + 键盘快捷键 + 滚动到底部按钮 全部工作
+
+### 未解决问题 / 下一阶段建议
+1. **【低】历史消息残留 emoji**：旧 AI 回复含 emoji 仍显示（可加客户端 sanitize，或保留历史真实性）
+2. **【低】课程持久化**：课程仅存内存，需补 Prisma 模型 `CourseModule` + `Lesson`
+3. **【低】认证系统**：NextAuth.js v4
+4. **【低】daemonize.py watchdog**：端口健康检查 + 自动重启
+
+### 关键文件变更清单
+- `src/components/learning/mouse-follow-tooltip.tsx` — 新建：可复用鼠标跟随提示框
+- `src/components/learning/create-new-panel.tsx` — FeatureRow 包裹提示框，传入面板边界
+- `src/components/learning/sidebar.tsx` — 触发按钮 + 折叠侧边栏图标包裹提示框，移除原生 title
+- `src/components/learning/main-content.tsx` — 补全滚动到底部按钮接线 + ArrowDown 导入

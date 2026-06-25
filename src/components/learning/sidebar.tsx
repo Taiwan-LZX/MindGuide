@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useLearningStore, type LearningSession } from '@/store/learning-store';
 import { UnifiedSearch } from './unified-search';
+import { MouseFollowTooltip } from './mouse-follow-tooltip';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -97,50 +98,53 @@ function CollapsedSidebar() {
       </motion.div>
 
       {/* Icon buttons */}
-      <motion.button
-        custom={1}
-        variants={iconStripVariants}
-        initial="hidden"
-        animate="visible"
-        whileHover={{ scale: 1.08 }}
-        whileTap={{ scale: 0.92 }}
-        onClick={() => setCoursePanelOpen(!coursePanelOpen)}
-        className={`mb-1.5 flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
-          coursePanelOpen
-            ? 'bg-white text-neutral-800 shadow-sm dark:bg-neutral-700 dark:text-neutral-100'
-            : 'text-neutral-500 hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300'
-        }`}
-        title="课程"
-      >
-        <BookOpen className="h-4 w-4" />
-      </motion.button>
+      <MouseFollowTooltip content="课程">
+        <motion.button
+          custom={1}
+          variants={iconStripVariants}
+          initial="hidden"
+          animate="visible"
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.92 }}
+          onClick={() => setCoursePanelOpen(!coursePanelOpen)}
+          className={`mb-1.5 flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+            coursePanelOpen
+              ? 'bg-white text-neutral-800 shadow-sm dark:bg-neutral-700 dark:text-neutral-100'
+              : 'text-neutral-500 hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300'
+          }`}
+        >
+          <BookOpen className="h-4 w-4" />
+        </motion.button>
+      </MouseFollowTooltip>
 
-      <motion.button
-        custom={2}
-        variants={iconStripVariants}
-        initial="hidden"
-        animate="visible"
-        whileHover={{ scale: 1.08 }}
-        whileTap={{ scale: 0.92 }}
-        onClick={() => setCreateNewPanelOpen(true)}
-        className="mb-1.5 flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
-        title="更多功能"
-      >
-        <Grid2X2 className="h-4 w-4" />
-      </motion.button>
+      <MouseFollowTooltip content="更多功能">
+        <motion.button
+          custom={2}
+          variants={iconStripVariants}
+          initial="hidden"
+          animate="visible"
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.92 }}
+          onClick={() => setCreateNewPanelOpen(true)}
+          className="mb-1.5 flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
+        >
+          <Grid2X2 className="h-4 w-4" />
+        </motion.button>
+      </MouseFollowTooltip>
 
-      <motion.button
-        custom={3}
-        variants={iconStripVariants}
-        initial="hidden"
-        animate="visible"
-        whileHover={{ scale: 1.08 }}
-        whileTap={{ scale: 0.92 }}
-        className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
-        title="搜索"
-      >
-        <Search className="h-4 w-4" />
-      </motion.button>
+      <MouseFollowTooltip content="搜索">
+        <motion.button
+          custom={3}
+          variants={iconStripVariants}
+          initial="hidden"
+          animate="visible"
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.92 }}
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
+        >
+          <Search className="h-4 w-4" />
+        </motion.button>
+      </MouseFollowTooltip>
     </aside>
   );
 }
@@ -466,17 +470,26 @@ function FullSidebar() {
         </motion.button>
 
         {/* More Features - Secondary Action */}
-        <button
-          data-more-features-trigger
-          onClick={(e) => {
-            e.preventDefault();
-            setCreateNewPanelOpen(true);
-          }}
-          className="flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-neutral-200 text-[13px] text-neutral-500 transition-colors duration-150 hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-700 active:scale-[0.98] dark:border-neutral-700 dark:text-neutral-400 dark:hover:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+        <MouseFollowTooltip
+          maxWidth={260}
+          content={
+            <span>
+              展开功能面板 · 任务规划 / 学习卡片 / 成就 / 统计 / 知识图谱 / 笔记
+            </span>
+          }
         >
-          <Grid2X2 className="h-3.5 w-3.5" />
-          更多功能
-        </button>
+          <button
+            data-more-features-trigger
+            onClick={(e) => {
+              e.preventDefault();
+              setCreateNewPanelOpen(true);
+            }}
+            className="mt-1.5 flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-neutral-200 text-[13px] text-neutral-500 transition-colors duration-150 hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-700 active:scale-[0.98] dark:border-neutral-700 dark:text-neutral-400 dark:hover:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+          >
+            <Grid2X2 className="h-3.5 w-3.5" />
+            更多功能
+          </button>
+        </MouseFollowTooltip>
       </motion.div>
     </aside>
   );

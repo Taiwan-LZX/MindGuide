@@ -14,15 +14,17 @@ export default function Page() {
     sidebarOpen,
     displayMode,
     fetchSessions,
+    fetchStats,
     activeFeatureView,
     settingsPanelOpen,
     setSettingsPanelOpen,
   } = useLearningStore();
 
-  // Fetch sessions on mount
+  // Fetch sessions + stats on mount
   useEffect(() => {
     fetchSessions();
-  }, [fetchSessions]);
+    fetchStats();
+  }, [fetchSessions, fetchStats]);
 
   // Close settings panel on Escape
   useEffect(() => {

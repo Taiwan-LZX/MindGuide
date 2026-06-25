@@ -357,34 +357,67 @@ const achievementIcons: Record<string, React.ElementType> = {
 };
 
 function AchievementsView() {
-  const { achievements } = useLearningStore();
+  const { achievements, stats, fetchStats, isLoadingStats } = useLearningStore();
+
+  // Fetch fresh stats on mount (achievements are derived from real DB data)
+  React.useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
   const unlockedCount = achievements.filter(a => a.unlocked).length;
+  const totalProgressPct = achievements.length > 0
+    ? Math.round((unlockedCount / achievements.length) * 100)
+    : 0;
 
   return (
     <>
       <FeatureHeader title="成就系统" icon={Trophy} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         <div className="mx-auto max-w-[600px] px-6 py-5">
-          {/* Summary */}
+          {/* Summary with circular progress */}
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-5 flex items-center gap-4 rounded-xl border border-neutral-200/60 bg-neutral-50/50 p-4 dark:border-neutral-800/60 dark:bg-neutral-900/50"
+            className="mb-5 overflow-hidden rounded-xl border border-neutral-200/60 bg-gradient-to-br from-neutral-50 to-white p-4 dark:border-neutral-800/60 dark:from-neutral-900/80 dark:to-neutral-900/40"
           >
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800">
-              <Trophy className="h-6 w-6 text-neutral-500 dark:text-neutral-400" />
-            </div>
-            <div>
-              <p className="text-[14px] font-semibold text-neutral-900 dark:text-neutral-100">{unlockedCount}/{achievements.length} 成就</p>
-              <p className="text-[12px] text-neutral-500 dark:text-neutral-400">继续学习来解锁更多成就</p>
+            <div className="flex items-center gap-4">
+              <div className="relative flex h-14 w-14 items-center justify-center">
+                <svg className="h-14 w-14 -rotate-90" viewBox="0 0 56 56">
+                  <circle cx="28" cy="28" r="24" fill="none" strokeWidth="4" className="stroke-neutral-200 dark:stroke-neutral-800" />
+                  <motion.circle
+                    cx="28" cy="28" r="24" fill="none" strokeWidth="4" strokeLinecap="round"
+                    className="stroke-neutral-700 dark:stroke-neutral-300"
+                    initial={{ strokeDasharray: '0 150.8' }}
+                    animate={{ strokeDasharray: `${(totalProgressPct / 100) * 150.8} 150.8` }}
+                    transition={{ duration: 0.8, ease: 'easeOut' }}
+                  />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-[12px] font-bold text-neutral-900 dark:text-neutral-100">{totalProgressPct}%</span>
+                </div>
+              </div>
+              <div className="flex-1">
+                <p className="text-[14px] font-semibold text-neutral-900 dark:text-neutral-100">{unlockedCount}/{achievements.length} 成就</p>
+                <p className="text-[12px] text-neutral-500 dark:text-neutral-400">
+                  {isLoadingStats ? '统计中...' : (unlockedCount === achievements.length ? '🏆 全部解锁！恭喜！' : '继续学习来解锁更多成就')}
+                </p>
+              </div>
+              <div className="flex flex-col items-end gap-0.5 text-right">
+                <span className="text-[10px] uppercase tracking-wider text-neutral-400">连续学习</span>
+                <span className="text-[16px] font-bold text-neutral-900 dark:text-neutral-100">{stats?.currentStreak ?? 0}<span className="text-[11px] font-normal text-neutral-400 ml-0.5">天</span></span>
+              </div>
             </div>
           </motion.div>
 
           {/* Achievement list */}
           <div className="space-y-2">
             <AnimatePresence initial={false}>
+              {achievements.length === 0 && (
+                <EmptyState icon={Trophy} title="加载中" description="正在获取成就数据..." />
+              )}
               {achievements.map((ach, i) => {
                 const Icon = achievementIcons[ach.icon] || Trophy;
+                const pct = ach.maxProgress > 0 ? Math.min((ach.progress / ach.maxProgress) * 100, 100) : 0;
                 return (
                   <motion.div
                     key={ach.id}
@@ -393,18 +426,28 @@ function AchievementsView() {
                     initial="hidden"
                     animate="visible"
                     layout
-                    className={`flex items-center gap-3 rounded-xl border p-3.5 transition-colors ${
+                    className={`flex items-center gap-3 rounded-xl border p-3.5 transition-all ${
                       ach.unlocked
-                        ? 'border-neutral-300 bg-neutral-50/50 dark:border-neutral-700 dark:bg-neutral-800/50'
+                        ? 'border-neutral-300 bg-gradient-to-r from-neutral-50/80 to-transparent dark:border-neutral-700 dark:from-neutral-800/40'
                         : 'border-neutral-100 bg-white dark:border-neutral-800 dark:bg-neutral-900'
                     }`}
                   >
-                    <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                    <div className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition-all ${
                       ach.unlocked
-                        ? 'bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-300'
+                        ? 'bg-neutral-800 text-white shadow-md shadow-neutral-900/20 dark:bg-neutral-200 dark:text-neutral-900'
                         : 'bg-neutral-100 text-neutral-400 dark:bg-neutral-800 dark:text-neutral-500'
                     }`}>
                       {ach.unlocked ? <Icon className="h-5 w-5" /> : <Lock className="h-4 w-4" />}
+                      {ach.unlocked && (
+                        <motion.span
+                          initial={{ scale: 0, rotate: -45 }}
+                          animate={{ scale: 1, rotate: 0 }}
+                          transition={{ delay: 0.2, type: 'spring', stiffness: 400, damping: 18 }}
+                          className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-500 text-white"
+                        >
+                          <Check className="h-2 w-2" strokeWidth={4} />
+                        </motion.span>
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className={`text-[13px] font-medium ${ach.unlocked ? 'text-neutral-900 dark:text-neutral-100' : 'text-neutral-500 dark:text-neutral-400'}`}>
@@ -414,18 +457,18 @@ function AchievementsView() {
                     </div>
                     <div className="shrink-0">
                       {ach.unlocked ? (
-                        <span className="text-[11px] text-neutral-600 dark:text-neutral-400 font-medium">✓ 已解锁</span>
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">✓ 已解锁</span>
                       ) : (
-                        <div className="flex items-center gap-1.5">
-                          <div className="h-1.5 w-16 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
+                        <div className="flex items-center gap-2">
+                          <div className="h-1.5 w-20 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
                             <motion.div
-                              className="h-full rounded-full bg-neutral-300 dark:bg-neutral-600"
+                              className="h-full rounded-full bg-neutral-700 dark:bg-neutral-300"
                               initial={{ width: 0 }}
-                              animate={{ width: `${(ach.progress / ach.maxProgress) * 100}%` }}
-                              transition={{ delay: 0.3, duration: 0.5 }}
+                              animate={{ width: `${pct}%` }}
+                              transition={{ delay: 0.3, duration: 0.6, ease: 'easeOut' }}
                             />
                           </div>
-                          <span className="text-[10px] text-neutral-400">{ach.progress}/{ach.maxProgress}</span>
+                          <span className="text-[10px] font-medium text-neutral-500 dark:text-neutral-400 tabular-nums w-10 text-right">{ach.progress}/{ach.maxProgress}</span>
                         </div>
                       )}
                     </div>
@@ -443,61 +486,139 @@ function AchievementsView() {
 // ─── 5. Stats View ───────────────────────────────────────────────────────────
 
 function StatsView() {
-  const stats = [
-    { label: '学习会话', value: '0', icon: BookOpen, color: 'text-neutral-500' },
-    { label: '对话轮数', value: '0', icon: MessageSquare, color: 'text-neutral-500' },
-    { label: '知识点', value: '0', icon: Layers, color: 'text-neutral-500' },
-    { label: '学习时长', value: '0h', icon: Clock, color: 'text-neutral-500' },
+  const { stats, weeklyActivity, fetchStats, isLoadingStats } = useLearningStore();
+
+  React.useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  const statsCards = [
+    { label: '学习会话', value: stats?.sessions ?? 0, icon: BookOpen, color: 'text-neutral-700 dark:text-neutral-200' },
+    { label: '对话轮数', value: stats?.messages ?? 0, icon: MessageSquare, color: 'text-neutral-700 dark:text-neutral-200' },
+    { label: '知识点', value: stats?.knowledgeNodes ?? 0, icon: Layers, color: 'text-neutral-700 dark:text-neutral-200', sub: `${stats?.masteredKnowledge ?? 0} 已掌握` },
+    { label: '学习时长', value: stats?.learningTimeLabel ?? '0m', icon: Clock, color: 'text-neutral-700 dark:text-neutral-200' },
   ];
+
+  // Compute weekly activity max for bar scaling
+  const maxWeekly = Math.max(1, ...(weeklyActivity?.map(d => d.count) || [1]));
 
   return (
     <>
       <FeatureHeader title="学习统计" icon={BarChart3} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         <div className="mx-auto max-w-[600px] px-6 py-5">
+          {/* Hero metric: current streak */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-5 overflow-hidden rounded-xl border border-neutral-200/60 bg-gradient-to-br from-neutral-50 via-white to-neutral-50 p-5 dark:border-neutral-800/60 dark:from-neutral-900 dark:via-neutral-900/80 dark:to-neutral-900"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[11px] uppercase tracking-wider text-neutral-400 dark:text-neutral-500">当前连续学习</p>
+                <div className="mt-1 flex items-baseline gap-1.5">
+                  <motion.span
+                    initial={{ scale: 0.5, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ delay: 0.15, type: 'spring', stiffness: 200, damping: 18 }}
+                    className="text-[32px] font-bold leading-none text-neutral-900 dark:text-neutral-100"
+                  >
+                    {stats?.currentStreak ?? 0}
+                  </motion.span>
+                  <span className="text-[13px] text-neutral-500 dark:text-neutral-400">天</span>
+                </div>
+                <p className="mt-1.5 text-[11px] text-neutral-400">
+                  {(stats?.currentStreak ?? 0) >= 3 ? '🔥 保持下去！' : '继续学习来培养习惯'}
+                </p>
+              </div>
+              <motion.div
+                initial={{ scale: 0, rotate: -30 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ delay: 0.25, type: 'spring', stiffness: 200, damping: 15 }}
+                className="flex h-14 w-14 items-center justify-center rounded-2xl bg-neutral-900 text-white shadow-lg shadow-neutral-900/20 dark:bg-neutral-100 dark:text-neutral-900 dark:shadow-neutral-100/10"
+              >
+                <Flame className="h-7 w-7" />
+              </motion.div>
+            </div>
+          </motion.div>
+
           {/* Stats grid */}
           <div className="mb-6 grid grid-cols-2 gap-3">
-            {stats.map((s, i) => (
+            {statsCards.map((s, i) => (
               <motion.div
                 key={s.label}
                 custom={i}
                 variants={itemVariants}
                 initial="hidden"
                 animate="visible"
-                className="flex items-center gap-3 rounded-xl border border-neutral-100 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900"
+                className="group relative overflow-hidden rounded-xl border border-neutral-100 bg-white p-4 transition-all hover:border-neutral-200 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700"
               >
-                <div className={`flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-50 dark:bg-neutral-800`}>
-                  <s.icon className={`h-5 w-5 ${s.color}`} />
+                <div className="flex items-start justify-between">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-50 transition-colors group-hover:bg-neutral-100 dark:bg-neutral-800 dark:group-hover:bg-neutral-700">
+                    <s.icon className={`h-5 w-5 ${s.color}`} />
+                  </div>
+                  {'sub' in s && s.sub && (
+                    <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                      {s.sub}
+                    </span>
+                  )}
                 </div>
-                <div>
-                  <p className="text-[18px] font-semibold text-neutral-900 dark:text-neutral-100">{s.value}</p>
+                <div className="mt-2.5">
+                  <p className="text-[20px] font-semibold tabular-nums text-neutral-900 dark:text-neutral-100">{s.value}</p>
                   <p className="text-[11px] text-neutral-400">{s.label}</p>
                 </div>
               </motion.div>
             ))}
           </div>
 
-          {/* Weekly activity placeholder */}
+          {/* Weekly activity (real data from /api/stats) */}
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0, transition: { delay: 0.25 } }}
             className="rounded-xl border border-neutral-100 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
           >
-            <p className="mb-4 text-[13px] font-medium text-neutral-700 dark:text-neutral-300">本周学习活动</p>
+            <div className="mb-4 flex items-center justify-between">
+              <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">本周学习活动</p>
+              <span className="text-[11px] text-neutral-400">
+                {isLoadingStats ? '加载中...' : `共 ${weeklyActivity?.reduce((s, d) => s + d.count, 0) ?? 0} 条消息`}
+              </span>
+            </div>
             <div className="flex items-end justify-between gap-2 px-2">
-              {['一', '二', '三', '四', '五', '六', '日'].map((day, i) => (
-                <motion.div
-                  key={day}
-                  initial={{ scaleY: 0 }}
-                  animate={{ scaleY: 1 }}
-                  transition={{ delay: 0.3 + i * 0.05, duration: 0.4 }}
-                  className="flex flex-1 flex-col items-center gap-1.5"
-                  style={{ transformOrigin: 'bottom' }}
-                >
-                  <div className="w-full rounded-md bg-neutral-100 dark:bg-neutral-800" style={{ height: `${20 + Math.random() * 60}px` }} />
-                  <span className="text-[10px] text-neutral-400">{day}</span>
-                </motion.div>
-              ))}
+              {(weeklyActivity && weeklyActivity.length > 0 ? weeklyActivity : [
+                { label: '一', count: 0 }, { label: '二', count: 0 }, { label: '三', count: 0 },
+                { label: '四', count: 0 }, { label: '五', count: 0 }, { label: '六', count: 0 }, { label: '日', count: 0 },
+              ]).map((day, i) => {
+                const heightPct = Math.max(4, (day.count / maxWeekly) * 100);
+                const isToday = i === 6; // last bucket is "today"
+                return (
+                  <motion.div
+                    key={i}
+                    initial={{ scaleY: 0 }}
+                    animate={{ scaleY: 1 }}
+                    transition={{ delay: 0.3 + i * 0.05, duration: 0.4 }}
+                    className="flex flex-1 flex-col items-center gap-1.5"
+                    style={{ transformOrigin: 'bottom' }}
+                  >
+                    <div className="relative flex w-full flex-col justify-end" style={{ height: '80px' }}>
+                      <motion.div
+                        className={`w-full rounded-md transition-colors ${
+                          day.count > 0
+                            ? (isToday ? 'bg-neutral-800 dark:bg-neutral-200' : 'bg-neutral-300 dark:bg-neutral-600')
+                            : 'bg-neutral-100 dark:bg-neutral-800'
+                        }`}
+                        style={{ height: `${heightPct}%` }}
+                      >
+                        {day.count > 0 && (
+                          <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[9px] font-medium text-neutral-500 dark:text-neutral-400 tabular-nums">
+                            {day.count}
+                          </span>
+                        )}
+                      </motion.div>
+                    </div>
+                    <span className={`text-[10px] ${isToday ? 'font-bold text-neutral-900 dark:text-neutral-100' : 'text-neutral-400'}`}>{day.label}</span>
+                  </motion.div>
+                );
+              })}
             </div>
           </motion.div>
         </div>

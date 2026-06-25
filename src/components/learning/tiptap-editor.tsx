@@ -39,6 +39,9 @@ import {
   Unlink,
   X,
   Check,
+  Cloud,
+  CloudOff,
+  Loader2,
 } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 
@@ -192,14 +195,51 @@ function MathDialog({
   );
 }
 
+// ─── Save Status Indicator ───────────────────────────────────────────────────
+
+function SaveStatusIndicator({ status }: { status: 'idle' | 'saving' | 'saved' | 'error' }) {
+  if (status === 'saving') {
+    return (
+      <div className="flex items-center gap-1.5 text-[11px] text-neutral-400 dark:text-neutral-500">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        <span>保存中...</span>
+      </div>
+    );
+  }
+  if (status === 'saved') {
+    return (
+      <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
+        <Check className="h-3 w-3" strokeWidth={3} />
+        <span>已保存</span>
+      </div>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <div className="flex items-center gap-1.5 text-[11px] text-red-500 dark:text-red-400">
+        <CloudOff className="h-3 w-3" />
+        <span>保存失败</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] text-neutral-300 dark:text-neutral-600">
+      <Cloud className="h-3 w-3" />
+      <span>自动保存</span>
+    </div>
+  );
+}
+
 // ─── Main Editor Component ───────────────────────────────────────────────────
 
 export default function TiptapEditor() {
-  const { notesContent, setNotesContent } = useLearningStore();
+  const { notesContent, setNotesContent, currentSessionId, notesSaveStatus } = useLearningStore();
   const [showLinkDialog, setShowLinkDialog] = useState(false);
   const [linkDialogInitialUrl, setLinkDialogInitialUrl] = useState('');
   const [showMathDialog, setShowMathDialog] = useState(false);
   const linkDialogAnchorRef = useRef<HTMLDivElement>(null);
+  // Track whether content changes originate from the editor itself (vs external load)
+  const isInternalChange = useRef(false);
 
   const editor = useEditor({
     extensions: [
@@ -252,6 +292,7 @@ export default function TiptapEditor() {
     content: notesContent || '',
     onUpdate: ({ editor }) => {
       const html = editor.getHTML();
+      isInternalChange.current = true;
       setNotesContent(html);
     },
     editorProps: {
@@ -269,6 +310,20 @@ export default function TiptapEditor() {
     }, 100);
     return () => clearTimeout(timer);
   }, [editor]);
+
+  // Sync editor content when session changes (external content swap)
+  // We compare to current HTML to avoid clobbering the user's caret during normal typing.
+  useEffect(() => {
+    if (!editor) return;
+    if (isInternalChange.current) {
+      isInternalChange.current = false;
+      return;
+    }
+    const currentHtml = editor.getHTML();
+    if ((notesContent || '') !== currentHtml) {
+      editor.commands.setContent(notesContent || '', false);
+    }
+  }, [notesContent, currentSessionId, editor]);
 
   // Close dialogs on outside click
   useEffect(() => {
@@ -508,8 +563,9 @@ export default function TiptapEditor() {
           </div>
         </div>
 
-        {/* Character Count */}
-        <div className="flex shrink-0 items-center justify-end px-6 py-2">
+        {/* Character Count + Save Status */}
+        <div className="flex shrink-0 items-center justify-between px-6 py-2">
+          <SaveStatusIndicator status={notesSaveStatus} />
           <span className="text-[11px] tabular-nums text-neutral-300 dark:text-neutral-600">
             {characterCount.characters()} 字符
           </span>

@@ -63,6 +63,32 @@ export interface CourseModule {
   lessons: CourseLesson[];
 }
 
+export interface Achievement {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  unlocked: boolean;
+  progress: number;
+  maxProgress: number;
+}
+
+export interface WeeklyActivityItem {
+  label: string;
+  count: number;
+}
+
+export interface LearningStats {
+  sessions: number;
+  messages: number;
+  userMessages: number;
+  knowledgeNodes: number;
+  masteredKnowledge: number;
+  learningTimeLabel: string;
+  maxRoundsInOneSession: number;
+  currentStreak: number;
+}
+
 // ─── Store Interface ────────────────────────────────────────────────────────
 
 interface LearningStore {
@@ -99,11 +125,18 @@ interface LearningStore {
   // Feature state
   tasks: Array<{ id: string; title: string; done: boolean; priority: number; createdAt: string }>;
   cards: Array<{ id: string; front: string; back: string; category: string; mastered: boolean; createdAt: string }>;
-  achievements: Array<{ id: string; title: string; description: string; icon: string; unlocked: boolean; unlockedAt: string | null; progress: number; maxProgress: number }>;
+  achievements: Achievement[];
+
+  // Stats state
+  stats: LearningStats | null;
+  weeklyActivity: WeeklyActivityItem[];
+  isLoadingStats: boolean;
 
   // Notes state
   notesContent: string;
   notesPanelOpen: boolean;
+  isSavingNotes: boolean;
+  notesSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
 
   // Actions - Sessions
   fetchSessions: () => Promise<void>;
@@ -125,7 +158,17 @@ interface LearningStore {
   setCoursePanelOpen: (open: boolean) => void;
   setActiveLessonId: (id: string | null) => void;
   generateCourse: () => Promise<void>;
+  fetchCourse: (sessionId: string) => Promise<void>;
   updateLessonStatus: (moduleId: string, lessonId: string, status: CourseLesson['status']) => void;
+
+  // Actions - Notes
+  fetchNotes: (sessionId: string) => Promise<void>;
+  saveNotes: (sessionId: string, content: string) => Promise<void>;
+  setNotesContent: (content: string) => void;
+  setNotesPanelOpen: (open: boolean) => void;
+
+  // Actions - Stats
+  fetchStats: () => Promise<void>;
 
   // Actions - UI
   setSidebarOpen: (open: boolean) => void;
@@ -139,12 +182,21 @@ interface LearningStore {
   deleteTask: (id: string) => void;
   addCard: (front: string, back: string, category?: string) => void;
   toggleCardMastered: (id: string) => void;
-  setNotesContent: (content: string) => void;
-  setNotesPanelOpen: (open: boolean) => void;
   reset: () => void;
 }
 
 // ─── Initial State ──────────────────────────────────────────────────────────
+
+const initialStats: LearningStats = {
+  sessions: 0,
+  messages: 0,
+  userMessages: 0,
+  knowledgeNodes: 0,
+  masteredKnowledge: 0,
+  learningTimeLabel: '0m',
+  maxRoundsInOneSession: 0,
+  currentStreak: 0,
+};
 
 const initialState = {
   sessions: [] as LearningSession[],
@@ -171,15 +223,18 @@ const initialState = {
   cards: [] as Array<{ id: string; front: string; back: string; category: string; mastered: boolean; createdAt: string }>,
   notesContent: '',
   notesPanelOpen: false,
-  achievements: [
-    { id: 'ach-1', title: '初次对话', description: '发送第一条学习消息', icon: 'message', unlocked: false, unlockedAt: null, progress: 0, maxProgress: 1 },
-    { id: 'ach-2', title: '知识探索者', description: '学习 5 个不同知识点', icon: 'compass', unlocked: false, unlockedAt: null, progress: 0, maxProgress: 5 },
-    { id: 'ach-3', title: '持续学习者', description: '连续 3 天学习', icon: 'flame', unlocked: false, unlockedAt: null, progress: 0, maxProgress: 3 },
-    { id: 'ach-4', title: '知识达人', description: '掌握 10 个知识点', icon: 'crown', unlocked: false, unlockedAt: null, progress: 0, maxProgress: 10 },
-    { id: 'ach-5', title: '深度思考者', description: '单次对话超过 20 轮', icon: 'brain', unlocked: false, unlockedAt: null, progress: 0, maxProgress: 20 },
-    { id: 'ach-6', title: '多面手', description: '创建 5 个学习主题', icon: 'layers', unlocked: false, unlockedAt: null, progress: 0, maxProgress: 5 },
-  ],
+  isSavingNotes: false,
+  notesSaveStatus: 'idle' as 'idle' | 'saving' | 'saved' | 'error',
+  stats: initialStats,
+  weeklyActivity: [] as WeeklyActivityItem[],
+  isLoadingStats: false,
+  achievements: [] as Achievement[],
 };
+
+// ─── Notes Save Debounce Tracker ────────────────────────────────────────────
+// Module-level timer to debounce notes auto-save across store instances
+let notesSaveTimer: ReturnType<typeof setTimeout> | null = null;
+const NOTES_SAVE_DELAY_MS = 800;
 
 // ─── Store ──────────────────────────────────────────────────────────────────
 
@@ -226,11 +281,23 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
   },
 
   selectSession: async (id: string) => {
-    set({ currentSessionId: id, messages: [], knowledgeNodes: [], references: [] });
+    // Preserve notes save state from previous session if needed
+    set({
+      currentSessionId: id,
+      messages: [],
+      knowledgeNodes: [],
+      references: [],
+      courseModules: [],
+      isCourseGenerated: false,
+      notesContent: '',
+      notesSaveStatus: 'idle',
+    });
     await Promise.all([
       get().fetchMessages(id),
       get().fetchKnowledgeNodes(id),
       get().fetchReferences(id),
+      get().fetchCourse(id),
+      get().fetchNotes(id),
     ]);
   },
 
@@ -244,7 +311,14 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
         sessions: sessions.filter((s) => s.id !== id),
         currentSessionId: isCurrent ? null : currentSessionId,
         // Also clear related data when deleting current session
-        ...(isCurrent ? { messages: [], knowledgeNodes: [], references: [] } : {}),
+        ...(isCurrent ? {
+          messages: [],
+          knowledgeNodes: [],
+          references: [],
+          courseModules: [],
+          isCourseGenerated: false,
+          notesContent: '',
+        } : {}),
       });
     } catch (error) {
       console.error('Failed to delete session:', error);
@@ -360,6 +434,9 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       get().fetchKnowledgeNodes(currentSessionId);
       get().fetchReferences(currentSessionId);
 
+      // Refresh global stats in the background (achievement progress may have changed)
+      get().fetchStats();
+
     } catch (error) {
       console.error('Failed to send message:', error);
       set({ isStreaming: false, streamingContent: '' });
@@ -421,6 +498,9 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
         // Rollback on failure
         set({ knowledgeNodes: prevNodes });
         console.error('toggleKnowledgeMastered failed:', res.status);
+      } else {
+        // Refresh global stats (mastery counts may have changed)
+        get().fetchStats();
       }
     } catch (error) {
       // Rollback on network error
@@ -434,6 +514,36 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
   setCoursePanelOpen: (open: boolean) => set({ coursePanelOpen: open }),
   setActiveLessonId: (id: string | null) => set({ activeLessonId: id }),
 
+  fetchCourse: async (sessionId: string) => {
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/course`);
+      if (!res.ok) { console.error('fetchCourse failed:', res.status); return; }
+      const data = await res.json();
+      const modules: CourseModule[] = (data.modules || []).map((m: any) => ({
+        id: m.id,
+        sessionId: m.sessionId,
+        title: m.title,
+        order: m.order,
+        lessons: (m.lessons || []).map((l: any) => ({
+          id: l.id,
+          moduleId: l.moduleId,
+          title: l.title,
+          type: l.type,
+          duration: l.duration,
+          status: l.status,
+          content: l.content,
+          order: l.order,
+        })),
+      }));
+      set({
+        courseModules: modules,
+        isCourseGenerated: modules.length > 0,
+      });
+    } catch (error) {
+      console.error('Failed to fetch course:', error);
+    }
+  },
+
   generateCourse: async () => {
     const state = get();
     if (!state.currentSessionId || state.isGeneratingCourse) return;
@@ -443,6 +553,7 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          sessionId: state.currentSessionId,
           messages: state.messages.map(m => ({ role: m.role, content: m.content, type: m.type })),
           knowledgeNodes: state.knowledgeNodes.map(n => ({
             title: n.title, content: n.content, category: n.category,
@@ -453,7 +564,24 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       if (!res.ok) { console.error('generateCourse failed:', res.status); return; }
       const data = await res.json();
       if (data.modules && data.modules.length > 0) {
-        set({ courseModules: data.modules, isCourseGenerated: true, coursePanelOpen: true });
+        // Normalize the response (which should be persisted DB rows when sessionId was provided)
+        const modules: CourseModule[] = data.modules.map((m: any) => ({
+          id: m.id,
+          sessionId: m.sessionId || state.currentSessionId,
+          title: m.title,
+          order: m.order,
+          lessons: (m.lessons || []).map((l: any) => ({
+            id: l.id,
+            moduleId: l.moduleId,
+            title: l.title,
+            type: l.type,
+            duration: l.duration,
+            status: l.status,
+            content: l.content,
+            order: l.order,
+          })),
+        }));
+        set({ courseModules: modules, isCourseGenerated: true, coursePanelOpen: true });
       }
     } catch (error) {
       console.error('Failed to generate course:', error);
@@ -463,6 +591,15 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
   },
 
   updateLessonStatus: (moduleId: string, lessonId: string, status: CourseLesson['status']) => {
+    const { currentSessionId, courseModules } = get();
+    if (!currentSessionId) return;
+
+    // Find the lesson to persist its new status
+    const targetModule = courseModules.find(m => m.id === moduleId);
+    const targetLesson = targetModule?.lessons.find(l => l.id === lessonId);
+    if (!targetLesson) return;
+
+    // Optimistic local update (auto-unlock next lesson if completed)
     set((state) => ({
       courseModules: state.courseModules.map(m => {
         if (m.id !== moduleId) return m;
@@ -470,19 +607,114 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
           if (l.id !== lessonId) return l;
           return { ...l, status };
         });
-        // Auto-unlock next lesson if current is completed
         if (status === 'completed') {
           const completedIdx = updatedLessons.findIndex(l => l.id === lessonId);
           if (completedIdx >= 0 && completedIdx + 1 < updatedLessons.length) {
             const nextLesson = updatedLessons[completedIdx + 1];
             if (nextLesson.status === 'locked') {
               updatedLessons[completedIdx + 1] = { ...nextLesson, status: 'available' };
+              // Persist the auto-unlock too
+              fetch(`/api/sessions/${currentSessionId}/course`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lessonId: nextLesson.id, status: 'available' }),
+              }).catch(err => console.error('Auto-unlock persist failed:', err));
             }
           }
         }
         return { ...m, lessons: updatedLessons };
       }),
     }));
+
+    // Persist the user-triggered status change
+    fetch(`/api/sessions/${currentSessionId}/course`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lessonId, status }),
+    }).catch(err => console.error('Lesson status persist failed:', err));
+
+    // Stats may need refresh (for "depth thinker" achievement)
+    get().fetchStats();
+  },
+
+  // ── Notes ─────────────────────────────────────────────────────────────────
+
+  fetchNotes: async (sessionId: string) => {
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/notes`);
+      if (!res.ok) { console.error('fetchNotes failed:', res.status); return; }
+      const data = await res.json();
+      const content = data.note?.content || '';
+      set({ notesContent: content, notesSaveStatus: 'idle' });
+    } catch (error) {
+      console.error('Failed to fetch notes:', error);
+    }
+  },
+
+  saveNotes: async (sessionId: string, content: string) => {
+    set({ isSavingNotes: true, notesSaveStatus: 'saving' });
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/notes`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      if (!res.ok) {
+        set({ notesSaveStatus: 'error' });
+        console.error('saveNotes failed:', res.status);
+        return;
+      }
+      set({ notesSaveStatus: 'saved' });
+      // Clear "saved" indicator after a short delay
+      setTimeout(() => {
+        if (get().notesSaveStatus === 'saved') {
+          set({ notesSaveStatus: 'idle' });
+        }
+      }, 1500);
+    } catch (error) {
+      set({ notesSaveStatus: 'error' });
+      console.error('Failed to save notes:', error);
+    } finally {
+      set({ isSavingNotes: false });
+    }
+  },
+
+  setNotesContent: (content: string) => {
+    const { currentSessionId } = get();
+    set({ notesContent: content });
+
+    if (!currentSessionId) return;
+
+    // Debounced auto-save: clear any pending timer, set a new one
+    if (notesSaveTimer) {
+      clearTimeout(notesSaveTimer);
+    }
+    set({ notesSaveStatus: 'saving' });
+    notesSaveTimer = setTimeout(() => {
+      get().saveNotes(currentSessionId, content);
+    }, NOTES_SAVE_DELAY_MS);
+  },
+
+  setNotesPanelOpen: (open: boolean) => set({ notesPanelOpen: open }),
+
+  // ── Stats ─────────────────────────────────────────────────────────────────
+
+  fetchStats: async () => {
+    set({ isLoadingStats: true });
+    try {
+      const res = await fetch('/api/stats');
+      if (!res.ok) { console.error('fetchStats failed:', res.status); return; }
+      const data = await res.json();
+      set({
+        stats: data.totals,
+        weeklyActivity: data.weeklyActivity || [],
+        achievements: data.achievements || [],
+      });
+    } catch (error) {
+      console.error('Failed to fetch stats:', error);
+    } finally {
+      set({ isLoadingStats: false });
+    }
   },
 
   // ── UI ────────────────────────────────────────────────────────────────────
@@ -492,7 +724,13 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
   setDisplayMode: (mode: 'side' | 'half' | 'full') => set({ displayMode: mode, sidebarOpen: mode !== 'full' }),
   setSettingsPanelOpen: (open: boolean) => set({ settingsPanelOpen: open }),
   setCreateNewPanelOpen: (open: boolean) => set({ createNewPanelOpen: open }),
-  setActiveFeatureView: (view: string | null) => set({ activeFeatureView: view, createNewPanelOpen: false }),
+  setActiveFeatureView: (view: string | null) => {
+    set({ activeFeatureView: view, createNewPanelOpen: false });
+    // Pre-fetch stats when entering stats or achievements view
+    if (view === 'stats' || view === 'achievements') {
+      get().fetchStats();
+    }
+  },
 
   // ── Feature Actions ─────────────────────────────────────────────────────
 
@@ -511,8 +749,6 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
   toggleCardMastered: (id: string) => set((s) => ({
     cards: s.cards.map(c => c.id === id ? { ...c, mastered: !c.mastered } : c),
   })),
-  setNotesContent: (content: string) => set({ notesContent: content }),
-  setNotesPanelOpen: (open: boolean) => set({ notesPanelOpen: open }),
 
   // ── Reset ─────────────────────────────────────────────────────────────────
 

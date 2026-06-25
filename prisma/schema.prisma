@@ -23,6 +23,8 @@ model LearningSession {
   messages       LearningMessage[]
   knowledgeNodes KnowledgeNode[]
   references     Reference[]
+  notes          Note?
+  courseModules  CourseModule[]
 }
 
 // Individual messages in the learning dialogue
@@ -65,4 +67,44 @@ model Reference {
   createdAt DateTime @default(now())
 
   session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// Per-session rich text notes (Tiptap HTML content)
+model Note {
+  id        String   @id @default(cuid())
+  sessionId String   @unique
+  content   String   @default("")        // HTML content from Tiptap editor
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// AI-generated course module (one session → many modules)
+model CourseModule {
+  id        String   @id @default(cuid())
+  sessionId String
+  title     String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  lessons  CourseLesson[]
+}
+
+// Individual lesson inside a module
+model CourseLesson {
+  id        String   @id @default(cuid())
+  moduleId  String
+  title     String
+  type      String   @default("theory")   // theory, practice, quiz
+  duration  String   @default("10分钟")
+  status    String   @default("locked")   // locked, available, active, completed
+  content   String   @default("")         // Detailed content description
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  module CourseModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
 }

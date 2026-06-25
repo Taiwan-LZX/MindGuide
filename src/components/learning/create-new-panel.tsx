@@ -47,11 +47,11 @@ const rowVariants = {
   }),
 };
 
-// ─── Kbd hint (flat, native-looking) ────────────────────────────────────────
+// ─── Kbd hint ────────────────────────────────────────────────────────────────
 
 function KbdHint({ keys }: { keys: string[] }) {
   return (
-    <span className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+    <span className="flex items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
       {keys.map((k, idx) => (
         <React.Fragment key={idx}>
           {idx > 0 && <span className="text-[10px] text-neutral-400">+</span>}
@@ -64,7 +64,11 @@ function KbdHint({ keys }: { keys: string[] }) {
   );
 }
 
-// ─── Feature Row (flat, minimal) ───────────────────────────────────────────
+// ─── Feature Row — soft highlight box with smooth follow animation ──────────
+// Instead of a hard bg color swap, we use a layered approach:
+//   - a motion highlight layer (absolute, rounded) that fades/slides in
+//   - the icon gently slides right and the chevron nudges, all spring-eased
+// This produces a "liquid follow" feel rather than a stiff text hover.
 
 function FeatureRow({
   feature,
@@ -83,14 +87,53 @@ function FeatureRow({
       animate="visible"
       onClick={onClick}
       title={feature.description}
-      className="group flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 active:bg-neutral-200/70 dark:active:bg-neutral-700/60"
+      className="group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left"
     >
-      <feature.icon className="h-4 w-4 shrink-0 text-neutral-400 transition-colors duration-150 group-hover:text-neutral-600 dark:group-hover:text-neutral-300" />
-      <span className="flex-1 text-[13px] font-medium text-neutral-600 dark:text-neutral-300 transition-colors duration-150 group-hover:text-neutral-900 dark:group-hover:text-neutral-100">
+      {/* Soft highlight layer — fades + scales in on hover, spring for smooth follow */}
+      <motion.span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 rounded-lg bg-neutral-100 dark:bg-neutral-800/70"
+        initial={false}
+        animate={{ opacity: 0 }}
+        whileHover={{ opacity: 1 }}
+        transition={{ duration: 0.18, ease: [0.25, 0.1, 0.25, 1] }}
+        // Subtle scale gives a "settling" feel instead of a hard rectangle appearing
+        variants={{ hover: { scale: 1 }, rest: { scale: 0.985 } }}
+      />
+      {/* Left accent line — appears on hover for a refined "selected" cue */}
+      <motion.span
+        aria-hidden
+        className="pointer-events-none absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-neutral-400 dark:bg-neutral-500"
+        initial={false}
+        animate={{ opacity: 0, scaleY: 0.4 }}
+        whileHover={{ opacity: 1, scaleY: 1 }}
+        transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+      />
+
+      {/* Icon — gentle slide-right + color shift on hover */}
+      <motion.div
+        className="relative z-10"
+        whileHover={{ x: 1 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 26 }}
+      >
+        <feature.icon className="h-4 w-4 shrink-0 text-neutral-400 transition-colors duration-200 group-hover:text-neutral-700 dark:group-hover:text-neutral-200" />
+      </motion.div>
+
+      {/* Label — color lifts toward ink on hover */}
+      <span className="relative z-10 flex-1 text-[13px] font-medium text-neutral-600 transition-colors duration-200 group-hover:text-neutral-900 dark:text-neutral-300 dark:group-hover:text-neutral-50">
         {feature.label}
       </span>
+
       <KbdHint keys={['⌘', feature.shortcut]} />
-      <ChevronRight className="h-3.5 w-3.5 text-neutral-300 transition-all duration-150 group-hover:translate-x-0.5 group-hover:text-neutral-400 dark:text-neutral-600 dark:group-hover:text-neutral-500" />
+
+      {/* Chevron — nudges right with spring */}
+      <motion.span
+        className="relative z-10"
+        whileHover={{ x: 2 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 22 }}
+      >
+        <ChevronRight className="h-3.5 w-3.5 text-neutral-300 transition-colors duration-200 group-hover:text-neutral-500 dark:text-neutral-600 dark:group-hover:text-neutral-400" />
+      </motion.span>
     </motion.button>
   );
 }
@@ -124,13 +167,11 @@ export function MoreFeaturesPanel() {
   useEffect(() => {
     if (!createNewPanelOpen) return;
     const handler = (e: KeyboardEvent) => {
-      // Esc closes
       if (e.key === 'Escape') {
         e.preventDefault();
         setCreateNewPanelOpen(false);
         return;
       }
-      // ⌘/Ctrl + 1..6
       const isMod = e.metaKey || e.ctrlKey;
       if (isMod && /^[1-6]$/.test(e.key)) {
         e.preventDefault();
@@ -156,7 +197,7 @@ export function MoreFeaturesPanel() {
           exit="exit"
           className="fixed bottom-3 left-3 z-[60] w-60 overflow-hidden rounded-xl border border-black/5 bg-white/95 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/95"
         >
-          {/* Header — flat, single layer */}
+          {/* Header */}
           <div className="flex items-center justify-between px-3 py-2.5">
             <h2 className="text-[12px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
               更多功能
@@ -170,10 +211,8 @@ export function MoreFeaturesPanel() {
             </button>
           </div>
 
-          {/* Divider — single hairline */}
           <div className="mx-3 h-px bg-neutral-100 dark:bg-neutral-800" />
 
-          {/* Feature List — flat rows, no recessed container */}
           <div className="p-1.5">
             {features.map((feature, i) => (
               <FeatureRow
@@ -185,7 +224,7 @@ export function MoreFeaturesPanel() {
             ))}
           </div>
 
-          {/* Footer hint — flat, minimal */}
+          {/* Footer hint */}
           <div className="flex items-center justify-between border-t border-neutral-100 px-3 py-1.5 dark:border-neutral-800">
             <span className="text-[10px] text-neutral-400 dark:text-neutral-600">
               按 <kbd className="rounded border border-neutral-200 bg-neutral-50 px-1 text-[9px] font-medium dark:border-neutral-700 dark:bg-neutral-800">⌘</kbd>

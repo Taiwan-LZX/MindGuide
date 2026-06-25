@@ -211,10 +211,10 @@ function FullSidebar() {
       >
         {/* Brand */}
         <motion.div className="flex items-center gap-2.5 px-1" variants={childVariants}>
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900">
-            <MessagesSquare className="h-3.5 w-3.5" />
+          <div className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral-200 text-neutral-700 dark:border-neutral-700 dark:text-neutral-300">
+            <MessagesSquare className="h-3.5 w-3.5" strokeWidth={1.6} />
           </div>
-          <span className="text-[15px] font-semibold text-neutral-800 dark:text-neutral-100">MindGuide</span>
+          <span className="font-serif text-[15px] font-medium tracking-tight text-neutral-800 dark:text-neutral-100">MindGuide</span>
         </motion.div>
 
         {/* Tab Navigation */}

@@ -194,3 +194,94 @@ GET /api/sessions/[id]/messages 200 in 55ms  (re-fetch after AI response)
 - `src/components/learning/create-new-panel.tsx` — 完全重写为扁平 + 快捷键
 - `src/components/learning/sidebar.tsx` — 两个底部按钮扁平化
 - `src/components/learning/feature-views.tsx` — 成就/统计页移除阴影与渐变
+
+---
+
+## 第三轮迭代 — 悬停跟随动画 + 学术论文风全局改造 (用户反馈驱动)
+
+### 触发与判断
+用户反馈两点：
+1. 「更多功能」悬停时希望保留柔和方框 + 跟随动画，而不是"纯文本贴上去"的僵硬感
+2. 整个项目要专业、平面、论文风 — 移除彩色图标、emoji、表现符号(🏆🔥✓○●等)
+
+### 已完成的修改
+
+**1. 重写「更多功能」面板悬停交互 (`create-new-panel.tsx`)**
+- 之前：`hover:bg-neutral-100` 硬切换 → 文字贴上去的僵硬感
+- 现在：分层动画方案
+  - 高亮层：绝对定位 `<motion.span>` 圆角矩形，`opacity` 淡入 + 微 `scale` 过渡（0.985→1），产生"沉降"感而非硬矩形出现
+  - 左侧细线：`<motion.span>` 2px 竖线，hover 时 `opacity + scaleY` 弹入，作为"选中"提示
+  - 图标：`whileHover={{ x: 1 }}` spring 弹簧右移
+  - 箭头：`whileHover={{ x: 2 }}` spring 右移
+  - 所有过渡用 `spring stiffness:400 damping:22-26`，自然跟随不僵硬
+
+**2. 全局学术论文风改造**
+
+*WelcomeView (`main-content.tsx`)*
+- Logo：`bg-gradient-to-br from-emerald-500 to-teal-600 shadow-lg` → `border border-neutral-200 bg-white`（黑白边框）
+- 标题：`font-semibold` → `font-serif font-medium`（衬线字体 scholarly）
+- 快捷主题：移除所有 emoji（🧠⚡🏗🎨🌐），改为纯文字按钮
+- 按钮形状：`rounded-full` → `rounded-md`（更方正学术）
+- hover：`scale 1.04` 弹跳 → `y: -1` 微妙上浮
+
+*成就系统 (`feature-views.tsx`)*
+- 移除 `🏆 全部解锁！恭喜！` → `全部解锁`
+- 移除已解锁角标 `bg-emerald-500` 圆形 ✓ 徽章
+- 「已解锁」徽章：`bg-emerald-100 text-emerald-700` → `border border-neutral-200 text-neutral-600`（中性边框）
+- `transition-all` → `transition-colors`
+
+*学习统计 (`feature-views.tsx`)*
+- 移除 `🔥 保持下去！` → `保持下去`
+- 移除 hero 火焰图标块（`Flame` 装饰性表现符号）
+- 「已掌握」徽章：`bg-emerald-50 text-emerald-700` → `border border-neutral-200 text-neutral-600`
+- 流式指示器：`bg-emerald-400` → `bg-neutral-500`
+
+*知识图谱 (`feature-views.tsx`)*
+- 掌握状态：`✓` / `○` 文字符号 → `<Check>` lucide 图标 / 中性边框圆点
+- 重要度：`●●●○○` 表现符号 → `3/5` 数字 tabular-nums
+
+*侧边栏品牌 (`sidebar.tsx`)*
+- Logo：`bg-neutral-900` 实心黑方块 → `border border-neutral-200` 中性边框
+- 品牌名：`font-semibold` → `font-serif font-medium tracking-tight`
+
+*笔记编辑器 (`tiptap-editor.tsx`)*
+- 「已保存」状态：`text-emerald-600` → `text-neutral-500`
+
+*AI 系统提示词 (`api/chat/route.ts`)*
+- 移除「用emoji来增加亲和力」
+- 新增「不要使用 emoji 或装饰性符号（如 ✨🎉🔥💡 等），保持克制的书面语风格」
+
+*成就解锁 toast (`learning-store.ts`)*
+- `🏆 成就解锁：` → `成就解锁：`
+- toast 边框：`border-emerald-200` → `border-neutral-200`
+
+### 验证结果
+- `bun run lint` ✅ 零错误
+- agent-browser + VLM 逐页验证：
+  - 首页："无彩色图标或emoji；Logo为黑白单色边框；标题为衬线字体；快捷主题按钮只有文字；整体专业学术平面" ✅
+  - 更多功能悬停："悬停行有柔和圆角高亮方框；高亮有淡入过渡；平面不僵硬" ✅
+  - 成就系统："无emoji或彩色徽章；已解锁角标已移除；整体黑白学术风" ✅
+  - 学习统计："顶部连续学习卡片无火焰图标或emoji；整体克制黑白学术风；无彩色残留" ✅
+  - 知识图谱："掌握状态用对勾；重要度用数字；整体学术平面风" ✅
+  - 会话界面："MindGuide品牌为衬线字体+黑白边框；头像单色；整体专业学术平面" ✅
+  - AI 新回复："最新AI回复无emoji；为克制书面语" ✅（旧消息含emoji是历史缓存，新提示词已生效）
+
+### 当前项目状态
+- Dev server 稳定运行 (PID 7381, port 3000)
+- UI 风格统一：衬线标题 + 中性灰阶 + 边框 + 无 emoji/彩色/表现符号
+- 真流式 SSE + 思考气泡 + 成就解锁 toast + 键盘快捷键 全部工作
+
+### 未解决问题 / 下一阶段建议
+1. **【中】历史消息残留 emoji**：旧 AI 回复含 emoji 仍显示在对话历史中，可考虑加一个客户端 sanitize 过滤（可选，保留历史真实性）
+2. **【中】笔记/课程持久化**：已部分实现（notes 有 DB 模型），课程仍需补 Prisma 模型
+3. **【低】认证系统**：NextAuth.js v4
+4. **【低】daemonize.py watchdog**：端口健康检查 + 自动重启
+
+### 关键文件变更清单
+- `src/components/learning/create-new-panel.tsx` — 悬停分层动画重写
+- `src/components/learning/main-content.tsx` — WelcomeView 学术化（衬线+黑白logo+无emoji主题）
+- `src/components/learning/feature-views.tsx` — 成就/统计/知识图谱移除 emoji+彩色
+- `src/components/learning/sidebar.tsx` — 品牌衬线+边框
+- `src/components/learning/tiptap-editor.tsx` — 保存状态中性化
+- `src/app/api/chat/route.ts` — 系统提示词禁用 emoji
+- `src/store/learning-store.ts` — 成就 toast 中性化

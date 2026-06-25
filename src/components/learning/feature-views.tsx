@@ -399,7 +399,7 @@ function AchievementsView() {
               <div className="flex-1">
                 <p className="text-[14px] font-semibold text-neutral-900 dark:text-neutral-100">{unlockedCount}/{achievements.length} 成就</p>
                 <p className="text-[12px] text-neutral-500 dark:text-neutral-400">
-                  {isLoadingStats ? '统计中...' : (unlockedCount === achievements.length ? '🏆 全部解锁！恭喜！' : '继续学习来解锁更多成就')}
+                  {isLoadingStats ? '统计中...' : (unlockedCount === achievements.length ? '全部解锁' : '继续学习来解锁更多成就')}
                 </p>
               </div>
               <div className="flex flex-col items-end gap-0.5 text-right">
@@ -438,16 +438,6 @@ function AchievementsView() {
                         : 'bg-neutral-100 text-neutral-400 dark:bg-neutral-800 dark:text-neutral-500'
                     }`}>
                       {ach.unlocked ? <Icon className="h-5 w-5" /> : <Lock className="h-4 w-4" />}
-                      {ach.unlocked && (
-                        <motion.span
-                          initial={{ scale: 0, rotate: -45 }}
-                          animate={{ scale: 1, rotate: 0 }}
-                          transition={{ delay: 0.2, type: 'spring', stiffness: 400, damping: 18 }}
-                          className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-500 text-white"
-                        >
-                          <Check className="h-2 w-2" strokeWidth={4} />
-                        </motion.span>
-                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className={`text-[13px] font-medium ${ach.unlocked ? 'text-neutral-900 dark:text-neutral-100' : 'text-neutral-500 dark:text-neutral-400'}`}>
@@ -457,7 +447,7 @@ function AchievementsView() {
                     </div>
                     <div className="shrink-0">
                       {ach.unlocked ? (
-                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">✓ 已解锁</span>
+                        <span className="rounded-full border border-neutral-200 px-2 py-0.5 text-[11px] font-medium text-neutral-600 dark:border-neutral-700 dark:text-neutral-400">已解锁</span>
                       ) : (
                         <div className="flex items-center gap-2">
                           <div className="h-1.5 w-20 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
@@ -528,17 +518,9 @@ function StatsView() {
                   <span className="text-[13px] text-neutral-500 dark:text-neutral-400">天</span>
                 </div>
                 <p className="mt-1.5 text-[11px] text-neutral-400">
-                  {(stats?.currentStreak ?? 0) >= 3 ? '🔥 保持下去！' : '继续学习来培养习惯'}
+                  {(stats?.currentStreak ?? 0) >= 3 ? '保持下去' : '继续学习来培养习惯'}
                 </p>
               </div>
-              <motion.div
-                initial={{ scale: 0, rotate: -30 }}
-                animate={{ scale: 1, rotate: 0 }}
-                transition={{ delay: 0.25, type: 'spring', stiffness: 200, damping: 15 }}
-                className="flex h-14 w-14 items-center justify-center rounded-2xl bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
-              >
-                <Flame className="h-7 w-7" />
-              </motion.div>
             </div>
           </motion.div>
 
@@ -558,7 +540,7 @@ function StatsView() {
                     <s.icon className={`h-5 w-5 ${s.color}`} />
                   </div>
                   {'sub' in s && s.sub && (
-                    <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                    <span className="rounded-full border border-neutral-200 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600 dark:border-neutral-700 dark:text-neutral-400">
                       {s.sub}
                     </span>
                   )}
@@ -655,19 +637,19 @@ function KnowledgeGraphView() {
                         : 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900'
                     }`}
                   >
-                    <div className={`flex h-8 w-8 items-center justify-center rounded-lg text-[10px] font-bold ${
+                    <div className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
                       node.mastered
-                        ? 'bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-300'
-                        : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+                        ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
+                        : 'border border-neutral-200 text-neutral-400 dark:border-neutral-700'
                     }`}>
-                      {node.mastered ? '✓' : '○'}
+                      {node.mastered ? <Check className="h-4 w-4" strokeWidth={2.5} /> : <span className="text-[12px] leading-none">·</span>}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="truncate text-[13px] font-medium text-neutral-700 dark:text-neutral-200">{node.title}</p>
                       {node.category && <p className="text-[11px] text-neutral-400">{node.category}</p>}
                     </div>
-                    <div className="text-[11px] text-neutral-400">
-                      重要度 {'●'.repeat(Math.min(node.importance, 5))}{'○'.repeat(Math.max(5 - node.importance, 0))}
+                    <div className="text-[11px] text-neutral-400 tabular-nums">
+                      重要度 {node.importance}/5
                     </div>
                   </motion.div>
                 ))}

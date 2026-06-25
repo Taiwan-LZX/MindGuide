@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MoreVertical, BookOpen, GraduationCap, Sparkles, Send, Square, ArrowDown } from 'lucide-react';
+import { MoreVertical, BookOpen, GraduationCap, Send, Square } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 import { KnowledgeInline } from '@/components/learning/knowledge-inline';
 import { MarkdownRenderer, CopyAllButton } from '@/components/learning/markdown-renderer';
@@ -149,7 +149,7 @@ export function MainContent() {
                 {streamingContent ? (
                   <>
                     <motion.div
-                      className="h-1.5 w-1.5 rounded-full bg-emerald-400"
+                      className="h-1.5 w-1.5 rounded-full bg-neutral-500"
                       animate={{ opacity: [1, 0.3, 1] }}
                       transition={{ repeat: Infinity, duration: 0.9 }}
                     />
@@ -193,7 +193,7 @@ export function MainContent() {
                 className="py-20 text-center"
               >
                 <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-100 dark:bg-neutral-800">
-                  <Sparkles className="h-5 w-5 text-neutral-400 dark:text-neutral-500" />
+                  <BookOpen className="h-5 w-5 text-neutral-400 dark:text-neutral-500" strokeWidth={1.5} />
                 </div>
                 <p className="text-[14px] text-neutral-400">
                   开始和 AI 交流，聊聊你想学什么
@@ -450,11 +450,11 @@ function WelcomeView() {
   const [topicInput, setTopicInput] = useState('');
 
   const topics = [
-    { label: '机器学习基础', icon: '🧠' },
-    { label: 'JavaScript 异步', icon: '⚡' },
-    { label: '数据结构与算法', icon: '🏗' },
-    { label: '设计模式', icon: '🎨' },
-    { label: '计算机网络', icon: '🌐' },
+    '机器学习基础',
+    'JavaScript 异步',
+    '数据结构与算法',
+    '设计模式',
+    '计算机网络',
   ];
 
   const handleSubmit = useCallback(async (value?: string) => {
@@ -468,24 +468,24 @@ function WelcomeView() {
     <div className="flex h-full flex-1 flex-col overflow-y-auto custom-scrollbar">
       <div className="flex flex-1 flex-col items-center justify-center px-8 py-12">
         <div className="w-full max-w-[560px] text-center">
-          {/* Logo */}
+          {/* Mark — a quiet monochrome wordmark instead of a colored logo */}
           <motion.div
             custom={0}
             variants={welcomeVariants}
             initial="hidden"
             animate="visible"
-            className="mb-8 mx-auto flex h-[56px] w-[56px] items-center justify-center rounded-[20px] bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/20"
+            className="mx-auto mb-8 flex h-[56px] w-[56px] items-center justify-center rounded-[20px] border border-neutral-200 bg-white text-neutral-800 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
           >
-            <GraduationCap className="h-7 w-7" strokeWidth={1.8} />
+            <GraduationCap className="h-7 w-7" strokeWidth={1.5} />
           </motion.div>
 
-          {/* Title */}
+          {/* Title — serif, scholarly */}
           <motion.h1
             custom={1}
             variants={welcomeVariants}
             initial="hidden"
             animate="visible"
-            className="mb-3 text-[28px] font-semibold tracking-tight text-neutral-900 dark:text-neutral-100"
+            className="mb-3 font-serif text-[30px] font-medium tracking-tight text-neutral-900 dark:text-neutral-100"
           >
             MindGuide
           </motion.h1>
@@ -495,12 +495,12 @@ function WelcomeView() {
             variants={welcomeVariants}
             initial="hidden"
             animate="visible"
-            className="mb-10 text-[15px] leading-relaxed text-neutral-400"
+            className="mb-10 text-[14px] leading-relaxed text-neutral-500 dark:text-neutral-400"
           >
             输入一个学习主题，开始你的 AI 学习之旅
           </motion.p>
 
-          {/* Simple topic input */}
+          {/* Topic input */}
           <motion.div
             custom={3}
             variants={welcomeVariants}
@@ -533,7 +533,7 @@ function WelcomeView() {
             </div>
           </motion.div>
 
-          {/* Quick Start Topics */}
+          {/* Quick Start — text-only suggestions, no icons */}
           <motion.div
             custom={4}
             variants={welcomeVariants}
@@ -551,20 +551,19 @@ function WelcomeView() {
             animate="visible"
             className="flex flex-wrap justify-center gap-2.5"
           >
-            {topics.map((t, i) => (
+            {topics.map((label, i) => (
               <motion.button
-                key={t.label}
+                key={label}
                 custom={6 + i}
                 variants={welcomeVariants}
                 initial="hidden"
                 animate="visible"
-                whileHover={{ scale: 1.04, y: -2 }}
-                whileTap={{ scale: 0.96 }}
-                onClick={() => createSession(t.label)}
-                className="group flex items-center gap-2 rounded-full border border-neutral-200/80 bg-white/70 px-4 py-2 text-[13px] text-neutral-500 backdrop-blur-sm transition-all duration-200 hover:border-neutral-300 hover:bg-white hover:text-neutral-700 hover:shadow-sm dark:border-neutral-700/60 dark:bg-neutral-900/60 dark:text-neutral-400 dark:hover:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={() => createSession(label)}
+                className="rounded-md border border-neutral-200/80 bg-white/70 px-3.5 py-1.5 text-[13px] text-neutral-600 transition-colors duration-200 hover:border-neutral-300 hover:bg-white hover:text-neutral-900 dark:border-neutral-700/60 dark:bg-neutral-900/60 dark:text-neutral-400 dark:hover:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
               >
-                <span className="text-[14px]">{t.icon}</span>
-                <span>{t.label}</span>
+                {label}
               </motion.button>
             ))}
           </motion.div>

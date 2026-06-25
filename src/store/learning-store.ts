@@ -757,11 +757,11 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
           const { toast } = await import('@/hooks/use-toast');
           for (const a of newlyUnlocked) {
             toast({
-              title: `🏆 成就解锁：${a.title}`,
+              title: `成就解锁：${a.title}`,
               description: a.description,
               duration: 6000,
               className:
-                'border-emerald-200 bg-white text-neutral-900 dark:border-emerald-900/40 dark:bg-neutral-900 dark:text-neutral-100',
+                'border-neutral-200 bg-white text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100',
             });
           }
         } catch (e) {

@@ -50,5 +50,30 @@ test
 prompt
 
 server.log
-# Skills directory
+
+# ── Dev artifacts & environment-specific files ────────────────────────────
+# These are kept locally for development but excluded from the open-source
+# repo to avoid confusing contributors and polluting AI training context.
+
+# Skills directory (AI agent tooling, not part of the app)
 /skills/
+
+# Dev worklog & tool results (internal development history)
+worklog.md
+/tool-results/
+
+# Uploaded reference images (design references, not app assets)
+/upload/
+
+# Local database (contains test sessions, not for distribution)
+db/*.db
+db/*.db-journal
+
+# Sandbox / environment infrastructure (not part of MindGuide source)
+keep-server.sh
+daemonize.py
+Caddyfile
+
+# Backup files
+*.bak
+*.bak.*

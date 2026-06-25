@@ -166,13 +166,20 @@ export function MouseFollowTooltip({
                 ref={tipRef}
                 role="tooltip"
                 initial={{ opacity: 0, scale: 0.94 }}
-                animate={{ opacity: 1, scale: 1 }}
+                animate={{ opacity: 1, scale: 1, x: pos.x, y: pos.y }}
                 exit={{ opacity: 0, scale: 0.94 }}
-                transition={{ duration: 0.12, ease: [0.25, 0.1, 0.25, 1] }}
+                transition={{
+                  opacity: { duration: 0.12, ease: [0.25, 0.1, 0.25, 1] },
+                  scale: { duration: 0.12, ease: [0.25, 0.1, 0.25, 1] },
+                  // Liquid follow: fast spring settles in ~90ms, no perceptible
+                  // lag but feels organic rather than rigidly glued to cursor.
+                  x: { type: 'spring', stiffness: 600, damping: 36, mass: 0.6 },
+                  y: { type: 'spring', stiffness: 600, damping: 36, mass: 0.6 },
+                }}
                 style={{
                   position: 'fixed',
-                  left: pos.x,
-                  top: pos.y,
+                  top: 0,
+                  left: 0,
                   maxWidth,
                   pointerEvents: 'none',
                   zIndex: 100,

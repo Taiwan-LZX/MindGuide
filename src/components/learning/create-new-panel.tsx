@@ -75,16 +75,13 @@ function FeatureRow({
   feature,
   index,
   onClick,
-  boundaryRef,
 }: {
   feature: (typeof features)[number];
   index: number;
   onClick: () => void;
-  boundaryRef?: React.RefObject<HTMLElement>;
 }) {
   return (
     <MouseFollowTooltip
-      boundaryRef={boundaryRef}
       maxWidth={240}
       content={
         <span className="block text-neutral-600 dark:text-neutral-300">
@@ -231,7 +228,6 @@ export function MoreFeaturesPanel() {
                 key={feature.id}
                 feature={feature}
                 index={i + 1}
-                boundaryRef={panelRef}
                 onClick={() => setActiveFeatureView(feature.id)}
               />
             ))}

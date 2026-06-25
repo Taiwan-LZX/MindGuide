@@ -1,9 +1,11 @@
 'use client';
 
-import React from 'react';
+import React, { useSyncExternalStore } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, X, Trash2, PanelLeft, Columns2, Maximize2 } from 'lucide-react';
+import { Plus, X, Trash2, PanelLeft, Columns2, Maximize2, Sun, Moon, Monitor } from 'lucide-react';
+import { useTheme } from 'next-themes';
 import { useLearningStore } from '@/store/learning-store';
+import { usePreferences } from '@/store/preferences-store';
 
 // ─── Design Tokens (from reference image) ──────────────────────────────────
 const TOKENS = {
@@ -163,6 +165,108 @@ function ActionRow({
   );
 }
 
+// ─── Appearance Section (embedded in Settings Panel) ──────────────────────
+// Groups the two appearance prefs — theme (light/dark/system) and motion
+// (on/off) — into a single inline section. This is the same content the old
+// standalone AppearanceButton popover exposed, now folded into the three-dot
+// menu so there is a single, consistent entry point for display preferences.
+
+// SSR-safe mounted flag (no setState-in-render). next-themes returns undefined
+// until hydrated; we only render the active-theme highlight after mount to
+// avoid a hydration mismatch.
+const emptySubscribe = () => () => {};
+const getTrue = () => true;
+const getFalse = () => false;
+
+const themeOptions = [
+  { value: 'light', label: '浅色', icon: Sun },
+  { value: 'dark', label: '深色', icon: Moon },
+  { value: 'system', label: '系统', icon: Monitor },
+] as const;
+
+function AppearanceSection() {
+  const { theme, setTheme, resolvedTheme } = useTheme();
+  const { motionEnabled, setMotionEnabled } = usePreferences();
+  const mounted = useSyncExternalStore(emptySubscribe, getTrue, getFalse);
+
+  const isDark = mounted && resolvedTheme === 'dark';
+  // Fall back to resolvedTheme before mount so the segmented control still
+  // shows a sensible selection (avoids an empty highlight on first paint).
+  const activeTheme = theme ?? (isDark ? 'dark' : 'light');
+
+  return (
+    <motion.div
+      custom={1}
+      variants={itemVariants}
+      initial="hidden"
+      animate="visible"
+      className="bg-[#FAFAF8] px-5 py-4 dark:bg-[#242426]"
+    >
+      {/* Theme segmented control */}
+      <div className="mb-3.5">
+        <div className="mb-2 flex items-center gap-1.5">
+          <span className="text-[12px] font-medium text-neutral-600 dark:text-neutral-300">主题</span>
+          <span className="text-[11px] text-neutral-400 dark:text-neutral-500">· 色彩模式</span>
+        </div>
+        <div className="flex gap-1 rounded-lg bg-neutral-100 p-1 dark:bg-neutral-800/80">
+          {themeOptions.map(opt => {
+            const selected = activeTheme === opt.value;
+            const OptIcon = opt.icon;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setTheme(opt.value)}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] font-medium transition-colors duration-200 ${
+                  selected
+                    ? 'bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-50'
+                    : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200'
+                }`}
+              >
+                <OptIcon className="h-3.5 w-3.5" />
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Motion toggle */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[12px] font-medium text-neutral-600 dark:text-neutral-300">动态效果</span>
+            <span className="text-[11px] text-neutral-400 dark:text-neutral-500">· 动画与过渡</span>
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-neutral-400 dark:text-neutral-500">
+            关闭后界面动画即时完成，减少视觉波动
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={motionEnabled}
+          aria-label="切换动态效果"
+          onClick={() => setMotionEnabled(!motionEnabled)}
+          className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${
+            motionEnabled
+              ? 'bg-neutral-900 dark:bg-neutral-100'
+              : 'bg-neutral-200 dark:bg-neutral-700'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 h-4 w-4 rounded-full shadow-sm transition-transform duration-200 ${
+              motionEnabled
+                ? 'translate-x-4 bg-white dark:bg-neutral-900'
+                : 'translate-x-0.5 bg-white dark:bg-neutral-300'
+            }`}
+          />
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── Settings Panel ────────────────────────────────────────────────────────
 
 export function SettingsPanel() {
@@ -217,7 +321,7 @@ export function SettingsPanel() {
             initial="hidden"
             animate="visible"
             exit="exit"
-            className={`fixed right-1.5 top-1 z-[50] w-[280px] overflow-hidden ${TOKENS.panelRound} ${TOKENS.panelBorder} ${TOKENS.panelBg} ${TOKENS.panelShadow}`}
+            className={`fixed right-1.5 top-1 z-[50] w-[300px] overflow-hidden ${TOKENS.panelRound} ${TOKENS.panelBorder} ${TOKENS.panelBg} ${TOKENS.panelShadow}`}
           >
             {/* Header — cream/warm tone like reference */}
             <div className={`flex items-center justify-between px-5 py-3.5 ${TOKENS.headerBg}`}>
@@ -263,6 +367,13 @@ export function SettingsPanel() {
                 />
               </motion.div>
             </div>
+
+            {/* Divider */}
+            <div className={`mx-5 h-px ${TOKENS.divider}`} />
+
+            {/* Appearance — theme + motion, folded in from the old sidebar
+                AppearanceButton so the three-dot menu is the single entry point. */}
+            <AppearanceSection />
 
             {/* Divider */}
             <div className={`mx-5 h-px ${TOKENS.divider}`} />

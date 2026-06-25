@@ -197,14 +197,17 @@ export function MainContent() {
             </motion.button>
           </MouseFollowTooltip>
 
-          <motion.button
-            whileHover={{ scale: 1.08 }}
-            whileTap={{ scale: 0.92 }}
-            onClick={() => useLearningStore.getState().setSettingsPanelOpen(!useLearningStore.getState().settingsPanelOpen)}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
-          >
-            <MoreVertical className="h-4 w-4" />
-          </motion.button>
+          <MouseFollowTooltip content="显示选项 · 主题与动态效果">
+            <motion.button
+              whileHover={{ scale: 1.08 }}
+              whileTap={{ scale: 0.92 }}
+              onClick={() => useLearningStore.getState().setSettingsPanelOpen(!useLearningStore.getState().settingsPanelOpen)}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+              aria-label="显示选项"
+            >
+              <MoreVertical className="h-4 w-4" />
+            </motion.button>
+          </MouseFollowTooltip>
         </div>
       </div>
 
@@ -545,6 +548,7 @@ function MsgBubble({ msg }: { msg: { role: string; content: string; createdAt: s
 
 function WelcomeView() {
   const { createSession, sendMessage } = useLearningStore();
+  const setSettingsPanelOpen = useLearningStore(s => s.setSettingsPanelOpen);
   const [topicInput, setTopicInput] = useState('');
 
   const topics = [
@@ -569,8 +573,25 @@ function WelcomeView() {
   }, [topicInput, createSession, sendMessage]);
 
   return (
-    <div className="flex h-full flex-1 flex-col overflow-y-auto custom-scrollbar">
-      <div className="flex flex-1 flex-col items-center justify-center px-8 py-12">
+    <div className="flex h-full flex-1 flex-col overflow-hidden">
+      {/* Top bar — mirrors the chat header so the three-dot entry (显示选项:
+          布局 / 主题 / 动态效果 / 会话操作) lives in the same spot on the
+          welcome screen and inside a conversation. */}
+      <div className="flex h-14 shrink-0 items-center justify-end px-6">
+        <MouseFollowTooltip content="显示选项 · 主题与动态效果">
+          <motion.button
+            whileHover={{ scale: 1.08 }}
+            whileTap={{ scale: 0.92 }}
+            onClick={() => setSettingsPanelOpen(true)}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+            aria-label="显示选项"
+          >
+            <MoreVertical className="h-4 w-4" />
+          </motion.button>
+        </MouseFollowTooltip>
+      </div>
+
+      <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto custom-scrollbar px-8 py-12">
         <div className="w-full max-w-[560px] text-center">
           {/* Mark — a quiet monochrome wordmark instead of a colored logo */}
           <motion.div

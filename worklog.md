@@ -730,3 +730,27 @@ GET /api/sessions/[id]/messages 200 in 55ms  (re-fetch after AI response)
 - `src/components/learning/main-content.tsx` — Welcome Piaget 题记
 - `src/app/layout.tsx` — Lora 字体引入
 - `src/app/globals.css` — --font-serif 字体栈修正
+
+---
+Task ID: UI-COSMOS-INPUT
+Agent: main (Z.ai Code)
+Task: 参照 cosmos.so 参考图 (https://www.cosmos.so/e/743835149) 复刻主页主输入框 UI，移除多余图标，简洁整洁突出主输入框，并统一其他相关输入框风格
+
+Work Log:
+- 用 agent-browser 打开参考图 + VLM 分析其设计语言：纯白底、1px 浅灰描边、极淡阴影、胶囊形搜索框 / 12px 圆角 composer、无衬线、右侧仅保留必要发送钮
+- 截图当前主页，VLM 比对：原主输入框为 rounded-xl + 左侧 BookOpen 图标 + 右侧方形 Send 钮，偏拥挤
+- 设计决策：保留中性黑配色（不引入 cosmos 蓝色，与全站学术极简风一致）；发送钮用 ArrowUp（比纸飞机更干净，符合现代 AI 对话惯例）
+- main-content.tsx 三处编辑：
+  1. imports: `Send` → `ArrowUp`
+  2. WelcomeView 主输入框 (line 608-631)：rounded-full 胶囊、bg-white、pl-6 pr-2.5 py-2.5、shadow-sm、聚焦时 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.12)]、移除 BookOpen 左图标、text-[15px]、圆形 h-9 w-9 ArrowUp 发送钮（激活 neutral-900 / 禁用 neutral-100）
+  3. SimpleChatInput composer (line 416, 449-456)：rounded-2xl、bg-white、py-2.5、同款聚焦柔光、发送钮 rounded-full + ArrowUp
+- `bun run lint` 零错误零警告
+- agent-browser 验证：reload → 截图 → VLM 确认主输入框为干净胶囊形、无左侧图标残留、圆形 ArrowUp 发送钮；填入"光合作用原理"→ 发送钮变深色激活态 → 点击创建会话成功 (POST /api/sessions 200) → 对话 composer 同款白底圆角风格
+- dev.log 全 200，无运行时错误
+
+Stage Summary:
+- 主页主输入框已改造为 cosmos 风格胶囊 hero：纯白底 + 柔阴影 + 圆形 ArrowUp 发送钮，移除左侧 BookOpen 图标，聚焦时柔光晕开
+- 对话 composer 统一为同款白底 12px 圆角 + 圆形 ArrowUp 发送钮
+- 全站中性黑配色保持一致，未引入蓝色
+- 已通过 lint + agent-browser + VLM 端到端验证
+- 待与用户讨论：发送钮图标是否需改回纸飞机 (Send)、是否需要进一步放大 hero 输入框、是否给 hero 加更多 cosmos 风格细节（如左侧极淡的引导词）

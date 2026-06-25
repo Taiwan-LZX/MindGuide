@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MoreVertical, BookOpen, GraduationCap, Send, Square, ArrowDown, Copy, Check } from 'lucide-react';
+import { MoreVertical, BookOpen, GraduationCap, ArrowUp, Square, ArrowDown, Copy, Check } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 import { KnowledgeInline } from '@/components/learning/knowledge-inline';
 import { MarkdownRenderer } from '@/components/learning/markdown-renderer';
@@ -413,7 +413,7 @@ function SimpleChatInput({
   const canSend = value.trim().length > 0 && !isStreaming;
 
   return (
-    <div className="flex items-end gap-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 transition-colors focus-within:border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 dark:focus-within:border-neutral-600">
+    <div className="flex items-end gap-2 rounded-2xl border border-neutral-200 bg-white px-3 py-2.5 shadow-sm transition-all duration-200 focus-within:border-neutral-300 focus-within:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.12)] dark:border-neutral-800 dark:bg-neutral-900 dark:focus-within:border-neutral-600">
       <textarea
         ref={textareaRef}
         value={value}
@@ -422,7 +422,7 @@ function SimpleChatInput({
         placeholder={placeholder}
         disabled={isStreaming}
         rows={1}
-        className="flex-1 resize-none border-0 bg-transparent py-1 text-[14px] leading-relaxed text-neutral-800 placeholder:text-neutral-400 focus:outline-none disabled:opacity-50 dark:text-neutral-200 dark:placeholder:text-neutral-500"
+        className="flex-1 resize-none border-0 bg-transparent py-1.5 text-[14px] leading-relaxed text-neutral-800 placeholder:text-neutral-400 focus:outline-none disabled:opacity-50 dark:text-neutral-200 dark:placeholder:text-neutral-500"
       />
       <AnimatePresence mode="wait">
         {isStreaming ? (
@@ -446,13 +446,14 @@ function SimpleChatInput({
             whileTap={{ scale: 0.9 }}
             onClick={canSend ? onSend : undefined}
             disabled={!canSend}
-            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+            aria-label="发送"
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-200 ${
               canSend
                 ? 'bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100'
-                : 'bg-neutral-200 text-neutral-400 dark:bg-neutral-700 dark:text-neutral-500'
+                : 'bg-neutral-100 text-neutral-300 dark:bg-neutral-800 dark:text-neutral-600'
             }`}
           >
-            <Send className="h-3.5 w-3.5" />
+            <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
           </motion.button>
         )}
       </AnimatePresence>
@@ -605,27 +606,28 @@ function WelcomeView() {
             animate="visible"
             className="mb-10"
           >
-            <div className="mx-auto flex items-center gap-2 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 transition-colors focus-within:border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 dark:focus-within:border-neutral-600">
-              <BookOpen className="h-4 w-4 shrink-0 text-neutral-400" />
+            <div className="mx-auto flex items-center gap-3 rounded-full border border-neutral-200 bg-white py-2.5 pl-6 pr-2.5 shadow-sm transition-all duration-200 focus-within:border-neutral-300 focus-within:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.12)] dark:border-neutral-800 dark:bg-neutral-900 dark:focus-within:border-neutral-600">
               <input
                 type="text"
                 value={topicInput}
                 onChange={e => setTopicInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') handleSubmit(); }}
                 placeholder="输入你想学的主题..."
-                className="flex-1 border-0 bg-transparent py-0.5 text-[14px] text-neutral-800 placeholder:text-neutral-400 focus:outline-none dark:text-neutral-200 dark:placeholder:text-neutral-500"
+                aria-label="学习主题"
+                className="flex-1 border-0 bg-transparent text-[15px] text-neutral-800 placeholder:text-neutral-400 focus:outline-none dark:text-neutral-200 dark:placeholder:text-neutral-500"
               />
               <motion.button
                 whileTap={{ scale: 0.9 }}
                 onClick={() => handleSubmit()}
                 disabled={!topicInput.trim()}
-                className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+                aria-label="开始学习"
+                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-200 ${
                   topicInput.trim()
                     ? 'bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900'
-                    : 'bg-neutral-200 text-neutral-400 dark:bg-neutral-700 dark:text-neutral-500'
+                    : 'bg-neutral-100 text-neutral-300 dark:bg-neutral-800 dark:text-neutral-600'
                 }`}
               >
-                <Send className="h-3.5 w-3.5" />
+                <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
               </motion.button>
             </div>
           </motion.div>

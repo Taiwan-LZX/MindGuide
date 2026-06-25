@@ -1,0 +1,689 @@
+     1→'use client';
+     2→
+     3→import React, { useState, useRef, useEffect, useCallback } from 'react';
+     4→import { motion, AnimatePresence } from 'framer-motion';
+     5→import { MoreVertical, BookOpen, GraduationCap, Send, Square, ArrowDown, Copy, Check } from 'lucide-react';
+     6→import { useLearningStore } from '@/store/learning-store';
+     7→import { KnowledgeInline } from '@/components/learning/knowledge-inline';
+     8→import { MarkdownRenderer } from '@/components/learning/markdown-renderer';
+     9→import { MouseFollowTooltip } from '@/components/learning/mouse-follow-tooltip';
+    10→
+    11→// ─── Helpers ──────────────────────────────────────────────────────────────────
+    12→
+    13→function fmtDate(d: string) {
+    14→  const now = new Date();
+    15→  const date = new Date(d);
+    16→  if (date.toDateString() === now.toDateString()) return '今天';
+    17→  const y = new Date(now); y.setDate(y.getDate() - 1);
+    18→  if (date.toDateString() === y.toDateString()) return '昨天';
+    19→  return date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' });
+    20→}
+    21→
+    22→// ─── Animation Variants ─────────────────────────────────────────────────────
+    23→
+    24→const msgVariants = {
+    25→  hidden: { opacity: 0, y: 12, scale: 0.97 },
+    26→  visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] } },
+    27→};
+    28→
+    29→const dateSepVariants = {
+    30→  hidden: { opacity: 0, scale: 0.9 },
+    31→  visible: { opacity: 1, scale: 1, transition: { duration: 0.25 } },
+    32→};
+    33→
+    34→const streamingBubbleVariants = {
+    35→  hidden: { opacity: 0, y: 8 },
+    36→  visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] } },
+    37→  exit: { opacity: 0, y: -4, transition: { duration: 0.15 } },
+    38→};
+    39→
+    40→const emptyStateVariants = {
+    41→  hidden: { opacity: 0, y: 10 },
+    42→  visible: { opacity: 1, y: 0, transition: { delay: 0.15, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] } },
+    43→};
+    44→
+    45→const knowledgeVariants = {
+    46→  hidden: { opacity: 0, y: 16, scale: 0.98 },
+    47→  visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.35, ease: [0.25, 0.1, 0.25, 1] } },
+    48→};
+    49→
+    50→const welcomeVariants = {
+    51→  hidden: { opacity: 0, y: 20 },
+    52→  visible: (i: number) => ({
+    53→    opacity: 1,
+    54→    y: 0,
+    55→    transition: { delay: 0.08 * i, duration: 0.45, ease: [0.25, 0.1, 0.25, 1] },
+    56→  }),
+    57→};
+    58→
+    59→// ─── Component ───────────────────────────────────────────────────────────────
+    60→
+    61→export function MainContent() {
+    62→  const {
+    63→    currentSessionId,
+    64→    sessions,
+    65→    messages,
+    66→    isLoadingMessages,
+    67→    isStreaming,
+    68→    streamingContent,
+    69→    knowledgeNodes,
+    70→    sendMessage,
+    71→    setCoursePanelOpen,
+    72→    coursePanelOpen,
+    73→    isCourseGenerated,
+    74→  } = useLearningStore();
+    75→
+    76→  const [input, setInput] = useState('');
+    77→  const [showScrollBottom, setShowScrollBottom] = useState(false);
+    78→  const bottomRef = useRef<HTMLDivElement>(null);
+    79→  const scrollContainerRef = useRef<HTMLDivElement>(null);
+    80→
+    81→  const session = sessions.find(s => s.id === currentSessionId);
+    82→
+    83→  // Scroll to bottom
+    84→  useEffect(() => {
+    85→    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    86→  }, [messages, streamingContent]);
+    87→
+    88→  // Track whether the user has scrolled up from the bottom
+    89→  const handleScroll = useCallback(() => {
+    90→    const el = scrollContainerRef.current;
+    91→    if (!el) return;
+    92→    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    93→    setShowScrollBottom(distFromBottom > 200);
+    94→  }, []);
+    95→
+    96→  const scrollToBottom = useCallback(() => {
+    97→    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    98→  }, []);
+    99→
+   100→  const handleSend = useCallback(async () => {
+   101→    const t = input.trim();
+   102→    if (!t || isStreaming) return;
+   103→    setInput('');
+   104→    await sendMessage(t);
+   105→  }, [input, isStreaming, sendMessage]);
+   106→
+   107→  const handleStop = useCallback(() => {
+   108→    useLearningStore.setState({ isStreaming: false, streamingContent: '' });
+   109→  }, []);
+   110→
+   111→  // ── No session selected: welcome screen ──
+   112→  if (!currentSessionId) {
+   113→    return <WelcomeView />;
+   114→  }
+   115→
+   116→  // ── Loading ──
+   117→  if (isLoadingMessages) {
+   118→    return (
+   119→      <div className="flex h-full items-center justify-center">
+   120→        <motion.div
+   121→          className="h-5 w-5 rounded-full border-2 border-neutral-300 border-t-neutral-900 dark:border-neutral-600 dark:border-t-neutral-200"
+   122→          animate={{ rotate: 360 }}
+   123→          transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}
+   124→        />
+   125→      </div>
+   126→    );
+   127→  }
+   128→
+   129→  const userMsgCount = messages.filter(m => m.role === 'user').length;
+   130→  const lastMsgRole = messages[messages.length - 1]?.role;
+   131→
+   132→  // ── Chat view ──
+   133→  return (
+   134→    <div className="relative flex h-full flex-1 flex-col">
+   135→      {/* Chat header */}
+   136→      <div className="relative z-[41] flex h-14 shrink-0 items-center justify-between border-b border-neutral-200 px-6 dark:border-neutral-800">
+   137→        <div className="min-w-0">
+   138→          <h1 className="truncate text-[15px] font-medium text-neutral-900 dark:text-neutral-100">
+   139→            {session?.title || '学习中'}
+   140→          </h1>
+   141→          <p className="text-[12px] text-neutral-400">{userMsgCount} 条对话</p>
+   142→        </div>
+   143→        <div className="flex items-center gap-1">
+   144→          <AnimatePresence mode="wait">
+   145→            {isStreaming && (
+   146→              <motion.div
+   147→                key="streaming-indicator"
+   148→                initial={{ opacity: 0, x: 8 }}
+   149→                animate={{ opacity: 1, x: 0 }}
+   150→                exit={{ opacity: 0, x: 8 }}
+   151→                className="flex items-center gap-1.5 px-2 text-[12px] text-neutral-400"
+   152→              >
+   153→                {streamingContent ? (
+   154→                  <>
+   155→                    <motion.div
+   156→                      className="h-1.5 w-1.5 rounded-full bg-neutral-500"
+   157→                      animate={{ opacity: [1, 0.3, 1] }}
+   158→                      transition={{ repeat: Infinity, duration: 0.9 }}
+   159→                    />
+   160→                    回复中
+   161→                  </>
+   162→                ) : (
+   163→                  <>
+   164→                    <motion.div
+   165→                      className="h-1.5 w-1.5 rounded-full bg-neutral-400"
+   166→                      animate={{ scale: [1, 1.3, 1], opacity: [1, 0.5, 1] }}
+   167→                      transition={{ repeat: Infinity, duration: 1.2 }}
+   168→                    />
+   169→                    思考中
+   170→                  </>
+   171→                )}
+   172→              </motion.div>
+   173→            )}
+   174→          </AnimatePresence>
+   175→
+   176→          {/* Course trigger — opens the course panel. Shows a tiny dot when a
+   177→              course has been generated for this session, so the user knows
+   178→              there's content to review. */}
+   179→          <MouseFollowTooltip
+   180→            content={isCourseGenerated ? '查看本主题的结构化课程' : '生成结构化课程'}
+   181→          >
+   182→            <motion.button
+   183→              whileHover={{ scale: 1.08 }}
+   184→              whileTap={{ scale: 0.92 }}
+   185→              onClick={() => setCoursePanelOpen(!coursePanelOpen)}
+   186→              className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+   187→                coursePanelOpen
+   188→                  ? 'bg-neutral-100 text-neutral-800 dark:bg-neutral-800 dark:text-neutral-100'
+   189→                  : 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300'
+   190→              }`}
+   191→              aria-label="课程"
+   192→            >
+   193→              <BookOpen className="h-4 w-4" />
+   194→              {isCourseGenerated && !coursePanelOpen && (
+   195→                <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-neutral-700 dark:bg-neutral-300" />
+   196→              )}
+   197→            </motion.button>
+   198→          </MouseFollowTooltip>
+   199→
+   200→          <motion.button
+   201→            whileHover={{ scale: 1.08 }}
+   202→            whileTap={{ scale: 0.92 }}
+   203→            onClick={() => useLearningStore.getState().setSettingsPanelOpen(!useLearningStore.getState().settingsPanelOpen)}
+   204→            className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+   205→          >
+   206→            <MoreVertical className="h-4 w-4" />
+   207→          </motion.button>
+   208→        </div>
+   209→      </div>
+   210→
+   211→      {/* Messages */}
+   212→      <div
+   213→        ref={scrollContainerRef}
+   214→        onScroll={handleScroll}
+   215→        className="flex-1 overflow-y-auto custom-scrollbar"
+   216→      >
+   217→        <div className="mx-auto max-w-[720px] px-6 py-4">
+   218→          <AnimatePresence>
+   219→            {messages.length === 0 && !isStreaming && (
+   220→              <motion.div
+   221→                key="empty-state"
+   222→                variants={emptyStateVariants}
+   223→                initial="hidden"
+   224→                animate="visible"
+   225→                className="py-20 text-center"
+   226→              >
+   227→                <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-100 dark:bg-neutral-800">
+   228→                  <BookOpen className="h-5 w-5 text-neutral-400 dark:text-neutral-500" strokeWidth={1.5} />
+   229→                </div>
+   230→                <p className="text-[14px] text-neutral-400">
+   231→                  开始和 AI 交流，聊聊你想学什么
+   232→                </p>
+   233→              </motion.div>
+   234→            )}
+   235→          </AnimatePresence>
+   236→
+   237→          <AnimatePresence initial={false}>
+   238→            {messages.map((msg, idx) => {
+   239→              const showDate = idx === 0 || !(
+   240→                new Date(msg.createdAt).toDateString() === new Date(messages[idx - 1].createdAt).toDateString()
+   241→              );
+   242→              return (
+   243→                <React.Fragment key={msg.id}>
+   244→                  {showDate && (
+   245→                    <motion.div
+   246→                      variants={dateSepVariants}
+   247→                      initial="hidden"
+   248→                      animate="visible"
+   249→                      className="my-6 flex items-center gap-3"
+   250→                    >
+   251→                      <div className="flex-1 border-t border-neutral-100 dark:border-neutral-800" />
+   252→                      <span className="text-[11px] text-neutral-400">{fmtDate(msg.createdAt)}</span>
+   253→                      <div className="flex-1 border-t border-neutral-100 dark:border-neutral-800" />
+   254→                    </motion.div>
+   255→                  )}
+   256→                  <motion.div variants={msgVariants} initial="hidden" animate="visible">
+   257→                    <MsgBubble msg={msg} />
+   258→                  </motion.div>
+   259→                </React.Fragment>
+   260→              );
+   261→            })}
+   262→          </AnimatePresence>
+   263→
+   264→          {/* Thinking bubble — shown while waiting for the first streamed token */}
+   265→          <AnimatePresence>
+   266→            {isStreaming && !streamingContent && lastMsgRole !== 'assistant' && (
+   267→              <motion.div
+   268→                variants={streamingBubbleVariants}
+   269→                initial="hidden"
+   270→                animate="visible"
+   271→                exit="exit"
+   272→                className="my-3 flex gap-3"
+   273→              >
+   274→                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-[11px] text-white dark:bg-white dark:text-neutral-900">
+   275→                  <GraduationCap className="h-3.5 w-3.5" />
+   276→                </div>
+   277→                <div className="flex items-center gap-1.5 rounded-xl rounded-tl-sm bg-neutral-100 px-4 py-3 dark:bg-neutral-800">
+   278→                  {[0, 1, 2].map((dot) => (
+   279→                    <motion.span
+   280→                      key={dot}
+   281→                      className="h-1.5 w-1.5 rounded-full bg-neutral-400 dark:bg-neutral-500"
+   282→                      animate={{
+   283→                        y: [0, -3, 0],
+   284→                        opacity: [0.4, 1, 0.4],
+   285→                      }}
+   286→                      transition={{
+   287→                        repeat: Infinity,
+   288→                        duration: 0.9,
+   289→                        delay: dot * 0.15,
+   290→                        ease: 'easeInOut',
+   291→                      }}
+   292→                    />
+   293→                  ))}
+   294→                </div>
+   295→              </motion.div>
+   296→            )}
+   297→          </AnimatePresence>
+   298→
+   299→          {/* Streaming response */}
+   300→          <AnimatePresence>
+   301→            {isStreaming && lastMsgRole !== 'assistant' && streamingContent && (
+   302→              <motion.div
+   303→                variants={streamingBubbleVariants}
+   304→                initial="hidden"
+   305→                animate="visible"
+   306→                exit="exit"
+   307→                className="my-3 flex gap-3"
+   308→              >
+   309→                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-[11px] text-white dark:bg-white dark:text-neutral-900">
+   310→                  <GraduationCap className="h-3.5 w-3.5" />
+   311→                </div>
+   312→                <div className="group relative min-w-0 max-w-[85%] rounded-xl rounded-tl-sm bg-neutral-100 px-3.5 py-2.5 text-[14px] leading-relaxed text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200">
+   313→                  <MarkdownRenderer content={streamingContent} streaming />
+   314→                  <motion.span
+   315→                    className="ml-0.5 inline-block h-3.5 w-0.5 rounded-full bg-neutral-400 dark:bg-neutral-500"
+   316→                    animate={{ opacity: [1, 0, 1] }}
+   317→                    transition={{ repeat: Infinity, duration: 0.8 }}
+   318→                  />
+   319→                </div>
+   320→              </motion.div>
+   321→            )}
+   322→          </AnimatePresence>
+   323→
+   324→          {/* Knowledge nodes inline */}
+   325→          <AnimatePresence>
+   326→            {knowledgeNodes.length > 0 && !isStreaming && messages.length > 0 && (
+   327→              <motion.div
+   328→                key="knowledge-panel"
+   329→                variants={knowledgeVariants}
+   330→                initial="hidden"
+   331→                animate="visible"
+   332→                className="my-8"
+   333→              >
+   334→                <KnowledgeInline nodes={knowledgeNodes} />
+   335→              </motion.div>
+   336→            )}
+   337→          </AnimatePresence>
+   338→
+   339→          <div ref={bottomRef} />
+   340→        </div>
+   341→      </div>
+   342→
+   343→      {/* Scroll-to-bottom button — appears when the user has scrolled up */}
+   344→      <AnimatePresence>
+   345→        {showScrollBottom && (
+   346→          <motion.button
+   347→            initial={{ opacity: 0, y: 8, scale: 0.9 }}
+   348→            animate={{ opacity: 1, y: 0, scale: 1 }}
+   349→            exit={{ opacity: 0, y: 8, scale: 0.9 }}
+   350→            transition={{ duration: 0.18, ease: [0.25, 0.1, 0.25, 1] }}
+   351→            onClick={scrollToBottom}
+   352→            whileHover={{ scale: 1.06 }}
+   353→            whileTap={{ scale: 0.94 }}
+   354→            className="absolute bottom-[92px] left-1/2 z-30 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-neutral-200 bg-white/95 text-neutral-500 shadow-sm backdrop-blur-sm transition-colors hover:text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/95 dark:text-neutral-300 dark:hover:text-neutral-100"
+   355→            aria-label="滚动到最新消息"
+   356→          >
+   357→            <ArrowDown className="h-4 w-4" />
+   358→          </motion.button>
+   359→        )}
+   360→      </AnimatePresence>
+   361→
+   362→      {/* Simple Chat Input */}
+   363→      <div className="shrink-0 border-t border-neutral-200/50 px-6 pb-6 pt-4">
+   364→        <div className="mx-auto max-w-[680px]">
+   365→          <SimpleChatInput
+   366→            value={input}
+   367→            onChange={setInput}
+   368→            onSend={handleSend}
+   369→            onStop={handleStop}
+   370→            isStreaming={isStreaming}
+   371→            placeholder="输入消息..."
+   372→          />
+   373→        </div>
+   374→      </div>
+   375→    </div>
+   376→  );
+   377→}
+   378→
+   379→// ─── Simple Chat Input ──────────────────────────────────────────────────────
+   380→
+   381→function SimpleChatInput({
+   382→  value,
+   383→  onChange,
+   384→  onSend,
+   385→  onStop,
+   386→  isStreaming,
+   387→  placeholder = '输入消息...',
+   388→}: {
+   389→  value: string;
+   390→  onChange: (v: string) => void;
+   391→  onSend: () => void;
+   392→  onStop: () => void;
+   393→  isStreaming: boolean;
+   394→  placeholder?: string;
+   395→}) {
+   396→  const textareaRef = useRef<HTMLTextAreaElement>(null);
+   397→
+   398→  // Auto-resize
+   399→  useEffect(() => {
+   400→    const el = textareaRef.current;
+   401→    if (!el) return;
+   402→    el.style.height = 'auto';
+   403→    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+   404→  }, [value]);
+   405→
+   406→  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+   407→    if (e.key === 'Enter' && !e.shiftKey) {
+   408→      e.preventDefault();
+   409→      if (value.trim() && !isStreaming) onSend();
+   410→    }
+   411→  }, [value, isStreaming, onSend]);
+   412→
+   413→  const canSend = value.trim().length > 0 && !isStreaming;
+   414→
+   415→  return (
+   416→    <div className="flex items-end gap-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 transition-colors focus-within:border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 dark:focus-within:border-neutral-600">
+   417→      <textarea
+   418→        ref={textareaRef}
+   419→        value={value}
+   420→        onChange={e => onChange(e.target.value)}
+   421→        onKeyDown={handleKeyDown}
+   422→        placeholder={placeholder}
+   423→        disabled={isStreaming}
+   424→        rows={1}
+   425→        className="flex-1 resize-none border-0 bg-transparent py-1 text-[14px] leading-relaxed text-neutral-800 placeholder:text-neutral-400 focus:outline-none disabled:opacity-50 dark:text-neutral-200 dark:placeholder:text-neutral-500"
+   426→      />
+   427→      <AnimatePresence mode="wait">
+   428→        {isStreaming ? (
+   429→          <motion.button
+   430→            key="stop"
+   431→            initial={{ scale: 0.8, opacity: 0 }}
+   432→            animate={{ scale: 1, opacity: 1 }}
+   433→            exit={{ scale: 0.8, opacity: 0 }}
+   434→            whileTap={{ scale: 0.9 }}
+   435→            onClick={onStop}
+   436→            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-neutral-600 text-white transition-colors hover:bg-neutral-500 dark:bg-neutral-400 dark:text-neutral-900"
+   437→          >
+   438→            <Square className="h-3 w-3 fill-current" />
+   439→          </motion.button>
+   440→        ) : (
+   441→          <motion.button
+   442→            key="send"
+   443→            initial={{ scale: 0.8, opacity: 0 }}
+   444→            animate={{ scale: 1, opacity: 1 }}
+   445→            exit={{ scale: 0.8, opacity: 0 }}
+   446→            whileTap={{ scale: 0.9 }}
+   447→            onClick={canSend ? onSend : undefined}
+   448→            disabled={!canSend}
+   449→            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors ${
+   450→              canSend
+   451→                ? 'bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100'
+   452→                : 'bg-neutral-200 text-neutral-400 dark:bg-neutral-700 dark:text-neutral-500'
+   453→            }`}
+   454→          >
+   455→            <Send className="h-3.5 w-3.5" />
+   456→          </motion.button>
+   457→        )}
+   458→      </AnimatePresence>
+   459→    </div>
+   460→  );
+   461→}
+   462→
+   463→// ─── Message Bubble ──────────────────────────────────────────────────────────
+   464→
+   465→function timeFmt(d: string) {
+   466→  const date = new Date(d);
+   467→  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+   468→}
+   469→
+   470→function MsgBubble({ msg }: { msg: { role: string; content: string; createdAt: string } }) {
+   471→  const isUser = msg.role === 'user';
+   472→  const [copied, setCopied] = useState(false);
+   473→
+   474→  const handleCopy = useCallback(() => {
+   475→    navigator.clipboard?.writeText(msg.content).then(() => {
+   476→      setCopied(true);
+   477→      setTimeout(() => setCopied(false), 1400);
+   478→    }).catch(() => {});
+   479→  }, [msg.content]);
+   480→
+   481→  return (
+   482→    <div className={`group/msg group flex items-end gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
+   483→      <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-medium ${
+   484→        isUser
+   485→          ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
+   486→          : 'bg-neutral-200 text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300'
+   487→      }`}>
+   488→        {isUser ? '我' : 'AI'}
+   489→      </div>
+   490→
+   491→      <div className={`flex min-w-0 max-w-[85%] flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+   492→        <div className={`relative rounded-xl px-3.5 py-2.5 text-[14px] leading-relaxed transition-shadow duration-200 ${
+   493→          isUser
+   494→            ? 'rounded-tr-sm bg-neutral-900 text-neutral-100 dark:bg-white dark:text-neutral-900'
+   495→            : 'rounded-tl-sm bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200'
+   496→        }`}>
+   497→          {/* Subtle left accent on hover — thesis-style margin annotation cue */}
+   498→          <span
+   499→            aria-hidden
+   500→            className={`pointer-events-none absolute top-2 bottom-2 w-px bg-neutral-400/0 transition-colors duration-200 group-hover/msg:bg-neutral-400/40 ${
+   501→              isUser ? 'right-0' : 'left-0'
+   502→            }`}
+   503→          />
+   504→          {isUser ? (
+   505→            <p className="whitespace-pre-wrap">{msg.content}</p>
+   506→          ) : (
+   507→            <MarkdownRenderer content={msg.content} />
+   508→          )}
+   509→        </div>
+   510→
+   511→        {/* Hover meta row: timestamp + copy */}
+   512→        <div
+   513→          className={`mt-1 flex items-center gap-2 px-1 opacity-0 transition-opacity duration-200 group-hover:opacity-100 ${
+   514→            isUser ? 'flex-row-reverse' : 'flex-row'
+   515→          }`}
+   516→        >
+   517→          <span className="font-sans text-[10px] tabular-nums text-neutral-400 dark:text-neutral-500">
+   518→            {timeFmt(msg.createdAt)}
+   519→          </span>
+   520→          <button
+   521→            onClick={handleCopy}
+   522→            className="flex items-center gap-1 font-sans text-[10px] text-neutral-400 transition-colors hover:text-neutral-700 dark:text-neutral-500 dark:hover:text-neutral-200"
+   523→            aria-label="复制消息"
+   524→          >
+   525→            {copied ? (
+   526→              <>
+   527→                <Check className="h-3 w-3" />
+   528→                已复制
+   529→              </>
+   530→            ) : (
+   531→              <>
+   532→                <Copy className="h-3 w-3" />
+   533→                复制
+   534→              </>
+   535→            )}
+   536→          </button>
+   537→        </div>
+   538→      </div>
+   539→    </div>
+   540→  );
+   541→}
+   542→
+   543→// ─── Welcome View ─────────────────────────────────────────────────────────────
+   544→
+   545→function WelcomeView() {
+   546→  const { createSession } = useLearningStore();
+   547→  const [topicInput, setTopicInput] = useState('');
+   548→
+   549→  const topics = [
+   550→    '机器学习基础',
+   551→    'JavaScript 异步',
+   552→    '数据结构与算法',
+   553→    '设计模式',
+   554→    '计算机网络',
+   555→  ];
+   556→
+   557→  const handleSubmit = useCallback(async (value?: string) => {
+   558→    const t = (value || topicInput).trim();
+   559→    if (!t) return;
+   560→    setTopicInput('');
+   561→    await createSession(t);
+   562→  }, [topicInput, createSession]);
+   563→
+   564→  return (
+   565→    <div className="flex h-full flex-1 flex-col overflow-y-auto custom-scrollbar">
+   566→      <div className="flex flex-1 flex-col items-center justify-center px-8 py-12">
+   567→        <div className="w-full max-w-[560px] text-center">
+   568→          {/* Mark — a quiet monochrome wordmark instead of a colored logo */}
+   569→          <motion.div
+   570→            custom={0}
+   571→            variants={welcomeVariants}
+   572→            initial="hidden"
+   573→            animate="visible"
+   574→            className="mx-auto mb-8 flex h-[56px] w-[56px] items-center justify-center rounded-[20px] border border-neutral-200 bg-white text-neutral-800 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+   575→          >
+   576→            <GraduationCap className="h-7 w-7" strokeWidth={1.5} />
+   577→          </motion.div>
+   578→
+   579→          {/* Title — serif, scholarly */}
+   580→          <motion.h1
+   581→            custom={1}
+   582→            variants={welcomeVariants}
+   583→            initial="hidden"
+   584→            animate="visible"
+   585→            className="mb-3 font-serif text-[30px] font-medium tracking-tight text-neutral-900 dark:text-neutral-100"
+   586→          >
+   587→            MindGuide
+   588→          </motion.h1>
+   589→
+   590→          <motion.p
+   591→            custom={2}
+   592→            variants={welcomeVariants}
+   593→            initial="hidden"
+   594→            animate="visible"
+   595→            className="mb-10 text-[14px] leading-relaxed text-neutral-500 dark:text-neutral-400"
+   596→          >
+   597→            输入一个学习主题，开始你的 AI 学习之旅
+   598→          </motion.p>
+   599→
+   600→          {/* Topic input */}
+   601→          <motion.div
+   602→            custom={3}
+   603→            variants={welcomeVariants}
+   604→            initial="hidden"
+   605→            animate="visible"
+   606→            className="mb-10"
+   607→          >
+   608→            <div className="mx-auto flex items-center gap-2 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 transition-colors focus-within:border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 dark:focus-within:border-neutral-600">
+   609→              <BookOpen className="h-4 w-4 shrink-0 text-neutral-400" />
+   610→              <input
+   611→                type="text"
+   612→                value={topicInput}
+   613→                onChange={e => setTopicInput(e.target.value)}
+   614→                onKeyDown={e => { if (e.key === 'Enter') handleSubmit(); }}
+   615→                placeholder="输入你想学的主题..."
+   616→                className="flex-1 border-0 bg-transparent py-0.5 text-[14px] text-neutral-800 placeholder:text-neutral-400 focus:outline-none dark:text-neutral-200 dark:placeholder:text-neutral-500"
+   617→              />
+   618→              <motion.button
+   619→                whileTap={{ scale: 0.9 }}
+   620→                onClick={() => handleSubmit()}
+   621→                disabled={!topicInput.trim()}
+   622→                className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+   623→                  topicInput.trim()
+   624→                    ? 'bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900'
+   625→                    : 'bg-neutral-200 text-neutral-400 dark:bg-neutral-700 dark:text-neutral-500'
+   626→                }`}
+   627→              >
+   628→                <Send className="h-3.5 w-3.5" />
+   629→              </motion.button>
+   630→            </div>
+   631→          </motion.div>
+   632→
+   633→          {/* Quick Start — text-only suggestions, no icons */}
+   634→          <motion.div
+   635→            custom={4}
+   636→            variants={welcomeVariants}
+   637→            initial="hidden"
+   638→            animate="visible"
+   639→          >
+   640→            <p className="mb-4 text-[11px] font-medium tracking-[0.12em] text-neutral-400 uppercase dark:text-neutral-500">
+   641→              Quick Start
+   642→            </p>
+   643→          </motion.div>
+   644→          <motion.div
+   645→            custom={5}
+   646→            variants={welcomeVariants}
+   647→            initial="hidden"
+   648→            animate="visible"
+   649→            className="flex flex-wrap justify-center gap-2.5"
+   650→          >
+   651→            {topics.map((label, i) => (
+   652→              <motion.button
+   653→                key={label}
+   654→                custom={6 + i}
+   655→                variants={welcomeVariants}
+   656→                initial="hidden"
+   657→                animate="visible"
+   658→                whileHover={{ y: -1 }}
+   659→                whileTap={{ scale: 0.97 }}
+   660→                onClick={() => createSession(label)}
+   661→                className="rounded-md border border-neutral-200/80 bg-white/70 px-3.5 py-1.5 text-[13px] text-neutral-600 transition-colors duration-200 hover:border-neutral-300 hover:bg-white hover:text-neutral-900 dark:border-neutral-700/60 dark:bg-neutral-900/60 dark:text-neutral-400 dark:hover:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+   662→              >
+   663→                {label}
+   664→              </motion.button>
+   665→            ))}
+   666→          </motion.div>
+   667→
+   668→          {/* Scholarly footnote — a quiet aphorism grounding the experience */}
+   669→          <motion.div
+   670→            custom={11}
+   671→            variants={welcomeVariants}
+   672→            initial="hidden"
+   673→            animate="visible"
+   674→            className="mt-14 flex flex-col items-center gap-1.5 text-neutral-400 dark:text-neutral-500"
+   675→          >
+   676→            <div className="h-px w-10 bg-neutral-200 dark:bg-neutral-700" />
+   677→            <p className="font-serif text-[11.5px] italic text-neutral-400 dark:text-neutral-500">
+   678→              “知识不是被给予的，而是被建构的。”
+   679→            </p>
+   680→            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-300 dark:text-neutral-600">
+   681→              — Jean Piaget
+   682→            </p>
+   683→          </motion.div>
+   684→        </div>
+   685→      </div>
+   686→    </div>
+   687→  );
+   688→}
+   689→

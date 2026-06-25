@@ -128,3 +128,69 @@ GET /api/sessions/[id]/messages 200 in 55ms  (re-fetch after AI response)
 - 数据库: `/home/z/my-project/db/custom.db`
 - Prisma schema: `/home/z/my-project/prisma/schema.prisma`
 - 项目文档: `/home/z/my-project/PROJECT.md`、`/home/z/my-project/README.md`
+
+---
+
+## 第二轮迭代 — UI 平面化 + 更多功能细节 (用户反馈驱动)
+
+### 触发与判断
+用户反馈："更多功能那里希望更简约、更自然、更平面一点，不用画那么多复杂的结构，整体画风立体度太高了，应该更平面自然一点"
+
+通过 agent-browser 打开"更多功能"弹窗并使用 VLM 分析，确认原设计存在以下立体化问题：
+1. **凹槽内容区** (recessedBg)：浅灰背景层 + 内部白色卡片 → 双层结构
+2. **图标内嵌凹槽** (inset shadow)：每个图标被放在带 `shadow-[inset_0_1px_2px]` 的井里 → 凸起/凹陷错觉
+3. **多层复合阴影**：`shadow-[0_4px_12px_rgba(0,0,0,0.1),0_1px_3px_rgba(0,0,0,0.06)]` → 浮起感过强
+4. **卡片边框+凹槽阴影**：每个功能项是独立的白色圆角卡片带 inset shadow
+5. **侧边栏触发按钮**：`bg-white shadow-sm` 也有轻微浮起
+
+### 已完成的修改
+
+**1. 重写 `create-new-panel.tsx`（核心修复）**
+- 删除整套 Design Tokens `T` 对象（recessed/groove/itemGroove/itemHoverShadow 等）
+- 移除凹槽内容区：列表区背景与面板同色，不再有浅灰凹陷层
+- 移除图标凹槽井：图标直接 inline，无容器无 inset shadow
+- 改为 macOS 原生菜单风格的扁平行：`hover:bg-neutral-100` + 无边框 + 无阴影
+- 头部从双层(cream header bg + content recessed)改为单层 flat header
+- 关闭按钮从"灰色圆形浮起"改为"hover 时浅灰方块"
+- 面板阴影从复合多层简化为 `shadow-sm` + `backdrop-blur-md`（毛玻璃）
+- 标题样式改为 `uppercase tracking-wider` 小标签风
+
+**2. 平面化侧边栏触发按钮 (`sidebar.tsx`)**
+- "更多功能"按钮：`bg-white shadow-sm` → `border border-neutral-200`（ghost/outline 风格）
+- "创建新主题"按钮：`shadow-sm hover:shadow-md` → 纯色 + `hover:bg-neutral-800`（无阴影）
+
+**3. 平面化 feature-views.tsx 中的残留立体元素**
+- 成就系统：移除已解锁图标的 `shadow-md shadow-neutral-900/20`；移除卡片 `bg-gradient-to-r` 渐变 → 纯色 `bg-neutral-50/80`；`transition-all` → `transition-colors`
+- 学习统计：移除火焰图标的 `shadow-lg shadow-neutral-900/20`；移除 hero 卡片 `bg-gradient-to-br` 三段渐变 → 纯色 `bg-neutral-50/60`
+
+**4. 新增功能细节（平面化基础上的增强）**
+- **键盘快捷键**：⌘/Ctrl + 1~6 快速跳转对应功能，Esc 关闭面板
+- **快捷键提示 UI**：每行 hover 时显示 `⌘1` 等 kbd 徽标（macOS 原生风格，无边框浮起）
+- **底部状态栏**：显示快捷键提示文案 + 功能项总数
+- 这些细节都是平面文字/边框，不引入任何 3D 元素
+
+### 验证结果
+- `bun run lint` ✅ 零错误零警告
+- agent-browser + VLM 视觉验证：
+  - "更多功能"弹窗："无3D立体感、内凹凹槽或凸起卡片，风格平面自然简约；图标直接inline显示；整体层次单一清爽；与左侧栏协调一致" ✅
+  - 成就系统页："整体平面自然，无明显3D阴影或渐变立体感；已解锁成就图标无凸起阴影" ✅
+  - 学习统计页："整体平面自然简约；火焰图标所在方块无突兀3D阴影" ✅
+  - 快捷键提示 + 底部状态栏："底部有快捷键提示(⌘1-6)；整体符合macOS原生菜单风格" ✅
+- 快捷键功能端到端测试：`agent-browser eval` 派发 ⌘3 keydown → 自动跳转成就系统页 + 面板自动关闭 ✅
+
+### 当前项目状态
+- Dev server: PID 7381，运行在 http://localhost:3000，PPID=1（daemonize.py 守护），稳定
+- 核心 QA 全通过：首页渲染、会话创建、AI 对话、知识图谱、笔记、成就、统计、键盘快捷键
+- UI 风格统一为：扁平 + 中性色 + 微妙边框 + 无 3D 阴影（仅 popover 保留 `shadow-sm` 用于浮层区分）
+
+### 未解决问题 / 下一阶段建议
+1. **【中】真流式**：`/api/chat` 仍为同步调用后模拟分块，建议改用 z-ai-web-dev-sdk stream 模式
+2. **【中】笔记/课程持久化**：notesContent 与生成的课程仅存内存，刷新丢失（需新增 Prisma 模型）
+3. **【中】成就解锁触发**：当前成就进度从 /api/stats 实时计算（已工作），但可补充"解锁瞬间"的 toast/动画反馈
+4. **【低】认证系统**：接入 NextAuth.js v4
+5. **【低】daemonize.py watchdog**：加入端口健康检查 + 崩溃自动重启
+
+### 关键文件变更清单
+- `src/components/learning/create-new-panel.tsx` — 完全重写为扁平 + 快捷键
+- `src/components/learning/sidebar.tsx` — 两个底部按钮扁平化
+- `src/components/learning/feature-views.tsx` — 成就/统计页移除阴影与渐变

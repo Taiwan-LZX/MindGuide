@@ -378,7 +378,7 @@ function AchievementsView() {
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-5 overflow-hidden rounded-xl border border-neutral-200/60 bg-gradient-to-br from-neutral-50 to-white p-4 dark:border-neutral-800/60 dark:from-neutral-900/80 dark:to-neutral-900/40"
+            className="mb-5 rounded-xl border border-neutral-200/70 bg-neutral-50/60 p-4 dark:border-neutral-800/70 dark:bg-neutral-900/50"
           >
             <div className="flex items-center gap-4">
               <div className="relative flex h-14 w-14 items-center justify-center">
@@ -426,15 +426,15 @@ function AchievementsView() {
                     initial="hidden"
                     animate="visible"
                     layout
-                    className={`flex items-center gap-3 rounded-xl border p-3.5 transition-all ${
+                    className={`flex items-center gap-3 rounded-xl border p-3.5 transition-colors ${
                       ach.unlocked
-                        ? 'border-neutral-300 bg-gradient-to-r from-neutral-50/80 to-transparent dark:border-neutral-700 dark:from-neutral-800/40'
+                        ? 'border-neutral-300 bg-neutral-50/80 dark:border-neutral-700 dark:bg-neutral-800/40'
                         : 'border-neutral-100 bg-white dark:border-neutral-800 dark:bg-neutral-900'
                     }`}
                   >
-                    <div className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition-all ${
+                    <div className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${
                       ach.unlocked
-                        ? 'bg-neutral-800 text-white shadow-md shadow-neutral-900/20 dark:bg-neutral-200 dark:text-neutral-900'
+                        ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
                         : 'bg-neutral-100 text-neutral-400 dark:bg-neutral-800 dark:text-neutral-500'
                     }`}>
                       {ach.unlocked ? <Icon className="h-5 w-5" /> : <Lock className="h-4 w-4" />}
@@ -511,7 +511,7 @@ function StatsView() {
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-5 overflow-hidden rounded-xl border border-neutral-200/60 bg-gradient-to-br from-neutral-50 via-white to-neutral-50 p-5 dark:border-neutral-800/60 dark:from-neutral-900 dark:via-neutral-900/80 dark:to-neutral-900"
+            className="mb-5 rounded-xl border border-neutral-200/70 bg-neutral-50/60 p-5 dark:border-neutral-800/70 dark:bg-neutral-900/50"
           >
             <div className="flex items-center justify-between">
               <div>
@@ -535,7 +535,7 @@ function StatsView() {
                 initial={{ scale: 0, rotate: -30 }}
                 animate={{ scale: 1, rotate: 0 }}
                 transition={{ delay: 0.25, type: 'spring', stiffness: 200, damping: 15 }}
-                className="flex h-14 w-14 items-center justify-center rounded-2xl bg-neutral-900 text-white shadow-lg shadow-neutral-900/20 dark:bg-neutral-100 dark:text-neutral-900 dark:shadow-neutral-100/10"
+                className="flex h-14 w-14 items-center justify-center rounded-2xl bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
               >
                 <Flame className="h-7 w-7" />
               </motion.div>

@@ -459,7 +459,7 @@ function FullSidebar() {
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.98 }}
           onClick={() => setIsCreating(true)}
-          className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-neutral-900 text-[13px] font-medium text-white shadow-sm transition-shadow hover:shadow-md dark:bg-white dark:text-neutral-900 dark:hover:shadow-lg"
+          className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-neutral-900 text-[13px] font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
         >
           <Plus className="h-4 w-4" />
           创建新主题
@@ -472,9 +472,9 @@ function FullSidebar() {
             e.preventDefault();
             setCreateNewPanelOpen(true);
           }}
-          className="flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-white text-[13px] text-neutral-600 shadow-sm transition-colors duration-150 hover:bg-neutral-50 active:scale-[0.98] dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+          className="flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-neutral-200 text-[13px] text-neutral-500 transition-colors duration-150 hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-700 active:scale-[0.98] dark:border-neutral-700 dark:text-neutral-400 dark:hover:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
         >
-          <Grid2X2 className="h-3.5 w-3.5 text-neutral-400 dark:text-neutral-500" />
+          <Grid2X2 className="h-3.5 w-3.5" />
           更多功能
         </button>
       </motion.div>

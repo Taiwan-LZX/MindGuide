@@ -103,8 +103,8 @@ function FeatureHeader({ title, icon: Icon, color }: { title: string; icon: Reac
   return (
     <div className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-200 px-6 dark:border-neutral-800">
       <motion.button
-        whileHover={{ scale: 1.08 }}
-        whileTap={{ scale: 0.92 }}
+        whileHover={{ scale: 1.06 }}
+        whileTap={{ scale: 0.94 }}
         onClick={() => setActiveFeatureView(null)}
         className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
         aria-label="返回"
@@ -286,7 +286,7 @@ function TaskPlannerView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElem
               />
               <motion.button
                 whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.92 }}
+                whileTap={{ scale: 0.94 }}
                 onClick={() => { void submit(); }}
                 disabled={submitting}
                 className="flex h-9 w-9 items-center justify-center rounded-lg bg-neutral-900 text-white transition-opacity disabled:opacity-50 dark:bg-white dark:text-neutral-900"

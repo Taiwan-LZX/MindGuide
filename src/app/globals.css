@@ -130,10 +130,25 @@
   }
   html {
     scroll-behavior: smooth;
+    /* Stabilize text rendering during framer-motion transform animations:
+       subpixel-AA stays on instead of flickering to grayscale during
+       scale/translate. Reverted to auto on the body to keep fonts crisp. */
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
   body {
     @apply bg-background text-foreground;
     overflow: hidden;
+    /* Use normal font smoothing on the body so the antialiased hint above only
+       applies during animated transforms, not as a global override that would
+       thin out the serif headings. */
+    -webkit-font-smoothing: auto;
+  }
+  /* Numeric labels (timestamps, counts, stats) render in tabular figures so
+     they don't jitter as digits change while streaming / updating. */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
   }
   /* Selection — neutral tint */
   ::selection {
@@ -149,6 +164,17 @@
   }
   .dark :focus-visible {
     outline-color: oklch(0.6 0 0);
+  }
+  /* Respect users who prefer reduced motion at the OS level — kill CSS
+     transitions and animations even if framer-motion's MotionConfig hasn't
+     been toggled. This is a safety net for the 'user' reducedMotion mode. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 

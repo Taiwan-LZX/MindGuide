@@ -5,45 +5,30 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, X, Trash2, Settings, Eraser } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 
-// ─── Design Tokens (from reference image) ──────────────────────────────────
-const TOKENS = {
-  panelBg: 'bg-white dark:bg-[#1c1c1e]',
-  headerBg: 'bg-[#F8F7F3] dark:bg-[#2a2a2c]',
-  panelShadow: 'shadow-[0_4px_12px_rgba(0,0,0,0.1)] dark:shadow-[0_4px_16px_rgba(0,0,0,0.35)]',
-  panelBorder: 'border border-[#E8E7E3] dark:border-[#38383a]',
-  panelRound: 'rounded-2xl',
-  titleText: 'text-[#333333] dark:text-[#E0E0E0]',
-  titleSize: 'text-[16px]',
-  titleWeight: 'font-medium',
-  closeBtnBg: 'bg-[#D1D0CC] dark:bg-[#48484a]',
-  closeBtnIcon: 'text-white dark:text-white',
-  closeBtnSize: 'h-[28px] w-[28px]',
-  closeBtnRound: 'rounded-full',
-  actionText: 'text-[#555555] dark:text-[#a1a1a6]',
-  actionHover: 'hover:bg-[#F5F5F3] dark:hover:bg-[#3a3a3c]',
-  actionDanger: 'text-red-500 dark:text-red-400',
-  divider: 'bg-[#E8E7E3] dark:bg-[#38383a]',
-} as const;
-
 // ─── Animation Variants ────────────────────────────────────────────────────
+//
+// The quick menu now shares the exact same neutral palette as the rest of the
+// app (neutral-50/100/200/800/900) — no more warm #F8F7F3 / #E8E7E3 hexes that
+// made it read like a separate design system. Radii, borders and shadows match
+// the sidebar + chat surface language so the popover feels native.
 
 const panelVariants = {
-  hidden: { opacity: 0, scale: 0.92, y: -8 },
+  hidden: { opacity: 0, scale: 0.96, y: -6 },
   visible: {
     opacity: 1, scale: 1, y: 0,
-    transition: { type: 'spring', stiffness: 380, damping: 28, mass: 0.8 },
+    transition: { type: 'spring', stiffness: 380, damping: 30, mass: 0.7 },
   },
   exit: {
-    opacity: 0, scale: 0.95, y: -4,
+    opacity: 0, scale: 0.97, y: -4,
     transition: { duration: 0.15, ease: [0.4, 0, 1, 1] },
   },
 };
 
 const itemVariants = {
-  hidden: { opacity: 0, y: 8 },
+  hidden: { opacity: 0, y: 6 },
   visible: (i: number) => ({
     opacity: 1, y: 0,
-    transition: { delay: 0.03 * i, duration: 0.3, ease: [0.25, 0.1, 0.25, 1] },
+    transition: { delay: 0.03 * i, duration: 0.28, ease: [0.25, 0.1, 0.25, 1] },
   }),
 };
 
@@ -52,14 +37,12 @@ const itemVariants = {
 function ActionRow({
   icon: Icon,
   label,
-  hint,
   danger,
   onClick,
   index,
 }: {
   icon: React.ElementType;
   label: string;
-  hint?: string;
   danger?: boolean;
   onClick: () => void;
   index: number;
@@ -70,18 +53,17 @@ function ActionRow({
       variants={itemVariants}
       initial="hidden"
       animate="visible"
-      whileHover={{ x: 3 }}
-      whileTap={{ scale: 0.97 }}
+      whileHover={{ x: 2 }}
+      whileTap={{ scale: 0.98 }}
       onClick={onClick}
       className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-[7px] text-[13px] transition-colors duration-150 ${
         danger
-          ? `${TOKENS.actionDanger} hover:bg-red-50 dark:hover:bg-red-500/10`
-          : `${TOKENS.actionText} ${TOKENS.actionHover}`
+          ? 'text-red-500 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10'
+          : 'text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800'
       }`}
     >
       <Icon className="h-[14px] w-[14px] shrink-0 opacity-60" />
       <span className="flex-1 text-left">{label}</span>
-      {hint && <span className="text-[11px] text-neutral-400 dark:text-neutral-500">{hint}</span>}
     </motion.button>
   );
 }
@@ -136,58 +118,62 @@ export function SettingsPanel() {
           {/* Backdrop — transparent click-catcher */}
           <motion.div
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1, transition: { duration: 0.2 } }}
+            animate={{ opacity: 1, transition: { duration: 0.18 } }}
             exit={{ opacity: 0, transition: { duration: 0.12 } }}
             className="fixed inset-0 z-[49]"
             onClick={() => setSettingsPanelOpen(false)}
           />
 
-          {/* Panel — top-right corner, overlapping with three-dot button */}
+          {/* Panel — top-right corner, overlapping with three-dot button.
+              Uses the same neutral surface language as the sidebar + chat
+              surface (white/neutral-900 bg, neutral-200/800 border, soft
+              shadow) so it reads as part of the same app. */}
           <motion.div
             variants={panelVariants}
             initial="hidden"
             animate="visible"
             exit="exit"
-            className={`fixed right-1.5 top-1 z-[50] w-[260px] overflow-hidden ${TOKENS.panelRound} ${TOKENS.panelBorder} ${TOKENS.panelBg} ${TOKENS.panelShadow}`}
+            className="fixed right-2 top-2 z-[50] w-[260px] overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_8px_30px_-12px_rgba(0,0,0,0.12),0_2px_8px_-4px_rgba(0,0,0,0.08)] dark:border-neutral-800 dark:bg-neutral-900 dark:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.5),0_2px_8px_-4px_rgba(0,0,0,0.4)]"
           >
             {/* Header */}
-            <div className={`flex items-center justify-between px-5 py-3.5 ${TOKENS.headerBg}`}>
-              <h2 className={`${TOKENS.titleSize} ${TOKENS.titleWeight} ${TOKENS.titleText}`}>
+            <div className="flex items-center justify-between border-b border-neutral-100 px-4 py-3 dark:border-neutral-800">
+              <h2 className="text-[14px] font-medium text-neutral-800 dark:text-neutral-100">
                 快捷菜单
               </h2>
               <motion.button
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.88 }}
+                whileHover={{ scale: 1.08 }}
+                whileTap={{ scale: 0.9 }}
                 onClick={() => setSettingsPanelOpen(false)}
-                className={`flex items-center justify-center ${TOKENS.closeBtnSize} ${TOKENS.closeBtnRound} ${TOKENS.closeBtnBg} ${TOKENS.closeBtnIcon} transition-transform`}
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-100 text-neutral-500 transition-colors hover:bg-neutral-200 hover:text-neutral-700 dark:bg-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+                aria-label="关闭"
               >
-                <X className="h-3.5 w-3.5" strokeWidth={2.5} />
+                <X className="h-3.5 w-3.5" strokeWidth={2.25} />
               </motion.button>
             </div>
 
             {/* 设置 entry — opens the full detailed SettingsView */}
-            <div className="px-3 py-2">
+            <div className="px-2.5 py-2">
               <motion.button
                 custom={0}
                 variants={itemVariants}
                 initial="hidden"
                 animate="visible"
-                whileHover={{ x: 3 }}
-                whileTap={{ scale: 0.97 }}
+                whileHover={{ x: 2 }}
+                whileTap={{ scale: 0.98 }}
                 onClick={openSettings}
-                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-[7px] text-[13px] font-medium text-[#333333] transition-colors duration-150 hover:bg-[#F5F5F3] dark:text-[#E0E0E0] dark:hover:bg-[#3a3a3c]"
+                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-[7px] text-[13px] font-medium text-neutral-800 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800"
               >
                 <Settings className="h-[14px] w-[14px] shrink-0 opacity-70" />
-                <span className="flex-1 text-left">设置</span>
-                <span className="text-[11px] text-neutral-400 dark:text-neutral-500">主题 · 配色 · 布局</span>
+                <span className="flex-1 truncate text-left">设置</span>
+                <span className="shrink-0 whitespace-nowrap text-[11px] text-neutral-400 dark:text-neutral-500">主题 · 配色 · 布局</span>
               </motion.button>
             </div>
 
-            {/* Divider */}
-            <div className={`mx-5 h-px ${TOKENS.divider}`} />
+            {/* Divider — inset to align with the action row padding */}
+            <div className="mx-4 h-px bg-neutral-100 dark:bg-neutral-800" />
 
             {/* Quick session actions */}
-            <div className="px-3 py-2">
+            <div className="px-2.5 py-2">
               <ActionRow icon={Plus} label="创建新对话" onClick={handleNewChat} index={1} />
               <ActionRow icon={Eraser} label="清空对话" onClick={handleClearChat} index={2} />
               {currentSessionId && (

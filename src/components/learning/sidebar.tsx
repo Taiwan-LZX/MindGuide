@@ -104,8 +104,8 @@ function CollapsedSidebar() {
           variants={iconStripVariants}
           initial="hidden"
           animate="visible"
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.92 }}
+          whileHover={{ scale: 1.06 }}
+          whileTap={{ scale: 0.94 }}
           onClick={() => setCoursePanelOpen(!coursePanelOpen)}
           className={`mb-1.5 flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
             coursePanelOpen
@@ -123,8 +123,8 @@ function CollapsedSidebar() {
           variants={iconStripVariants}
           initial="hidden"
           animate="visible"
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.92 }}
+          whileHover={{ scale: 1.06 }}
+          whileTap={{ scale: 0.94 }}
           onClick={() => setCreateNewPanelOpen(true)}
           className="mb-1.5 flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
         >
@@ -138,8 +138,8 @@ function CollapsedSidebar() {
           variants={iconStripVariants}
           initial="hidden"
           animate="visible"
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.92 }}
+          whileHover={{ scale: 1.06 }}
+          whileTap={{ scale: 0.94 }}
           className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
         >
           <Search className="h-4 w-4" />
@@ -157,8 +157,8 @@ function CollapsedSidebar() {
       >
         <MouseFollowTooltip content="账号">
           <motion.button
-            whileHover={{ scale: 1.08 }}
-            whileTap={{ scale: 0.92 }}
+            whileHover={{ scale: 1.06 }}
+            whileTap={{ scale: 0.94 }}
             className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
             aria-label="账号"
           >
@@ -358,7 +358,6 @@ function FullSidebar() {
                       animate="visible"
                       exit="exit"
                       layout
-                      layoutId={session.id}
                     >
                       <SessionRow
                         session={session}
@@ -406,7 +405,6 @@ function FullSidebar() {
                       animate="visible"
                       exit="exit"
                       layout
-                      layoutId={session.id}
                     >
                       <SessionRow
                         session={session}
@@ -505,7 +503,7 @@ function FullSidebar() {
               e.preventDefault();
               setCreateNewPanelOpen(true);
             }}
-            className="mt-1.5 flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-neutral-200 text-[13px] text-neutral-500 transition-colors duration-150 hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-700 active:scale-[0.98] dark:border-neutral-700 dark:text-neutral-400 dark:hover:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            className="flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-neutral-200 text-[13px] text-neutral-500 transition-colors duration-150 hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-700 active:scale-[0.98] dark:border-neutral-700 dark:text-neutral-400 dark:hover:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
           >
             <Grid2X2 className="h-3.5 w-3.5" />
             更多功能

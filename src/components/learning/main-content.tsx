@@ -22,8 +22,8 @@ function fmtDate(d: string) {
 // ─── Animation Variants ─────────────────────────────────────────────────────
 
 const msgVariants = {
-  hidden: { opacity: 0, y: 12, scale: 0.97 },
-  visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] } },
+  hidden: { opacity: 0, y: 10 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] } },
 };
 
 const dateSepVariants = {
@@ -132,15 +132,18 @@ export function MainContent() {
   // ── Chat view ──
   return (
     <div className="relative flex h-full flex-1 flex-col">
-      {/* Chat header */}
-      <div className="relative z-[41] flex h-14 shrink-0 items-center justify-between border-b border-neutral-200 px-6 dark:border-neutral-800">
-        <div className="min-w-0">
-          <h1 className="truncate text-[15px] font-medium text-neutral-900 dark:text-neutral-100">
-            {session?.title || '学习中'}
-          </h1>
-          <p className="text-[12px] text-neutral-400">{userMsgCount} 条对话</p>
-        </div>
-        <div className="flex items-center gap-1">
+      {/* Chat header — the inner row is constrained to the same max-width as
+          the message thread + input bar, so the title's left edge aligns
+          perfectly with the first message bubble below it (no stair-step). */}
+      <div className="relative z-[41] flex h-14 shrink-0 items-center border-b border-neutral-200 dark:border-neutral-800">
+        <div className="mx-auto flex w-full max-w-[720px] items-center justify-between px-6">
+          <div className="flex min-w-0 flex-col justify-center leading-tight">
+            <h1 className="truncate text-[15px] font-medium text-neutral-900 dark:text-neutral-100">
+              {session?.title || '学习中'}
+            </h1>
+            <p className="text-[11.5px] text-neutral-400 dark:text-neutral-500">{userMsgCount} 条对话</p>
+          </div>
+          <div className="flex items-center gap-1">
           <AnimatePresence mode="wait">
             {isStreaming && (
               <motion.div
@@ -180,8 +183,8 @@ export function MainContent() {
             content={isCourseGenerated ? '查看本主题的结构化课程' : '生成结构化课程'}
           >
             <motion.button
-              whileHover={{ scale: 1.08 }}
-              whileTap={{ scale: 0.92 }}
+              whileHover={{ scale: 1.06 }}
+              whileTap={{ scale: 0.94 }}
               onClick={() => setCoursePanelOpen(!coursePanelOpen)}
               className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
                 coursePanelOpen
@@ -199,8 +202,8 @@ export function MainContent() {
 
           <MouseFollowTooltip content="显示选项 · 主题与动态效果">
             <motion.button
-              whileHover={{ scale: 1.08 }}
-              whileTap={{ scale: 0.92 }}
+              whileHover={{ scale: 1.06 }}
+              whileTap={{ scale: 0.94 }}
               onClick={() => useLearningStore.getState().setSettingsPanelOpen(!useLearningStore.getState().settingsPanelOpen)}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
               aria-label="显示选项"
@@ -208,6 +211,7 @@ export function MainContent() {
               <MoreVertical className="h-4 w-4" />
             </motion.button>
           </MouseFollowTooltip>
+        </div>
         </div>
       </div>
 
@@ -272,7 +276,7 @@ export function MainContent() {
                 initial="hidden"
                 animate="visible"
                 exit="exit"
-                className="my-3 flex gap-3"
+                className="my-3 flex items-start gap-3"
               >
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-[11px] text-white dark:bg-white dark:text-neutral-900">
                   <GraduationCap className="h-3.5 w-3.5" />
@@ -307,7 +311,7 @@ export function MainContent() {
                 initial="hidden"
                 animate="visible"
                 exit="exit"
-                className="my-3 flex gap-3"
+                className="my-3 flex items-start gap-3"
               >
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-[11px] text-white dark:bg-white dark:text-neutral-900">
                   <GraduationCap className="h-3.5 w-3.5" />
@@ -315,7 +319,7 @@ export function MainContent() {
                 <div className="group relative min-w-0 max-w-[85%] rounded-xl rounded-tl-sm bg-neutral-100 px-3.5 py-2.5 text-[14px] leading-relaxed text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200">
                   <MarkdownRenderer content={streamingContent} streaming />
                   <motion.span
-                    className="ml-0.5 inline-block h-3.5 w-0.5 rounded-full bg-neutral-400 dark:bg-neutral-500"
+                    className="ml-0.5 inline-block h-[1.05em] w-0.5 translate-y-[0.15em] rounded-full bg-neutral-400 align-text-bottom dark:bg-neutral-500"
                     animate={{ opacity: [1, 0, 1] }}
                     transition={{ repeat: Infinity, duration: 0.8 }}
                   />
@@ -362,9 +366,10 @@ export function MainContent() {
         )}
       </AnimatePresence>
 
-      {/* Simple Chat Input */}
-      <div className="shrink-0 border-t border-neutral-200/50 px-6 pb-6 pt-4">
-        <div className="mx-auto max-w-[680px]">
+      {/* Simple Chat Input — aligned to the same max-width as the message
+          thread so the input's left/right edges line up with the bubbles. */}
+      <div className="shrink-0 border-t border-neutral-200/60 px-6 pb-6 pt-4 dark:border-neutral-800/60">
+        <div className="mx-auto max-w-[720px]">
           <SimpleChatInput
             value={input}
             onChange={setInput}
@@ -425,34 +430,37 @@ function SimpleChatInput({
         placeholder={placeholder}
         disabled={isStreaming}
         rows={1}
-        className="flex-1 resize-none border-0 bg-transparent py-1.5 text-[14px] leading-relaxed text-neutral-800 placeholder:text-neutral-400 focus:outline-none disabled:opacity-50 dark:text-neutral-200 dark:placeholder:text-neutral-500"
+        className="flex-1 resize-none border-0 bg-transparent py-1.5 text-[14px] leading-relaxed text-neutral-800 placeholder:text-neutral-400 focus:outline-none disabled:opacity-60 dark:text-neutral-100 dark:placeholder:text-neutral-500"
       />
       <AnimatePresence mode="wait">
         {isStreaming ? (
           <motion.button
             key="stop"
-            initial={{ scale: 0.8, opacity: 0 }}
+            initial={{ scale: 0.85, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.8, opacity: 0 }}
-            whileTap={{ scale: 0.9 }}
+            exit={{ scale: 0.85, opacity: 0 }}
+            transition={{ duration: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
+            whileTap={{ scale: 0.92 }}
             onClick={onStop}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-neutral-600 text-white transition-colors hover:bg-neutral-500 dark:bg-neutral-400 dark:text-neutral-900"
+            aria-label="停止"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-neutral-600 text-white transition-colors hover:bg-neutral-500 dark:bg-neutral-400 dark:text-neutral-900 dark:hover:bg-neutral-300"
           >
             <Square className="h-3 w-3 fill-current" />
           </motion.button>
         ) : (
           <motion.button
             key="send"
-            initial={{ scale: 0.8, opacity: 0 }}
+            initial={{ scale: 0.85, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.8, opacity: 0 }}
-            whileTap={{ scale: 0.9 }}
+            exit={{ scale: 0.85, opacity: 0 }}
+            transition={{ duration: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
+            whileTap={{ scale: 0.92 }}
             onClick={canSend ? onSend : undefined}
             disabled={!canSend}
             aria-label="发送"
             className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-200 ${
               canSend
-                ? 'bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100'
+                ? 'bg-[var(--brand)] text-[var(--brand-foreground)] hover:opacity-90'
                 : 'bg-neutral-100 text-neutral-300 dark:bg-neutral-800 dark:text-neutral-600'
             }`}
           >
@@ -483,7 +491,7 @@ function MsgBubble({ msg }: { msg: { role: string; content: string; createdAt: s
   }, [msg.content]);
 
   return (
-    <div className={`group/msg group flex items-end gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
+    <div className={`group/msg group flex items-start gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
       <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-medium ${
         isUser
           ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
@@ -580,8 +588,8 @@ function WelcomeView() {
       <div className="flex h-14 shrink-0 items-center justify-end px-6">
         <MouseFollowTooltip content="显示选项 · 主题与动态效果">
           <motion.button
-            whileHover={{ scale: 1.08 }}
-            whileTap={{ scale: 0.92 }}
+            whileHover={{ scale: 1.06 }}
+            whileTap={{ scale: 0.94 }}
             onClick={() => setSettingsPanelOpen(true)}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
             aria-label="显示选项"

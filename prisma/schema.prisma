@@ -1,0 +1,68 @@
+// AI Learning Platform Schema
+// Core philosophy: AI understands the learner first, then guides through dialogue
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Learning Session - a focused learning conversation
+model LearningSession {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  topic       String?              // Main learning topic
+  status      String   @default("active") // active, paused, completed, archived
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  messages       LearningMessage[]
+  knowledgeNodes KnowledgeNode[]
+  references     Reference[]
+}
+
+// Individual messages in the learning dialogue
+model LearningMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      String                // user, assistant, system
+  content   String                // Message content (markdown)
+  type      String   @default("dialogue") // dialogue, question, explanation, summary, encouragement, follow_up
+  thinking  String?               // AI's reasoning process
+  createdAt DateTime @default(now())
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// Knowledge nodes extracted/generated during learning
+model KnowledgeNode {
+  id          String   @id @default(cuid())
+  sessionId   String
+  title       String
+  content     String                // Explanation content (markdown)
+  category    String?               // concept, fact, principle, example, analogy
+  importance  Int      @default(3)   // 1-5 scale
+  mastered    Boolean  @default(false)
+  tags        String?               // Comma-separated tags
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// Reference sources collected during learning
+model Reference {
+  id        String   @id @default(cuid())
+  sessionId String
+  title     String
+  url       String?
+  type      String   @default("article") // article, book, video, paper, tutorial
+  note      String?               // Why this reference is relevant
+  createdAt DateTime @default(now())
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}

@@ -6,6 +6,7 @@ import { MoreVertical, BookOpen, GraduationCap, Send, Square, ArrowDown, Copy, C
 import { useLearningStore } from '@/store/learning-store';
 import { KnowledgeInline } from '@/components/learning/knowledge-inline';
 import { MarkdownRenderer } from '@/components/learning/markdown-renderer';
+import { MouseFollowTooltip } from '@/components/learning/mouse-follow-tooltip';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -67,6 +68,9 @@ export function MainContent() {
     streamingContent,
     knowledgeNodes,
     sendMessage,
+    setCoursePanelOpen,
+    coursePanelOpen,
+    isCourseGenerated,
   } = useLearningStore();
 
   const [input, setInput] = useState('');
@@ -168,6 +172,30 @@ export function MainContent() {
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* Course trigger — opens the course panel. Shows a tiny dot when a
+              course has been generated for this session, so the user knows
+              there's content to review. */}
+          <MouseFollowTooltip
+            content={isCourseGenerated ? '查看本主题的结构化课程' : '生成结构化课程'}
+          >
+            <motion.button
+              whileHover={{ scale: 1.08 }}
+              whileTap={{ scale: 0.92 }}
+              onClick={() => setCoursePanelOpen(!coursePanelOpen)}
+              className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+                coursePanelOpen
+                  ? 'bg-neutral-100 text-neutral-800 dark:bg-neutral-800 dark:text-neutral-100'
+                  : 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300'
+              }`}
+              aria-label="课程"
+            >
+              <BookOpen className="h-4 w-4" />
+              {isCourseGenerated && !coursePanelOpen && (
+                <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-neutral-700 dark:bg-neutral-300" />
+              )}
+            </motion.button>
+          </MouseFollowTooltip>
 
           <motion.button
             whileHover={{ scale: 1.08 }}

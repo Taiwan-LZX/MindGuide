@@ -118,8 +118,18 @@ function EmptyState({ icon: Icon, title, description }: { icon: React.ElementTyp
 // ─── 2. Task Planner View ───────────────────────────────────────────────────
 
 function TaskPlannerView() {
-  const { tasks, addTask, toggleTask, deleteTask } = useLearningStore();
+  const { tasks, addTask, toggleTask, deleteTask, isLoadingTasks } = useLearningStore();
   const [newTask, setNewTask] = React.useState('');
+  const [submitting, setSubmitting] = React.useState(false);
+
+  const submit = React.useCallback(async () => {
+    const t = newTask.trim();
+    if (!t || submitting) return;
+    setSubmitting(true);
+    setNewTask('');
+    await addTask(t);
+    setSubmitting(false);
+  }, [newTask, submitting, addTask]);
 
   const doneCount = tasks.filter(t => t.done).length;
   const pct = tasks.length > 0 ? (doneCount / tasks.length) * 100 : 0;
@@ -162,14 +172,15 @@ function TaskPlannerView() {
               placeholder="添加学习任务..."
               value={newTask}
               onChange={e => setNewTask(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && newTask.trim()) { addTask(newTask.trim()); setNewTask(''); } }}
+              onKeyDown={e => { if (e.key === 'Enter') { void submit(); } }}
               className="h-9 flex-1 rounded-lg border border-neutral-200 bg-white px-3 text-[13px] transition-colors duration-150 focus:border-neutral-300 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
             />
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.92 }}
-              onClick={() => { if (newTask.trim()) { addTask(newTask.trim()); setNewTask(''); } }}
-              className="flex h-9 w-9 items-center justify-center rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900"
+              onClick={() => { void submit(); }}
+              disabled={submitting}
+              className="flex h-9 w-9 items-center justify-center rounded-lg bg-neutral-900 text-white transition-opacity disabled:opacity-50 dark:bg-white dark:text-neutral-900"
             >
               <Plus className="h-4 w-4" />
             </motion.button>
@@ -177,7 +188,17 @@ function TaskPlannerView() {
 
           {/* Task list */}
           <AnimatePresence mode="popLayout" initial={false}>
-            {tasks.length === 0 && <EmptyState icon={Check} title="暂无任务" description="添加学习任务来规划你的学习路径" />}
+            {isLoadingTasks && tasks.length === 0 && (
+              <div className="space-y-1.5">
+                {[0, 1, 2].map(i => (
+                  <div key={i} className="flex items-center gap-3 rounded-lg bg-white px-3 py-2.5 dark:bg-neutral-900">
+                    <div className="h-5 w-5 shrink-0 rounded-md bg-neutral-100 dark:bg-neutral-800" />
+                    <div className="h-3 flex-1 rounded bg-neutral-100 dark:bg-neutral-800" style={{ width: `${60 - i * 12}%` }} />
+                  </div>
+                ))}
+              </div>
+            )}
+            {!isLoadingTasks && tasks.length === 0 && <EmptyState icon={Check} title="暂无任务" description="添加学习任务来规划你的学习路径" />}
             {tasks.map((task, i) => (
               <motion.div
                 key={task.id}
@@ -193,7 +214,7 @@ function TaskPlannerView() {
               >
                 <motion.button
                   whileTap={{ scale: 0.8 }}
-                  onClick={() => toggleTask(task.id)}
+                  onClick={() => { void toggleTask(task.id); }}
                   className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${
                     task.done
                       ? 'border-neutral-700 bg-neutral-700 text-white dark:border-neutral-300 dark:bg-neutral-300 dark:text-neutral-900'
@@ -207,7 +228,7 @@ function TaskPlannerView() {
                 </span>
                 <motion.button
                   whileTap={{ scale: 0.8 }}
-                  onClick={() => deleteTask(task.id)}
+                  onClick={() => { void deleteTask(task.id); }}
                   className="opacity-0 group-hover:opacity-100 flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700"
                 >
                   <Trash2 className="h-3 w-3" />
@@ -224,12 +245,24 @@ function TaskPlannerView() {
 // ─── 3. Learning Cards View ────────────────────────────────────────────────
 
 function LearningCardsView() {
-  const { cards, addCard, toggleCardMastered } = useLearningStore();
+  const { cards, addCard, toggleCardMastered, deleteCard, isLoadingCards } = useLearningStore();
   const [front, setFront] = React.useState('');
   const [back, setBack] = React.useState('');
   const [flipped, setFlipped] = React.useState<string | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
 
   const masteredCount = cards.filter(c => c.mastered).length;
+
+  const submit = React.useCallback(async () => {
+    const f = front.trim();
+    const b = back.trim();
+    if (!f || !b || submitting) return;
+    setSubmitting(true);
+    setFront('');
+    setBack('');
+    await addCard(f, b);
+    setSubmitting(false);
+  }, [front, back, submitting, addCard]);
 
   return (
     <>
@@ -247,7 +280,17 @@ function LearningCardsView() {
         <div className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar">
           <div className="mx-auto grid max-w-[600px] grid-cols-2 gap-3">
             <AnimatePresence mode="popLayout" initial={false}>
-              {cards.length === 0 && (
+              {isLoadingCards && cards.length === 0 && (
+                <>
+                  {[0, 1, 2, 3].map(i => (
+                    <div key={`sk-${i}`} className="flex min-h-[120px] flex-col justify-between rounded-xl border border-neutral-100 p-3 dark:border-neutral-800">
+                      <div className="h-3 w-3/4 rounded bg-neutral-100 dark:bg-neutral-800" />
+                      <div className="h-3 w-1/3 rounded bg-neutral-100 dark:bg-neutral-800" />
+                    </div>
+                  ))}
+                </>
+              )}
+              {!isLoadingCards && cards.length === 0 && (
                 <EmptyState key="empty" icon={RotateCcw} title="暂无卡片" description="创建闪卡来强化记忆" />
               )}
               {cards.map((card, i) => (
@@ -257,14 +300,23 @@ function LearningCardsView() {
                   variants={itemVariants}
                   initial="hidden"
                   animate="visible"
+                  exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.15 } }}
                   layout
                   onClick={() => setFlipped(flipped === card.id ? null : card.id)}
-                  className={`flex min-h-[120px] cursor-pointer flex-col justify-between rounded-xl border p-3 transition-all ${
+                  className={`group relative flex min-h-[120px] cursor-pointer flex-col justify-between rounded-xl border p-3 transition-all ${
                     card.mastered
                       ? 'border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/50'
                       : 'border-neutral-200 bg-white hover:border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:border-neutral-600'
                   }`}
                 >
+                  {/* Delete button — appears on hover */}
+                  <button
+                    onClick={e => { e.stopPropagation(); void deleteCard(card.id); }}
+                    className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded text-neutral-300 opacity-0 transition-opacity hover:bg-neutral-100 hover:text-neutral-500 group-hover:opacity-100 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+                    aria-label="删除卡片"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
                   <div>
                     <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-200">
                       {flipped === card.id ? card.back : card.front}
@@ -283,7 +335,7 @@ function LearningCardsView() {
                     <span className="text-[11px] text-neutral-400">{card.category}</span>
                     <motion.button
                       whileTap={{ scale: 0.8 }}
-                      onClick={e => { e.stopPropagation(); toggleCardMastered(card.id); }}
+                      onClick={e => { e.stopPropagation(); void toggleCardMastered(card.id); }}
                       className={`flex h-5 w-5 items-center justify-center rounded border ${
                         card.mastered ? 'border-neutral-700 bg-neutral-700 text-white dark:border-neutral-300 dark:bg-neutral-300 dark:text-neutral-900' : 'border-neutral-300 dark:border-neutral-600'
                       }`}
@@ -314,26 +366,15 @@ function LearningCardsView() {
                 placeholder="背面（答案）"
                 value={back}
                 onChange={e => setBack(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && front.trim() && back.trim()) {
-                    addCard(front.trim(), back.trim());
-                    setFront('');
-                    setBack('');
-                  }
-                }}
+                onKeyDown={e => { if (e.key === 'Enter') { void submit(); } }}
                 className="h-8 w-full rounded-md border border-neutral-200 bg-white px-2 text-[12px] transition-colors duration-150 focus:border-neutral-300 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
               />
               <motion.button
                 whileHover={{ scale: 1.04 }}
                 whileTap={{ scale: 0.96 }}
-                onClick={() => {
-                  if (front.trim() && back.trim()) {
-                    addCard(front.trim(), back.trim());
-                    setFront('');
-                    setBack('');
-                  }
-                }}
-                className="mt-auto flex items-center justify-center gap-1 rounded-lg bg-neutral-900 py-1.5 text-[12px] font-medium text-white dark:bg-white dark:text-neutral-900"
+                onClick={() => { void submit(); }}
+                disabled={submitting}
+                className="mt-auto flex items-center justify-center gap-1 rounded-lg bg-neutral-900 py-1.5 text-[12px] font-medium text-white transition-opacity disabled:opacity-50 dark:bg-white dark:text-neutral-900"
               >
                 <Plus className="h-3 w-3" /> 添加卡片
               </motion.button>

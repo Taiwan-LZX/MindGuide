@@ -126,6 +126,8 @@ interface LearningStore {
   // Feature state
   tasks: Array<{ id: string; title: string; done: boolean; priority: number; createdAt: string }>;
   cards: Array<{ id: string; front: string; back: string; category: string; mastered: boolean; createdAt: string }>;
+  isLoadingTasks: boolean;
+  isLoadingCards: boolean;
   achievements: Achievement[];
 
   // Stats state
@@ -178,11 +180,14 @@ interface LearningStore {
   setSettingsPanelOpen: (open: boolean) => void;
   setCreateNewPanelOpen: (open: boolean) => void;
   setActiveFeatureView: (view: string | null) => void;
-  addTask: (title: string, priority?: number) => void;
-  toggleTask: (id: string) => void;
-  deleteTask: (id: string) => void;
-  addCard: (front: string, back: string, category?: string) => void;
-  toggleCardMastered: (id: string) => void;
+  fetchTasks: (sessionId: string) => Promise<void>;
+  addTask: (title: string, priority?: number) => Promise<void>;
+  toggleTask: (id: string) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
+  fetchCards: (sessionId: string) => Promise<void>;
+  addCard: (front: string, back: string, category?: string) => Promise<void>;
+  toggleCardMastered: (id: string) => Promise<void>;
+  deleteCard: (id: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -222,6 +227,8 @@ const initialState = {
   activeFeatureView: null as string | null,
   tasks: [] as Array<{ id: string; title: string; done: boolean; priority: number; createdAt: string }>,
   cards: [] as Array<{ id: string; front: string; back: string; category: string; mastered: boolean; createdAt: string }>,
+  isLoadingTasks: false,
+  isLoadingCards: false,
   notesContent: '',
   notesPanelOpen: false,
   isSavingNotes: false,
@@ -319,6 +326,8 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       isCourseGenerated: false,
       notesContent: '',
       notesSaveStatus: 'idle',
+      tasks: [],
+      cards: [],
     });
     await Promise.all([
       get().fetchMessages(id),
@@ -326,6 +335,8 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       get().fetchReferences(id),
       get().fetchCourse(id),
       get().fetchNotes(id),
+      get().fetchTasks(id),
+      get().fetchCards(id),
     ]);
   },
 
@@ -819,21 +830,172 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
 
   // ── Feature Actions ─────────────────────────────────────────────────────
 
-  addTask: (title: string, priority: number = 3) => set((s) => ({
-    tasks: [...s.tasks, { id: `task-${Date.now()}`, title, done: false, priority, createdAt: new Date().toISOString() }],
-  })),
-  toggleTask: (id: string) => set((s) => ({
-    tasks: s.tasks.map(t => t.id === id ? { ...t, done: !t.done } : t),
-  })),
-  deleteTask: (id: string) => set((s) => ({
-    tasks: s.tasks.filter(t => t.id !== id),
-  })),
-  addCard: (front: string, back: string, category: string = '概念') => set((s) => ({
-    cards: [...s.cards, { id: `card-${Date.now()}`, front, back, category, mastered: false, createdAt: new Date().toISOString() }],
-  })),
-  toggleCardMastered: (id: string) => set((s) => ({
-    cards: s.cards.map(c => c.id === id ? { ...c, mastered: !c.mastered } : c),
-  })),
+  // ── Tasks (persisted) ────────────────────────────────────────────────────
+
+  fetchTasks: async (sessionId: string) => {
+    set({ isLoadingTasks: true });
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/tasks`);
+      if (!res.ok) { console.error('fetchTasks failed:', res.status); return; }
+      const data = await res.json();
+      set({ tasks: (data.tasks || []).map((t: { id: string; title: string; done: boolean; priority: number; createdAt: string }) => ({
+        id: t.id,
+        title: t.title,
+        done: t.done,
+        priority: t.priority,
+        createdAt: typeof t.createdAt === 'string' ? t.createdAt : new Date(t.createdAt as unknown as string).toISOString(),
+      })) });
+    } catch (e) {
+      console.error('fetchTasks error:', e);
+    } finally {
+      set({ isLoadingTasks: false });
+    }
+  },
+
+  addTask: async (title: string, priority: number = 3) => {
+    const { currentSessionId } = get();
+    if (!currentSessionId) return;
+    const t = title.trim();
+    if (!t) return;
+    try {
+      const res = await fetch(`/api/sessions/${currentSessionId}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: t, priority }),
+      });
+      if (!res.ok) { console.error('addTask failed:', res.status); return; }
+      const { task } = await res.json();
+      set((s) => ({
+        tasks: [...s.tasks, {
+          id: task.id,
+          title: task.title,
+          done: task.done,
+          priority: task.priority,
+          createdAt: typeof task.createdAt === 'string' ? task.createdAt : new Date(task.createdAt).toISOString(),
+        }],
+      }));
+    } catch (e) {
+      console.error('addTask error:', e);
+    }
+  },
+
+  toggleTask: async (id: string) => {
+    // Optimistic update
+    const prev = get().tasks;
+    const target = prev.find(t => t.id === id);
+    if (!target) return;
+    set({ tasks: prev.map(t => t.id === id ? { ...t, done: !t.done } : t) });
+    try {
+      const res = await fetch(`/api/tasks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ done: !target.done }),
+      });
+      if (!res.ok) {
+        // Rollback on failure
+        set({ tasks: prev });
+        console.error('toggleTask failed:', res.status);
+      }
+    } catch (e) {
+      set({ tasks: prev });
+      console.error('toggleTask error:', e);
+    }
+  },
+
+  deleteTask: async (id: string) => {
+    const prev = get().tasks;
+    set({ tasks: prev.filter(t => t.id !== id) });
+    try {
+      await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+    } catch (e) {
+      set({ tasks: prev });
+      console.error('deleteTask error:', e);
+    }
+  },
+
+  // ── Cards (persisted) ────────────────────────────────────────────────────
+
+  fetchCards: async (sessionId: string) => {
+    set({ isLoadingCards: true });
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/cards`);
+      if (!res.ok) { console.error('fetchCards failed:', res.status); return; }
+      const data = await res.json();
+      set({ cards: (data.cards || []).map((c: { id: string; front: string; back: string; category: string; mastered: boolean; createdAt: string }) => ({
+        id: c.id,
+        front: c.front,
+        back: c.back,
+        category: c.category,
+        mastered: c.mastered,
+        createdAt: typeof c.createdAt === 'string' ? c.createdAt : new Date(c.createdAt as unknown as string).toISOString(),
+      })) });
+    } catch (e) {
+      console.error('fetchCards error:', e);
+    } finally {
+      set({ isLoadingCards: false });
+    }
+  },
+
+  addCard: async (front: string, back: string, category: string = '概念') => {
+    const { currentSessionId } = get();
+    if (!currentSessionId) return;
+    const f = front.trim();
+    const b = back.trim();
+    if (!f || !b) return;
+    try {
+      const res = await fetch(`/api/sessions/${currentSessionId}/cards`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ front: f, back: b, category }),
+      });
+      if (!res.ok) { console.error('addCard failed:', res.status); return; }
+      const { card } = await res.json();
+      set((s) => ({
+        cards: [...s.cards, {
+          id: card.id,
+          front: card.front,
+          back: card.back,
+          category: card.category,
+          mastered: card.mastered,
+          createdAt: typeof card.createdAt === 'string' ? card.createdAt : new Date(card.createdAt).toISOString(),
+        }],
+      }));
+    } catch (e) {
+      console.error('addCard error:', e);
+    }
+  },
+
+  toggleCardMastered: async (id: string) => {
+    const prev = get().cards;
+    const target = prev.find(c => c.id === id);
+    if (!target) return;
+    set({ cards: prev.map(c => c.id === id ? { ...c, mastered: !c.mastered } : c) });
+    try {
+      const res = await fetch(`/api/cards/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mastered: !target.mastered }),
+      });
+      if (!res.ok) {
+        set({ cards: prev });
+        console.error('toggleCardMastered failed:', res.status);
+      }
+    } catch (e) {
+      set({ cards: prev });
+      console.error('toggleCardMastered error:', e);
+    }
+  },
+
+  deleteCard: async (id: string) => {
+    const prev = get().cards;
+    set({ cards: prev.filter(c => c.id !== id) });
+    try {
+      await fetch(`/api/cards/${id}`, { method: 'DELETE' });
+    } catch (e) {
+      set({ cards: prev });
+      console.error('deleteCard error:', e);
+    }
+  },
 
   // ── Reset ─────────────────────────────────────────────────────────────────
 

@@ -25,6 +25,8 @@ model LearningSession {
   references     Reference[]
   notes          Note?
   courseModules  CourseModule[]
+  tasks          Task[]
+  cards          Card[]
 }
 
 // Individual messages in the learning dialogue
@@ -107,4 +109,34 @@ model CourseLesson {
   updatedAt DateTime @updatedAt
 
   module CourseModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+}
+
+// Per-session learning task (planner). Persisted so a refresh doesn't wipe
+// the user's study plan.
+model Task {
+  id        String   @id @default(cuid())
+  sessionId String
+  title     String
+  done      Boolean  @default(false)
+  priority  Int      @default(3)          // 1 (low) – 5 (high)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// Per-session flashcard. Persisted for spaced-repetition review.
+model Card {
+  id        String   @id @default(cuid())
+  sessionId String
+  front     String                          // prompt / question
+  back      String                          // answer / explanation
+  category  String   @default("general")
+  mastered  Boolean  @default(false)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 }

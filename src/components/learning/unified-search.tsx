@@ -6,9 +6,7 @@ import {
   Search,
   X,
   MessageSquare,
-  FileText,
   BookOpen,
-  Link2,
   ArrowUp,
   ArrowDown,
   Keyboard,
@@ -16,7 +14,7 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ResultCategory = 'chat' | 'pdf' | 'lesson' | 'link';
+type ResultCategory = 'chat' | 'lesson';
 
 interface SearchResult {
   id: string;
@@ -31,12 +29,10 @@ interface SearchResult {
 
 const categoryConfig: Record<ResultCategory, { label: string; icon: React.ElementType }> = {
   chat: { label: '对话', icon: MessageSquare },
-  pdf: { label: 'PDF', icon: FileText },
-  lesson: { label: '课程', icon: BookOpen },
-  link: { label: '链接', icon: Link2 },
+  lesson: { label: '主题', icon: BookOpen },
 };
 
-const allCategories: ResultCategory[] = ['chat', 'pdf', 'lesson', 'link'];
+const allCategories: ResultCategory[] = ['chat', 'lesson'];
 
 // ─── Animation ───────────────────────────────────────────────────────────────
 
@@ -57,16 +53,19 @@ const itemVariants = {
   }),
 };
 
-// ─── Mock search results (will be replaced by real data) ──────────────────────
-
-const mockResults: SearchResult[] = [
-  { id: '1', category: 'chat', title: '机器学习基础', subtitle: '讨论了反向传播和梯度下降的数学原理', timestamp: '2小时前', sessionId: 's1' },
-  { id: '2', category: 'chat', title: 'JavaScript 异步', subtitle: 'Promise、async/await 和事件循环机制', timestamp: '5小时前', sessionId: 's2' },
-  { id: '3', category: 'pdf', title: 'CogAlpha 方法论解析', subtitle: 'PDF · 26页 · AI方法论全整合', timestamp: '1天前' },
-  { id: '4', category: 'lesson', title: '反向传播算法详解', subtitle: '理论 · 模块2 · 15:30', timestamp: '2小时前' },
-  { id: '5', category: 'lesson', title: '梯度下降与优化方法', subtitle: '理论 · 模块3 · 22:10', timestamp: '2小时前' },
-  { id: '6', category: 'link', title: '深度学习入门教程 — 知乎', subtitle: 'zhihu.com · 收藏于学习资源', timestamp: '3天前' },
-];
+// ─── Relative time formatter ─────────────────────────────────────────────────
+function relTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return '刚刚';
+  if (mins < 60) return `${mins}分钟前`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}小时前`;
+  const days = Math.floor(hrs / 24);
+  if (days === 1) return '昨天';
+  if (days < 7) return `${days}天前`;
+  return new Date(iso).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -80,39 +79,60 @@ export function UnifiedSearch({ value, onChange, onResultClick }: UnifiedSearchP
   const [activeCategory, setActiveCategory] = useState<ResultCategory | 'all'>('all');
   const [isOpen, setIsOpen] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState(-1);
+  const [allResults, setAllResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const reqIdRef = useRef(0);
 
-  // Filter results by query and category
-  const filteredResults = useMemo(() => {
-    if (!value.trim()) return [];
-    const q = value.toLowerCase();
-    let results = mockResults.filter(
-      r => r.title.toLowerCase().includes(q) || r.subtitle.toLowerCase().includes(q)
-    );
-    if (activeCategory !== 'all') {
-      results = results.filter(r => r.category === activeCategory);
+  // Debounced server search — 220ms after the user stops typing.
+  useEffect(() => {
+    const q = value.trim();
+    if (!q) {
+      setAllResults([]);
+      setIsSearching(false);
+      return;
     }
-    return results;
-  }, [value, activeCategory]);
+    setIsSearching(true);
+    const myId = ++reqIdRef.current;
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&limit=20`);
+        if (!res.ok) { setAllResults([]); return; }
+        const data = await res.json();
+        // Only apply if this is still the latest request.
+        if (myId === reqIdRef.current) {
+          setAllResults((data.results || []) as SearchResult[]);
+        }
+      } catch {
+        if (myId === reqIdRef.current) setAllResults([]);
+      } finally {
+        if (myId === reqIdRef.current) setIsSearching(false);
+      }
+    }, 220);
+    return () => clearTimeout(t);
+  }, [value]);
+
+  // Filter results by category tab
+  const filteredResults = useMemo(() => {
+    if (activeCategory === 'all') return allResults;
+    return allResults.filter(r => r.category === activeCategory);
+  }, [allResults, activeCategory]);
 
   // Count per category
   const categoryCounts = useMemo(() => {
-    if (!value.trim()) return {};
-    const q = value.toLowerCase();
     const counts: Record<string, number> = {};
     for (const cat of allCategories) {
-      counts[cat] = mockResults.filter(
-        r => r.category === cat && (r.title.toLowerCase().includes(q) || r.subtitle.toLowerCase().includes(q))
-      ).length;
+      counts[cat] = allResults.filter(r => r.category === cat).length;
     }
     return counts;
-  }, [value]);
+  }, [allResults]);
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     onChange(e.target.value);
     setIsOpen(true);
     setFocusedIndex(-1);
+    setActiveCategory('all');
   }, [onChange]);
 
   const handleFocus = useCallback(() => {
@@ -250,7 +270,12 @@ export function UnifiedSearch({ value, onChange, onResultClick }: UnifiedSearchP
 
             {/* Results */}
             <div className="max-h-[260px] overflow-y-auto custom-scrollbar">
-              {filteredResults.length > 0 ? (
+              {isSearching ? (
+                <div className="flex flex-col items-center py-8">
+                  <div className="h-4 w-4 rounded-full border-[1.5px] border-neutral-200 border-t-neutral-500 animate-spin dark:border-neutral-700 dark:border-t-neutral-300" />
+                  <p className="mt-2 text-[12px] text-neutral-400 dark:text-neutral-500">搜索中…</p>
+                </div>
+              ) : filteredResults.length > 0 ? (
                 <motion.div
                   initial="hidden"
                   animate="visible"
@@ -287,7 +312,7 @@ export function UnifiedSearch({ value, onChange, onResultClick }: UnifiedSearchP
                             {highlightText(result.title, value)}
                           </p>
                           <p className="truncate text-[11px] text-neutral-400 dark:text-neutral-500">
-                            {result.subtitle}
+                            {highlightText(result.subtitle, value)}
                           </p>
                         </div>
 
@@ -297,7 +322,7 @@ export function UnifiedSearch({ value, onChange, onResultClick }: UnifiedSearchP
                             {config.label}
                           </span>
                           <span className="text-[10px] text-neutral-300 dark:text-neutral-600">
-                            {result.timestamp}
+                            {relTime(result.timestamp)}
                           </span>
                         </div>
                       </motion.button>

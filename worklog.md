@@ -463,3 +463,114 @@ GET /api/sessions/[id]/messages 200 in 55ms  (re-fetch after AI response)
 - `src/components/learning/unified-search.tsx` — 增加 ⌘K kbd 提示
 - `src/components/learning/main-content.tsx` — MsgBubble 悬停元信息 + 复制按钮 + 左侧 accent 线
 - `src/app/page.tsx` — 挂载 <CommandPalette />
+
+---
+
+## 第六轮迭代 — Cron webDevReview：课程入口 + 任务/卡片持久化 + 真实搜索 (自动评审驱动)
+
+### 触发与判断
+本轮为定时 webDevReview 自动触发。读取 worklog.md 了解前 5 轮进展后，用 agent-browser 对所有视图做端到端 QA。项目状态稳定（lint 通过、无运行时错误），故本轮聚焦于「未解决问题」清单中的中优先项 + QA 中发现的新缺口。
+
+### QA 发现的问题
+
+**QA 1（导航缺口）：课程面板在完整侧边栏视图无入口**
+- 复现：在完整侧边栏模式下，打开任意会话 → 聊天头部只有设置（三点）按钮，无课程入口；课程面板只能通过折叠侧边栏的 BookOpen 图标打开
+- 进一步：⌘K 命令面板搜索「课程」返回 0 结果（无对应命令）
+- 影响：用户在主视图下无法触达课程功能，破坏功能可达性
+
+**QA 2（数据丢失）：任务规划 / 学习卡片仅存内存**
+- 复现：打开任务规划 → 添加任务 → 刷新页面 → 任务消失；卡片同理
+- 根因：store 中 `tasks`/`cards` 为 Zustand 内存状态，`addTask`/`addCard`/`toggleTask`/`toggleCardMastered` 仅 `set()` 本地数组，无 API 调用、无 Prisma 模型
+- 影响：用户精心规划的学习计划 / 闪卡一刷新就没了，严重破坏实用性
+
+**QA 3（假数据）：侧边栏 UnifiedSearch 使用 mockResults**
+- 复现：侧边栏搜索「梯度」→ 返回硬编码的「CogAlpha 方法论解析」「zhihu.com」等假结果
+- 根因：`unified-search.tsx` 内有 `mockResults` 数组，filter 本地数据
+- 影响：搜索功能形同虚设，用户搜不到真实会话/消息
+
+### 已完成的修改
+
+**1. 修复课程入口缺口（导航）**
+- `main-content.tsx`：聊天头部增加 BookOpen 课程按钮（设置按钮左侧），`onClick={() => setCoursePanelOpen(!coursePanelOpen)}`；已生成课程时右上角显示小圆点提示；包裹 `MouseFollowTooltip` 显示「查看/生成本主题的结构化课程」
+- `command-palette.tsx`：「操作」组新增「打开课程面板」命令，搜索「课程/课程/module/curriculum/lesson」可命中
+- 验证：agent-browser 点聊天头部 BookOpen → 课程面板弹出（标题「课程」+「AI 尚未了解你的学习状态」）✅；⌘K 搜「课程」→ 1 项「打开课程面板」→ Enter 弹出面板 ✅
+
+**2. 任务 & 卡片持久化（数据层 + API + store）**
+
+*Prisma schema (`prisma/schema.prisma`)*
+- 新增 `Task` 模型：id/sessionId/title/done/priority(1-5)/order/createdAt/updatedAt，关联 LearningSession（onDelete: Cascade）
+- 新增 `Card` 模型：id/sessionId/front/back/category/mastered/order/createdAt/updatedAt，关联 LearningSession（onDelete: Cascade）
+- LearningSession 增加 `tasks Task[]` + `cards Card[]` 关系
+- `bun run db:push` 同步 schema + 重新生成 Prisma Client
+
+*API 路由*
+- `GET/POST /api/sessions/[id]/tasks` — 列表（按 order/createdAt 排序）/ 新建（priority clamp 1-5，order 自动追加）
+- `GET/POST /api/sessions/[id]/cards` — 列表 / 新建（front+back 必填，category 默认 general）
+- `PATCH/DELETE /api/tasks/[id]` — 更新 done/title/priority / 删除
+- `PATCH/DELETE /api/cards/[id]` — 更新 mastered/front/back/category / 删除
+
+*Store (`store/learning-store.ts`)*
+- 接口新增 `fetchTasks`/`fetchCards`/`deleteCard` + `isLoadingTasks`/`isLoadingCards` 状态
+- `selectSession` 重置 tasks/cards 并加入 `fetchTasks`/`fetchCards` 到并行预取
+- `addTask`/`toggleTask`/`deleteTask`/`addCard`/`toggleCardMastered`/`deleteCard` 全部改为 async，调用 API；toggle/delete 采用**乐观更新 + 失败回滚**（保留 prev 引用，错误时 `set({ tasks: prev })`）
+- 时间戳统一规范化（ISO string）
+
+*UI (`feature-views.tsx`)*
+- TaskPlannerView：用 `submit()` async handler 包裹 addTask，提交时禁用按钮 + 清空输入；加载中显示 3 行骨架屏（复选框占位 + 文本条）；toggle/delete 用 `void` 标注 floating promise
+- LearningCardsView：同上 submit handler；加载中显示 4 张骨架卡片；每张卡片右上角加 hover 删除按钮（Trash2）；exit 动画补全
+
+*验证*
+- agent-browser 添加 2 个任务 → POST 200 ×2 → DOM 显示「复习梯度下降公式」「完成神经网络作业」+ 进度 0/2 ✅
+- 刷新页面 → 重新进入任务规划 → 2 个任务仍在 ✅（持久化确认）
+- 添加 1 张卡片「什么是梯度下降 / 一种一阶迭代优化算法」→ POST 200 → 显示「1 张卡片」✅
+
+**3. UnifiedSearch 接入真实数据（替换 mockResults）**
+- 新建 `GET /api/search?q=<query>&limit=<n>`：先搜 LearningSession（title/topic contains），再搜 LearningMessage（content contains，含 session 关联），消息预览截取匹配点前后 24+80 字符并加省略号
+- `unified-search.tsx` 重写：
+  - 移除 `mockResults` + `pdf`/`link` 假分类，仅保留 `chat`（对话消息）+ `lesson`（主题）两类
+  - 新增 debounced（220ms）server search，用 `reqIdRef` 防止竞态（只采纳最新请求结果）
+  - 搜索中显示 spinner + 「搜索中…」
+  - 时间戳用 `relTime(iso)` 实时计算（刚刚/N分钟前/N小时前/昨天/N天前/月日）
+  - 副标题也做高亮（之前只高亮 title）
+- 验证：搜「梯度」→ GET /api/search?q=梯度 200 → 返回真实消息（「让我们一步步来理解梯度下降」「你好！很高兴和你聊梯度下降」），均为「对话」类，时间戳正确 ✅
+
+### 验证结果
+- `bun run lint` ✅ 零错误零警告
+- `bun run db:push` ✅ schema 同步 + Prisma Client 重新生成
+- agent-browser + VLM 端到端：
+  - 聊天头部课程按钮 + 鼠标跟随提示 ✅
+  - ⌘K「打开课程面板」命令 ✅
+  - 任务添加/持久化（刷新后仍在）✅
+  - 卡片添加 ✅
+  - 侧边栏搜索返回真实数据（非 mock）✅
+  - 加载骨架屏显示 ✅
+  - 首页/会话视图布局完整，单色学术风保持 ✅
+- dev.log 无运行时错误
+- 注意：本轮重启了 dev server（pkill next-server + daemonize.py 重启）以让新 Prisma Client 生效——globalForPrisma 在 dev 模式会缓存旧 client，schema 变更后必须重启
+
+### 当前项目状态
+- Dev server: PID 24221，运行在 http://localhost:3000（重启后）
+- 数据持久化完整覆盖：会话 / 消息 / 知识节点 / 参考资料 / 笔记 / 课程 / 任务 / 卡片 全部入库
+- 搜索功能真实可用（会话标题 + 消息内容）
+- 课程入口三通道可达：聊天头部按钮 / ⌘K 命令 / 折叠侧边栏图标
+- 论文风学术 UI 一致性保持
+
+### 未解决问题 / 下一阶段建议
+1. **【中】卡片复习模式**：当前仅支持翻面查看，可加「开始复习」模式（随机/顺序翻牌 + 掌握度统计 + 间隔重复算法 SM-2）
+2. **【中】任务排序与优先级 UI**：当前 priority 字段已存但 UI 未展示/编辑，可加优先级标签 + 拖拽排序
+3. **【低】认证系统**：NextAuth.js v4
+4. **【低】daemonize.py watchdog**：端口健康检查 + 自动重启
+5. **【低】命令面板扩展**：「最近会话」分组、危险操作确认
+
+### 关键文件变更清单
+- `prisma/schema.prisma` — 新增 Task + Card 模型 + LearningSession 关系
+- `src/app/api/sessions/[id]/tasks/route.ts` — 新建：任务列表/创建 API
+- `src/app/api/sessions/[id]/cards/route.ts` — 新建：卡片列表/创建 API
+- `src/app/api/tasks/[id]/route.ts` — 新建：任务 PATCH/DELETE
+- `src/app/api/cards/[id]/route.ts` — 新建：卡片 PATCH/DELETE
+- `src/app/api/search/route.ts` — 新建：跨会话+消息真实搜索
+- `src/store/learning-store.ts` — tasks/cards 全套异步持久化 + selectSession 预取
+- `src/components/learning/feature-views.tsx` — TaskPlanner/Cards 视图异步提交 + 骨架屏 + 删除按钮
+- `src/components/learning/main-content.tsx` — 聊天头部课程按钮 + 提示框
+- `src/components/learning/command-palette.tsx` — 「打开课程面板」命令
+- `src/components/learning/unified-search.tsx` — 替换 mock 为真实 API + debounce + 骨架屏

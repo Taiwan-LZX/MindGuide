@@ -45,6 +45,7 @@ function useStaticCommands(close: () => void): Command[] {
     setCreateNewPanelOpen,
     setSettingsPanelOpen,
     setSidebarOpen,
+    setCoursePanelOpen,
     sidebarOpen,
   } = useLearningStore();
   const { setTheme, theme } = useTheme();
@@ -144,6 +145,15 @@ function useStaticCommands(close: () => void): Command[] {
       },
       // ── Actions ──
       {
+        id: 'act-course',
+        label: '打开课程面板',
+        hint: '查看或生成本主题的结构化课程',
+        icon: BookOpen,
+        group: '操作',
+        keywords: 'course lesson module curriculum 课程 模块 教程',
+        action: run(() => setCoursePanelOpen(true)),
+      },
+      {
         id: 'act-more',
         label: '打开功能面板',
         hint: '展开更多功能浮层',
@@ -181,7 +191,7 @@ function useStaticCommands(close: () => void): Command[] {
       },
     ];
     return cmds;
-  }, [setActiveFeatureView, setCreateNewPanelOpen, setSettingsPanelOpen, setSidebarOpen, sidebarOpen, setTheme, theme, run]);
+  }, [setActiveFeatureView, setCreateNewPanelOpen, setSettingsPanelOpen, setSidebarOpen, setCoursePanelOpen, sidebarOpen, setTheme, theme, run]);
 }
 
 // ─── Session commands (dynamic) ───────────────────────────────────────────

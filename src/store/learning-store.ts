@@ -88,6 +88,15 @@ export interface LearningStats {
   learningTimeLabel: string;
   maxRoundsInOneSession: number;
   currentStreak: number;
+  // Card / SM-2 review metrics
+  totalCards: number;
+  masteredCards: number;
+  dueCards: number;
+  reviewedCards: number;
+  avgEase: number;
+  // Task metrics
+  totalTasks: number;
+  doneTasks: number;
 }
 
 // ─── Store Interface ────────────────────────────────────────────────────────
@@ -241,6 +250,13 @@ const initialStats: LearningStats = {
   learningTimeLabel: '0m',
   maxRoundsInOneSession: 0,
   currentStreak: 0,
+  totalCards: 0,
+  masteredCards: 0,
+  dueCards: 0,
+  reviewedCards: 0,
+  avgEase: 2.5,
+  totalTasks: 0,
+  doneTasks: 0,
 };
 
 const initialState = {
@@ -410,24 +426,27 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
   },
 
   deleteSession: async (id: string) => {
+    // Optimistic UI: remove from local state FIRST so the sidebar reacts
+    // instantly. The DELETE endpoint is idempotent (P2025 → 200), so a
+    // duplicate click or a stale id won't cause a retry storm.
+    const { currentSessionId, sessions } = get();
+    const isCurrent = currentSessionId === id;
+    set({
+      sessions: sessions.filter((s) => s.id !== id),
+      currentSessionId: isCurrent ? null : currentSessionId,
+      // Also clear related data when deleting current session
+      ...(isCurrent ? {
+        messages: [],
+        knowledgeNodes: [],
+        references: [],
+        courseModules: [],
+        isCourseGenerated: false,
+        notesContent: '',
+      } : {}),
+    });
     try {
       const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
-      if (!res.ok) { console.error('deleteSession failed:', res.status); return; }
-      const { currentSessionId, sessions } = get();
-      const isCurrent = currentSessionId === id;
-      set({
-        sessions: sessions.filter((s) => s.id !== id),
-        currentSessionId: isCurrent ? null : currentSessionId,
-        // Also clear related data when deleting current session
-        ...(isCurrent ? {
-          messages: [],
-          knowledgeNodes: [],
-          references: [],
-          courseModules: [],
-          isCourseGenerated: false,
-          notesContent: '',
-        } : {}),
-      });
+      if (!res.ok) { console.error('deleteSession failed:', res.status); }
     } catch (error) {
       console.error('Failed to delete session:', error);
     }

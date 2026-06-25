@@ -23,6 +23,9 @@ import {
   RotateCw,
   StickyNote,
   GripVertical,
+  Layers3,
+  ListChecks,
+  Sparkles,
 } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 // PDFImportView removed during cleanup — feature replaced with notes editor
@@ -737,6 +740,100 @@ function AchievementsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEle
 
 // ─── 5. Stats View ───────────────────────────────────────────────────────────
 
+// ─── Stats view helper components ──────────────────────────────────────────
+
+// A gauge icon (lucide doesn't export "Gauge" in all versions; alias Activity)
+const GaugeIcon = BarChart3;
+
+/** Circular progress ring showing mastered / total cards. */
+function ReviewRing({ mastered, total }: { mastered: number; total: number }) {
+  const pct = total > 0 ? mastered / total : 0;
+  const radius = 28;
+  const circumference = 2 * Math.PI * radius;
+  const dash = circumference * pct;
+  return (
+    <div className="relative h-[72px] w-[72px] shrink-0">
+      <svg className="h-full w-full -rotate-90" viewBox="0 0 72 72">
+        <circle
+          cx="36" cy="36" r={radius}
+          fill="none"
+          strokeWidth="5"
+          className="stroke-neutral-100 dark:stroke-neutral-800"
+        />
+        <motion.circle
+          cx="36" cy="36" r={radius}
+          fill="none"
+          strokeWidth="5"
+          strokeLinecap="round"
+          className="stroke-neutral-800 dark:stroke-neutral-200"
+          strokeDasharray={`${dash} ${circumference}`}
+          initial={{ strokeDasharray: `0 ${circumference}` }}
+          animate={{ strokeDasharray: `${dash} ${circumference}` }}
+          transition={{ duration: 0.8, ease: [0.25, 0.1, 0.25, 1] }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-[15px] font-bold tabular-nums text-neutral-900 dark:text-neutral-100">
+          {Math.round(pct * 100)}%
+        </span>
+        <span className="text-[8px] uppercase tracking-wide text-neutral-400">掌握</span>
+      </div>
+    </div>
+  );
+}
+
+/** Horizontal progress bar for a single review metric. */
+function ReviewBar({
+  label, value, total, tone,
+}: {
+  label: string;
+  value: number;
+  total: number;
+  tone: 'mature' | 'due' | 'young';
+}) {
+  const pct = total > 0 ? Math.min(100, (value / total) * 100) : 0;
+  const toneClass = {
+    mature: 'bg-neutral-800 dark:bg-neutral-200',
+    due: 'bg-neutral-400 dark:bg-neutral-500',
+    young: 'bg-neutral-300 dark:bg-neutral-600',
+  }[tone];
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[11px] text-neutral-500 dark:text-neutral-400">{label}</span>
+        <span className="text-[11px] font-medium tabular-nums text-neutral-700 dark:text-neutral-300">{value}</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
+        <motion.div
+          className={`h-full rounded-full ${toneClass}`}
+          initial={{ width: 0 }}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.7, ease: [0.25, 0.1, 0.25, 1] }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Compact labelled stat for the footer row. */
+function MiniStat({
+  icon: Icon, label, value,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <Icon className="h-3.5 w-3.5 text-neutral-400" />
+      <div>
+        <p className="text-[13px] font-semibold tabular-nums text-neutral-800 dark:text-neutral-200">{value}</p>
+        <p className="text-[9px] uppercase tracking-wide text-neutral-400">{label}</p>
+      </div>
+    </div>
+  );
+}
+
 function StatsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
   const { stats, weeklyActivity, fetchStats, isLoadingStats } = useLearningStore();
 
@@ -814,6 +911,75 @@ function StatsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | 
               </motion.div>
             ))}
           </div>
+
+          {/* ─── Review progress (SM-2 cards + tasks) ─────────────────────────── */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: 0.2 } }}
+            className="mb-6 rounded-xl border border-neutral-100 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-3.5 w-3.5 text-neutral-400" />
+                <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">复习进度</p>
+              </div>
+              {(stats?.dueCards ?? 0) > 0 && (
+                <span className="rounded-full bg-neutral-900 px-2 py-0.5 text-[10px] font-medium text-white dark:bg-neutral-100 dark:text-neutral-900">
+                  {stats?.dueCards} 张待复习
+                </span>
+              )}
+            </div>
+
+            {/* Mastery ring + breakdown */}
+            <div className="flex items-center gap-5">
+              {/* Circular progress — mastered / total */}
+              <ReviewRing
+                mastered={stats?.masteredCards ?? 0}
+                total={stats?.totalCards ?? 0}
+              />
+
+              {/* Breakdown bars */}
+              <div className="flex-1 space-y-2.5">
+                <ReviewBar
+                  label="已掌握"
+                  value={stats?.masteredCards ?? 0}
+                  total={stats?.totalCards ?? 0}
+                  tone="mature"
+                />
+                <ReviewBar
+                  label="待复习"
+                  value={stats?.dueCards ?? 0}
+                  total={stats?.totalCards ?? 0}
+                  tone="due"
+                />
+                <ReviewBar
+                  label="已复习"
+                  value={stats?.reviewedCards ?? 0}
+                  total={stats?.totalCards ?? 0}
+                  tone="young"
+                />
+              </div>
+            </div>
+
+            {/* Footer mini-stats */}
+            <div className="mt-4 grid grid-cols-3 gap-3 border-t border-neutral-100 pt-4 dark:border-neutral-800">
+              <MiniStat
+                icon={Layers3}
+                label="卡片总数"
+                value={stats?.totalCards ?? 0}
+              />
+              <MiniStat
+                icon={GaugeIcon}
+                label="平均 Ease"
+                value={(stats?.avgEase ?? 2.5).toFixed(2)}
+              />
+              <MiniStat
+                icon={ListChecks}
+                label="任务完成"
+                value={`${stats?.doneTasks ?? 0}/${stats?.totalTasks ?? 0}`}
+              />
+            </div>
+          </motion.div>
 
           {/* Weekly activity (real data from /api/stats) */}
           <motion.div

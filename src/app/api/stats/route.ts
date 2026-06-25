@@ -11,6 +11,8 @@ export async function GET() {
       allKnowledge,
       masteredKnowledge,
       recentSessions,
+      allCards,
+      allTasks,
     ] = await Promise.all([
       db.learningSession.findMany({ select: { id: true, createdAt: true, updatedAt: true, status: true } }),
       db.learningMessage.findMany({ select: { id: true, role: true, sessionId: true, createdAt: true } }),
@@ -21,6 +23,8 @@ export async function GET() {
         orderBy: { updatedAt: 'desc' },
         select: { id: true, updatedAt: true, createdAt: true },
       }),
+      db.card.findMany({ select: { id: true, mastered: true, ease: true, dueAt: true, lastReviewedAt: true, repetition: true } }),
+      db.task.findMany({ select: { id: true, done: true } }),
     ]);
 
     // Per-session message counts (for max-round achievement & overall totals)
@@ -150,6 +154,19 @@ export async function GET() {
       .sort((a, b) => b.messageCount - a.messageCount)
       .slice(0, 5);
 
+    // ─── Card / SM-2 review metrics ─────────────────────────────────────────
+    const now = new Date();
+    const masteredCards = allCards.filter(c => c.mastered).length;
+    const dueCards = allCards.filter(c => c.dueAt && c.dueAt <= now).length;
+    const reviewedCards = allCards.filter(c => c.lastReviewedAt !== null).length;
+    const reviewedEase = allCards.filter(c => c.lastReviewedAt !== null);
+    const avgEase = reviewedEase.length > 0
+      ? reviewedEase.reduce((s, c) => s + c.ease, 0) / reviewedEase.length
+      : 2.5;
+
+    // ─── Task metrics ───────────────────────────────────────────────────────
+    const doneTasks = allTasks.filter(t => t.done).length;
+
     return NextResponse.json({
       totals: {
         sessions: sessions.length,
@@ -160,6 +177,13 @@ export async function GET() {
         learningTimeLabel,
         maxRoundsInOneSession,
         currentStreak: streak,
+        totalCards: allCards.length,
+        masteredCards,
+        dueCards,
+        reviewedCards,
+        avgEase: Math.round(avgEase * 100) / 100,
+        totalTasks: allTasks.length,
+        doneTasks,
       },
       weeklyActivity,
       achievements,

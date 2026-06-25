@@ -544,7 +544,7 @@ function MsgBubble({ msg }: { msg: { role: string; content: string; createdAt: s
 // ─── Welcome View ─────────────────────────────────────────────────────────────
 
 function WelcomeView() {
-  const { createSession } = useLearningStore();
+  const { createSession, sendMessage } = useLearningStore();
   const [topicInput, setTopicInput] = useState('');
 
   const topics = [
@@ -555,12 +555,18 @@ function WelcomeView() {
     '计算机网络',
   ];
 
+  // Create a session from the topic, then immediately send the topic as the
+  // first user message so the AI begins teaching instead of showing an empty
+  // "0 条对话" state.
   const handleSubmit = useCallback(async (value?: string) => {
     const t = (value || topicInput).trim();
     if (!t) return;
     setTopicInput('');
-    await createSession(t);
-  }, [topicInput, createSession]);
+    const session = await createSession(t);
+    if (session) {
+      await sendMessage(t);
+    }
+  }, [topicInput, createSession, sendMessage]);
 
   return (
     <div className="flex h-full flex-1 flex-col overflow-y-auto custom-scrollbar">
@@ -659,7 +665,7 @@ function WelcomeView() {
                 animate="visible"
                 whileHover={{ y: -1 }}
                 whileTap={{ scale: 0.97 }}
-                onClick={() => createSession(label)}
+                onClick={() => handleSubmit(label)}
                 className="rounded-md border border-neutral-200/80 bg-white/70 px-3.5 py-1.5 text-[13px] text-neutral-600 transition-colors duration-200 hover:border-neutral-300 hover:bg-white hover:text-neutral-900 dark:border-neutral-700/60 dark:bg-neutral-900/60 dark:text-neutral-400 dark:hover:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
               >
                 {label}

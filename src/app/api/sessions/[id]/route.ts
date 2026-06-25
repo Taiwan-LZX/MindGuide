@@ -59,7 +59,10 @@ export async function PATCH(
   }
 }
 
-// DELETE /api/sessions/[id] - Delete session
+// DELETE /api/sessions/[id] - Delete session (idempotent)
+// A delete on an already-deleted (or never-existed) session returns 200
+// because the desired end-state — "session does not exist" — is already true.
+// This prevents retry storms where the UI keeps firing DELETE on a stale id.
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -68,7 +71,17 @@ export async function DELETE(
     const { id } = await params;
     await db.learningSession.delete({ where: { id } });
     return NextResponse.json({ success: true });
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to delete session' }, { status: 500 });
+  } catch (error: unknown) {
+    // Prisma P2025: record not found — treat as already-deleted (idempotent success)
+    const code = (error as { code?: string })?.code;
+    if (code === 'P2025') {
+      return NextResponse.json({ success: true, alreadyDeleted: true });
+    }
+    // Real failure — surface the message so it's diagnosable in dev.log
+    console.error('[DELETE /api/sessions/[id]]', code, error);
+    return NextResponse.json(
+      { error: 'Failed to delete session' },
+      { status: 500 }
+    );
   }
 }

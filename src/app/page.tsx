@@ -9,6 +9,7 @@ import { SettingsPanel } from '@/components/learning/display-panel';
 import { MoreFeaturesPanel } from '@/components/learning/create-new-panel';
 import { CoursePanel } from '@/components/learning/course-panel';
 import { CommandPalette } from '@/components/learning/command-palette';
+import { KeyboardShortcutsOverlay } from '@/components/learning/keyboard-shortcuts-overlay';
 
 export default function Page() {
   const {
@@ -63,6 +64,9 @@ export default function Page() {
 
         {/* Command Palette (⌘K) */}
         <CommandPalette />
+
+        {/* Keyboard Shortcuts Overlay (?) */}
+        <KeyboardShortcutsOverlay />
       </div>
     </div>
   );

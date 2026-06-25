@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MoreVertical, BookOpen, GraduationCap, ArrowUp, Square, ArrowDown, Copy, Check } from 'lucide-react';
+import { MoreVertical, BookOpen, GraduationCap, ArrowUp, Square, ArrowDown, Copy, Check, Download } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 import { KnowledgeInline } from '@/components/learning/knowledge-inline';
 import { MarkdownRenderer } from '@/components/learning/markdown-renderer';

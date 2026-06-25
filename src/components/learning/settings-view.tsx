@@ -258,20 +258,24 @@ const HintContext = createContext<HintCtx>({ hovered: null, setHovered: () => {}
 const useHint = () => useContext(HintContext);
 
 const panelVariants = {
-  hidden: { opacity: 0, scale: 0.96, y: 10 },
+  hidden: { opacity: 0, scale: 0.96, y: 14 },
   visible: {
     opacity: 1,
     scale: 1,
     y: 0,
-    transition: { type: 'spring', stiffness: 320, damping: 30, mass: 0.9 },
+    transition: { type: 'spring', stiffness: 280, damping: 26, mass: 0.9 },
   },
-  exit: { opacity: 0, scale: 0.97, y: 6, transition: { duration: 0.16, ease: [0.4, 0, 1, 1] } },
+  exit: { opacity: 0, scale: 0.97, y: 8, transition: { duration: 0.24, ease: [0.4, 0, 1, 1] } },
 };
 
 const contentVariants = {
-  hidden: { opacity: 0, y: 8 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.28, ease: [0.25, 0.1, 0.25, 1] } },
-  exit: { opacity: 0, y: -4, transition: { duration: 0.12 } },
+  hidden: { opacity: 0, y: 10 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { type: 'spring', stiffness: 300, damping: 28, mass: 0.8 },
+  },
+  exit: { opacity: 0, y: -6, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } },
 };
 
 // Soft cross-fade for the right pane when the hovered hint changes. The key is
@@ -279,8 +283,12 @@ const contentVariants = {
 // it reads as a gentle settle rather than a slide.
 const hintVariants = {
   hidden: { opacity: 0, y: 6 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.22, ease: [0.25, 0.1, 0.25, 1] } },
-  exit: { opacity: 0, y: -4, transition: { duration: 0.12 } },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { type: 'spring', stiffness: 380, damping: 28, mass: 0.6 },
+  },
+  exit: { opacity: 0, y: -4, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } },
 };
 
 export function SettingsView() {

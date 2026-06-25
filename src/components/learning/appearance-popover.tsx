@@ -119,10 +119,10 @@ export function AppearanceButton() {
                 ref={panelRef}
                 role="dialog"
                 aria-label="外观设置"
-                initial={{ opacity: 0, y: pos.placeAbove ? 6 : -6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: pos.placeAbove ? 6 : -6 }}
-                transition={{ duration: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
+                initial={{ opacity: 0, y: pos.placeAbove ? 8 : -8, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: pos.placeAbove ? 6 : -6, scale: 0.98 }}
+                transition={{ type: 'spring', stiffness: 380, damping: 28, mass: 0.7 }}
                 style={{
                   position: 'fixed',
                   left: pos.x,

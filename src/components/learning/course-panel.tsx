@@ -17,36 +17,36 @@ import { InlineSpinner, LoadingSkeleton, LoadingOverlay } from '@/components/lea
 
 // ─── Shared Spring Config ────────────────────────────────────────────────────
 
-const spring = { type: 'spring' as const, stiffness: 350, damping: 28 };
+const spring = { type: 'spring' as const, stiffness: 320, damping: 28, mass: 0.8 };
 
 // ─── Animation Variants ─────────────────────────────────────────────────────
 
 /** Panel entrance: scale + fade from behind (floating card feel) */
 const panelVariants = {
-  hidden: { opacity: 0, scale: 0.95, y: 8 },
+  hidden: { opacity: 0, scale: 0.95, y: 12 },
   visible: {
     opacity: 1,
     scale: 1,
     y: 0,
-    transition: { ...spring, duration: 0.35 },
+    transition: { ...spring },
   },
-  exit: { opacity: 0, scale: 0.97, y: 4, transition: { duration: 0.15 } },
+  exit: { opacity: 0, scale: 0.97, y: 6, transition: { duration: 0.24, ease: [0.4, 0, 1, 1] } },
 };
 
 const moduleContainerVariants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: { staggerChildren: 0.06 },
+    transition: { staggerChildren: 0.07, delayChildren: 0.05 },
   },
 };
 
 const moduleVariants = {
-  hidden: { opacity: 0, y: 8 },
+  hidden: { opacity: 0, y: 10 },
   visible: {
     opacity: 1,
     y: 0,
-    transition: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] },
+    transition: { type: 'spring', stiffness: 300, damping: 28, mass: 0.8 },
   },
 };
 
@@ -54,16 +54,16 @@ const lessonContainerVariants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: { staggerChildren: 0.04 },
+    transition: { staggerChildren: 0.05 },
   },
 };
 
 const lessonVariants = {
-  hidden: { opacity: 0, x: -4 },
+  hidden: { opacity: 0, x: -6 },
   visible: {
     opacity: 1,
     x: 0,
-    transition: { duration: 0.2, ease: [0.25, 0.1, 0.25, 1] },
+    transition: { type: 'spring', stiffness: 380, damping: 30, mass: 0.6 },
   },
 };
 
@@ -76,16 +76,16 @@ const collapsibleVariants = {
   collapsed: {
     height: 0,
     opacity: 0,
-    transition: { duration: 0.2 },
+    transition: { duration: 0.25, ease: [0.4, 0, 1, 1] },
   },
 };
 
 const promptVariants = {
-  hidden: { opacity: 0, y: 10 },
+  hidden: { opacity: 0, y: 12 },
   visible: {
     opacity: 1,
     y: 0,
-    transition: { delay: 0.1, duration: 0.35, ease: [0.25, 0.1, 0.25, 1] },
+    transition: { delay: 0.12, type: 'spring', stiffness: 280, damping: 26, mass: 0.9 },
   },
 };
 
@@ -95,7 +95,7 @@ const dotVariants = {
   visible: (i: number) => ({
     opacity: 1,
     scale: 1,
-    transition: { delay: i * 0.1, duration: 0.3, ease: [0.25, 0.1, 0.25, 1] },
+    transition: { delay: i * 0.1, type: 'spring', stiffness: 500, damping: 22, mass: 0.6 },
   }),
 };
 
@@ -221,8 +221,14 @@ export function CoursePanel() {
                   </h2>
                 </div>
                 <motion.button
-                  whileHover={{ scale: 1.06 }}
-                  whileTap={{ scale: 0.94 }}
+                  whileHover={{
+                    scale: 1.06,
+                    transition: { type: 'spring', stiffness: 400, damping: 22 },
+                  }}
+                  whileTap={{
+                    scale: 0.94,
+                    transition: { type: 'spring', stiffness: 600, damping: 25 },
+                  }}
                   onClick={() => setCoursePanelOpen(false)}
                   className="flex h-7 w-7 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   aria-label="关闭课程面板"
@@ -267,9 +273,15 @@ export function CoursePanel() {
                         key="generate-btn"
                         initial={{ opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 8, transition: { duration: 0.12 } }}
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
+                        exit={{ opacity: 0, y: 8, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } }}
+                        whileHover={{
+                          scale: 1.02,
+                          transition: { type: 'spring', stiffness: 400, damping: 22 },
+                        }}
+                        whileTap={{
+                          scale: 0.985,
+                          transition: { type: 'spring', stiffness: 600, damping: 25 },
+                        }}
                         onClick={generateCourse}
                         disabled={isGeneratingCourse}
                         className="inline-flex items-center gap-2 rounded-xl bg-[var(--brand)] px-5 py-2.5 text-[13px] font-medium text-[var(--brand-foreground)] shadow-md shadow-black/10 transition-all hover:shadow-lg hover:shadow-black/15 disabled:opacity-60"
@@ -341,8 +353,14 @@ export function CoursePanel() {
                   </span>
                 </div>
                 <motion.button
-                  whileHover={{ scale: 1.06 }}
-                  whileTap={{ scale: 0.94 }}
+                  whileHover={{
+                    scale: 1.06,
+                    transition: { type: 'spring', stiffness: 400, damping: 22 },
+                  }}
+                  whileTap={{
+                    scale: 0.94,
+                    transition: { type: 'spring', stiffness: 600, damping: 25 },
+                  }}
                   onClick={() => setCoursePanelOpen(false)}
                   className="flex h-7 w-7 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   aria-label="关闭课程面板"
@@ -423,8 +441,14 @@ export function CoursePanel() {
                                         <motion.button
                                           key={lesson.id}
                                           variants={lessonVariants}
-                                          whileHover={isLocked ? {} : { x: 2 }}
-                                          whileTap={isLocked ? {} : { scale: 0.98 }}
+                                          whileHover={isLocked ? {} : {
+                                            x: 2,
+                                            transition: { type: 'spring', stiffness: 400, damping: 22 },
+                                          }}
+                                          whileTap={isLocked ? {} : {
+                                            scale: 0.985,
+                                            transition: { type: 'spring', stiffness: 600, damping: 25 },
+                                          }}
                                           onClick={() => handleLessonClick(mod.id, lesson)}
                                           disabled={isLocked}
                                           className={`group flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left transition-all duration-150 ${
@@ -479,8 +503,14 @@ export function CoursePanel() {
                   {/* Regenerate button */}
                   <div className="mt-4 px-1 pb-2">
                     <motion.button
-                      whileHover={{ scale: 1.01 }}
-                      whileTap={{ scale: 0.98 }}
+                      whileHover={{
+                        scale: 1.015,
+                        transition: { type: 'spring', stiffness: 400, damping: 22 },
+                      }}
+                      whileTap={{
+                        scale: 0.975,
+                        transition: { type: 'spring', stiffness: 600, damping: 25 },
+                      }}
                       onClick={generateCourse}
                       disabled={isGeneratingCourse}
                       className="flex w-full items-center justify-center gap-2 rounded-xl border border-neutral-200/80 bg-white/80 px-4 py-2.5 text-[13px] font-medium text-neutral-500 shadow-sm shadow-neutral-200/30 transition-all duration-150 hover:bg-neutral-50 hover:text-neutral-700 hover:shadow-md disabled:opacity-50 dark:border-neutral-700/50 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:bg-neutral-800/80 dark:hover:text-neutral-300 dark:shadow-black/10"

@@ -20,31 +20,67 @@ function fmtDate(d: string) {
 }
 
 // ─── Animation Variants ─────────────────────────────────────────────────────
+//
+// Tactile ("手感") tuning:
+//  - Message bubbles enter with a soft spring (stiffness 320, damping 30,
+//    mass 0.7) so they "settle" into place — feels physical, not snapped.
+//  - Date separators use a tiny spring scale-in for a quieter, more
+//    deliberate beat between message groups.
+//  - Streaming bubble + empty state + knowledge panel all switch from
+//    linear duration easing to spring physics so the whole chat surface
+//    shares one physical metaphor.
+//  - Welcome cascade uses longer springs (mass 0.9, damping 26) for a
+//    ceremonial, unhurried entrance.
 
 const msgVariants = {
   hidden: { opacity: 0, y: 10 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] } },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { type: 'spring', stiffness: 320, damping: 30, mass: 0.7 },
+  },
 };
 
 const dateSepVariants = {
-  hidden: { opacity: 0, scale: 0.9 },
-  visible: { opacity: 1, scale: 1, transition: { duration: 0.25 } },
+  hidden: { opacity: 0, scale: 0.92 },
+  visible: {
+    opacity: 1,
+    scale: 1,
+    transition: { type: 'spring', stiffness: 380, damping: 28, mass: 0.6 },
+  },
 };
 
 const streamingBubbleVariants = {
   hidden: { opacity: 0, y: 8 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] } },
-  exit: { opacity: 0, y: -4, transition: { duration: 0.15 } },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { type: 'spring', stiffness: 320, damping: 28, mass: 0.7 },
+  },
+  exit: {
+    opacity: 0,
+    y: -4,
+    transition: { duration: 0.2, ease: [0.4, 0, 1, 1] },
+  },
 };
 
 const emptyStateVariants = {
   hidden: { opacity: 0, y: 10 },
-  visible: { opacity: 1, y: 0, transition: { delay: 0.15, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] } },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { delay: 0.15, type: 'spring', stiffness: 260, damping: 26, mass: 0.9 },
+  },
 };
 
 const knowledgeVariants = {
   hidden: { opacity: 0, y: 16, scale: 0.98 },
-  visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.35, ease: [0.25, 0.1, 0.25, 1] } },
+  visible: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: { type: 'spring', stiffness: 240, damping: 26, mass: 0.9 },
+  },
 };
 
 const welcomeVariants = {
@@ -52,7 +88,13 @@ const welcomeVariants = {
   visible: (i: number) => ({
     opacity: 1,
     y: 0,
-    transition: { delay: 0.08 * i, duration: 0.45, ease: [0.25, 0.1, 0.25, 1] },
+    transition: {
+      delay: 0.08 * i,
+      type: 'spring',
+      stiffness: 220,
+      damping: 26,
+      mass: 0.9,
+    },
   }),
 };
 
@@ -183,8 +225,14 @@ export function MainContent() {
             content={isCourseGenerated ? '查看本主题的结构化课程' : '生成结构化课程'}
           >
             <motion.button
-              whileHover={{ scale: 1.06 }}
-              whileTap={{ scale: 0.94 }}
+              whileHover={{
+                scale: 1.06,
+                transition: { type: 'spring', stiffness: 400, damping: 22 },
+              }}
+              whileTap={{
+                scale: 0.94,
+                transition: { type: 'spring', stiffness: 600, damping: 25 },
+              }}
               onClick={() => setCoursePanelOpen(!coursePanelOpen)}
               className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
                 coursePanelOpen
@@ -202,8 +250,14 @@ export function MainContent() {
 
           <MouseFollowTooltip content="显示选项 · 主题与动态效果">
             <motion.button
-              whileHover={{ scale: 1.06 }}
-              whileTap={{ scale: 0.94 }}
+              whileHover={{
+                scale: 1.06,
+                transition: { type: 'spring', stiffness: 400, damping: 22 },
+              }}
+              whileTap={{
+                scale: 0.94,
+                transition: { type: 'spring', stiffness: 600, damping: 25 },
+              }}
               onClick={() => useLearningStore.getState().setSettingsPanelOpen(!useLearningStore.getState().settingsPanelOpen)}
               className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
               aria-label="显示选项"
@@ -354,10 +408,16 @@ export function MainContent() {
             initial={{ opacity: 0, y: 8, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.9 }}
-            transition={{ duration: 0.18, ease: [0.25, 0.1, 0.25, 1] }}
+            transition={{ type: 'spring', stiffness: 380, damping: 28, mass: 0.7 }}
             onClick={scrollToBottom}
-            whileHover={{ scale: 1.06 }}
-            whileTap={{ scale: 0.94 }}
+            whileHover={{
+              scale: 1.08,
+              transition: { type: 'spring', stiffness: 400, damping: 22 },
+            }}
+            whileTap={{
+              scale: 0.92,
+              transition: { type: 'spring', stiffness: 600, damping: 25 },
+            }}
             className="absolute bottom-[92px] left-1/2 z-30 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-neutral-200 bg-white/95 text-neutral-500 shadow-sm backdrop-blur-sm transition-colors hover:text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/95 dark:text-neutral-300 dark:hover:text-neutral-100"
             aria-label="滚动到最新消息"
           >
@@ -437,10 +497,16 @@ function SimpleChatInput({
           <motion.button
             key="stop"
             initial={{ scale: 0.85, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.85, opacity: 0 }}
-            transition={{ duration: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
-            whileTap={{ scale: 0.92 }}
+            animate={{
+              scale: 1,
+              opacity: 1,
+              transition: { type: 'spring', stiffness: 500, damping: 28, mass: 0.6 },
+            }}
+            exit={{ scale: 0.85, opacity: 0, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } }}
+            whileTap={{
+              scale: 0.92,
+              transition: { type: 'spring', stiffness: 600, damping: 25 },
+            }}
             onClick={onStop}
             aria-label="停止"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-neutral-600 text-white transition-colors hover:bg-neutral-500 dark:bg-neutral-400 dark:text-neutral-900 dark:hover:bg-neutral-300"
@@ -451,10 +517,16 @@ function SimpleChatInput({
           <motion.button
             key="send"
             initial={{ scale: 0.85, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.85, opacity: 0 }}
-            transition={{ duration: 0.15, ease: [0.25, 0.1, 0.25, 1] }}
-            whileTap={{ scale: 0.92 }}
+            animate={{
+              scale: 1,
+              opacity: 1,
+              transition: { type: 'spring', stiffness: 500, damping: 28, mass: 0.6 },
+            }}
+            exit={{ scale: 0.85, opacity: 0, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } }}
+            whileTap={{
+              scale: 0.92,
+              transition: { type: 'spring', stiffness: 600, damping: 25 },
+            }}
             onClick={canSend ? onSend : undefined}
             disabled={!canSend}
             aria-label="发送"
@@ -588,8 +660,14 @@ function WelcomeView() {
       <div className="flex h-14 shrink-0 items-center justify-end px-6">
         <MouseFollowTooltip content="显示选项 · 主题与动态效果">
           <motion.button
-            whileHover={{ scale: 1.06 }}
-            whileTap={{ scale: 0.94 }}
+            whileHover={{
+              scale: 1.06,
+              transition: { type: 'spring', stiffness: 400, damping: 22 },
+            }}
+            whileTap={{
+              scale: 0.94,
+              transition: { type: 'spring', stiffness: 600, damping: 25 },
+            }}
             onClick={() => setSettingsPanelOpen(true)}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
             aria-label="显示选项"
@@ -652,7 +730,14 @@ function WelcomeView() {
                 className="flex-1 border-0 bg-transparent text-[15px] text-neutral-800 placeholder:text-neutral-400 focus:outline-none dark:text-neutral-200 dark:placeholder:text-neutral-500"
               />
               <motion.button
-                whileTap={{ scale: 0.9 }}
+                whileTap={{
+                  scale: 0.9,
+                  transition: { type: 'spring', stiffness: 600, damping: 22 },
+                }}
+                whileHover={{
+                  scale: 1.04,
+                  transition: { type: 'spring', stiffness: 400, damping: 22 },
+                }}
                 onClick={() => handleSubmit()}
                 disabled={!topicInput.trim()}
                 aria-label="开始学习"
@@ -692,8 +777,15 @@ function WelcomeView() {
                 variants={welcomeVariants}
                 initial="hidden"
                 animate="visible"
-                whileHover={{ y: -1 }}
-                whileTap={{ scale: 0.97 }}
+                whileHover={{
+                  y: -2,
+                  scale: 1.02,
+                  transition: { type: 'spring', stiffness: 400, damping: 22 },
+                }}
+                whileTap={{
+                  scale: 0.97,
+                  transition: { type: 'spring', stiffness: 600, damping: 25 },
+                }}
                 onClick={() => handleSubmit(label)}
                 className="rounded-md border border-neutral-200/80 bg-white/70 px-3.5 py-1.5 text-[13px] text-neutral-600 transition-colors duration-200 hover:border-neutral-300 hover:bg-white hover:text-neutral-900 dark:border-neutral-700/60 dark:bg-neutral-900/60 dark:text-neutral-400 dark:hover:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
               >

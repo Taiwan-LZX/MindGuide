@@ -37,19 +37,25 @@ const allCategories: ResultCategory[] = ['chat', 'lesson'];
 // ─── Animation ───────────────────────────────────────────────────────────────
 
 const panelVariants = {
-  hidden: { opacity: 0, y: -4, scale: 0.98 },
+  hidden: { opacity: 0, y: -6, scale: 0.98 },
   visible: {
     opacity: 1, y: 0, scale: 1,
-    transition: { type: 'spring', stiffness: 350, damping: 28 },
+    transition: { type: 'spring', stiffness: 320, damping: 26, mass: 0.8 },
   },
-  exit: { opacity: 0, y: -4, scale: 0.98, transition: { duration: 0.15 } },
+  exit: { opacity: 0, y: -4, scale: 0.98, transition: { duration: 0.2, ease: [0.4, 0, 1, 1] } },
 };
 
 const itemVariants = {
   hidden: { opacity: 0, y: 4 },
   visible: (i: number) => ({
     opacity: 1, y: 0,
-    transition: { delay: 0.02 * i, duration: 0.2, ease: [0.25, 0.1, 0.25, 1] },
+    transition: {
+      delay: 0.04 + 0.03 * i,
+      type: 'spring',
+      stiffness: 380,
+      damping: 28,
+      mass: 0.6,
+    },
   }),
 };
 
@@ -207,7 +213,10 @@ export function UnifiedSearch({ value, onChange, onResultClick }: UnifiedSearchP
           <motion.button
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            whileTap={{ scale: 0.85 }}
+            whileTap={{
+              scale: 0.85,
+              transition: { type: 'spring', stiffness: 600, damping: 18 },
+            }}
             onClick={handleClear}
             className="absolute right-2 top-1/2 flex h-4.5 w-4.5 -translate-y-1/2 items-center justify-center rounded-full text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
           >

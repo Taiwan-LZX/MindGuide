@@ -140,7 +140,7 @@ export function CardReviewMode() {
                     className={`h-full rounded-full ${row.accent}`}
                     initial={{ width: 0 }}
                     animate={{ width: `${pct}%` }}
-                    transition={{ duration: 0.5, ease: 'easeOut' }}
+                    transition={{ type: 'spring', stiffness: 200, damping: 28, mass: 1 }}
                   />
                 </div>
                 <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-neutral-600 dark:text-neutral-300">
@@ -187,7 +187,7 @@ export function CardReviewMode() {
                 className="h-full rounded-full bg-neutral-700 dark:bg-neutral-200"
                 initial={false}
                 animate={{ width: `${progressPct}%` }}
-                transition={{ duration: 0.3, ease: 'easeOut' }}
+                transition={{ type: 'spring', stiffness: 200, damping: 28, mass: 1 }}
               />
             </div>
           </div>
@@ -200,10 +200,10 @@ export function CardReviewMode() {
           <AnimatePresence mode="wait">
             <motion.div
               key={current.id}
-              initial={{ opacity: 0, x: 30 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -30 }}
-              transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+              initial={{ opacity: 0, x: 30, scale: 0.985 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: -24, scale: 0.99 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 28, mass: 0.9 }}
               className="relative"
               style={{ perspective: '1200px' }}
             >
@@ -216,7 +216,7 @@ export function CardReviewMode() {
                 <motion.div
                   className="absolute inset-0"
                   animate={{ rotateY: reviewFlipped ? 180 : 0 }}
-                  transition={{ duration: 0.5, ease: [0.25, 0.1, 0.25, 1] }}
+                  transition={{ type: 'spring', stiffness: 200, damping: 28, mass: 1.1 }}
                   style={{ transformStyle: 'preserve-3d', backfaceVisibility: 'hidden' }}
                 >
                   {/* Front (question) */}
@@ -284,8 +284,14 @@ export function CardReviewMode() {
                       {QUALITY_BUTTONS.map((b) => (
                         <motion.button
                           key={b.q}
-                          whileHover={{ y: -2 }}
-                          whileTap={{ scale: 0.97 }}
+                          whileHover={{
+                            y: -2,
+                            transition: { type: 'spring', stiffness: 400, damping: 22 },
+                          }}
+                          whileTap={{
+                            scale: 0.97,
+                            transition: { type: 'spring', stiffness: 600, damping: 25 },
+                          }}
                           disabled={isSubmittingReview}
                           onClick={() => { void submitReview(b.q); }}
                           className="group flex flex-col items-center gap-1 rounded-lg border border-neutral-200 bg-white px-2 py-3 transition-colors hover:border-neutral-400 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:border-neutral-500 dark:hover:bg-neutral-800"

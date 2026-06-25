@@ -45,7 +45,11 @@ const containerVariants = {
 
 const childVariants = {
   hidden: { opacity: 0, y: 8 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] } },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { type: 'spring', stiffness: 320, damping: 28, mass: 0.7 },
+  },
 };
 
 const sessionVariants = {
@@ -54,9 +58,20 @@ const sessionVariants = {
     opacity: 1,
     y: 0,
     scale: 1,
-    transition: { delay: i * 0.03, duration: 0.25, ease: [0.25, 0.1, 0.25, 1] },
+    transition: {
+      delay: i * 0.035,
+      type: 'spring',
+      stiffness: 380,
+      damping: 30,
+      mass: 0.7,
+    },
   }),
-  exit: { opacity: 0, x: -20, scale: 0.95, transition: { duration: 0.15 } },
+  exit: {
+    opacity: 0,
+    x: -20,
+    scale: 0.95,
+    transition: { duration: 0.22, ease: [0.4, 0, 1, 1] },
+  },
 };
 
 const createFormVariants = {
@@ -67,7 +82,11 @@ const createFormVariants = {
 
 const sectionHeaderVariants = {
   hidden: { opacity: 0, x: -4 },
-  visible: { opacity: 1, x: 0, transition: { duration: 0.25 } },
+  visible: {
+    opacity: 1,
+    x: 0,
+    transition: { type: 'spring', stiffness: 380, damping: 28, mass: 0.6 },
+  },
 };
 
 // ─── Collapsed Icon Strip ─────────────────────────────────────────────────
@@ -77,7 +96,13 @@ const iconStripVariants = {
   visible: (i: number) => ({
     opacity: 1,
     x: 0,
-    transition: { delay: i * 0.06, duration: 0.25, ease: [0.25, 0.1, 0.25, 1] },
+    transition: {
+      delay: i * 0.06,
+      type: 'spring',
+      stiffness: 380,
+      damping: 28,
+      mass: 0.7,
+    },
   }),
 };
 
@@ -104,8 +129,14 @@ function CollapsedSidebar() {
           variants={iconStripVariants}
           initial="hidden"
           animate="visible"
-          whileHover={{ scale: 1.06 }}
-          whileTap={{ scale: 0.94 }}
+          whileHover={{
+            scale: 1.06,
+            transition: { type: 'spring', stiffness: 400, damping: 22 },
+          }}
+          whileTap={{
+            scale: 0.94,
+            transition: { type: 'spring', stiffness: 600, damping: 25 },
+          }}
           onClick={() => setCoursePanelOpen(!coursePanelOpen)}
           className={`mb-1.5 flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
             coursePanelOpen
@@ -123,8 +154,14 @@ function CollapsedSidebar() {
           variants={iconStripVariants}
           initial="hidden"
           animate="visible"
-          whileHover={{ scale: 1.06 }}
-          whileTap={{ scale: 0.94 }}
+          whileHover={{
+            scale: 1.06,
+            transition: { type: 'spring', stiffness: 400, damping: 22 },
+          }}
+          whileTap={{
+            scale: 0.94,
+            transition: { type: 'spring', stiffness: 600, damping: 25 },
+          }}
           onClick={() => setCreateNewPanelOpen(true)}
           className="mb-1.5 flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
         >
@@ -138,8 +175,14 @@ function CollapsedSidebar() {
           variants={iconStripVariants}
           initial="hidden"
           animate="visible"
-          whileHover={{ scale: 1.06 }}
-          whileTap={{ scale: 0.94 }}
+          whileHover={{
+            scale: 1.06,
+            transition: { type: 'spring', stiffness: 400, damping: 22 },
+          }}
+          whileTap={{
+            scale: 0.94,
+            transition: { type: 'spring', stiffness: 600, damping: 25 },
+          }}
           className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
         >
           <Search className="h-4 w-4" />
@@ -157,8 +200,14 @@ function CollapsedSidebar() {
       >
         <MouseFollowTooltip content="账号">
           <motion.button
-            whileHover={{ scale: 1.06 }}
-            whileTap={{ scale: 0.94 }}
+            whileHover={{
+              scale: 1.06,
+              transition: { type: 'spring', stiffness: 400, damping: 22 },
+            }}
+            whileTap={{
+              scale: 0.94,
+              transition: { type: 'spring', stiffness: 600, damping: 25 },
+            }}
             className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
             aria-label="账号"
           >
@@ -310,14 +359,20 @@ function FullSidebar() {
                 />
                 <div className="flex justify-end gap-1.5">
                   <motion.button
-                    whileTap={{ scale: 0.95 }}
+                    whileTap={{
+                      scale: 0.95,
+                      transition: { type: 'spring', stiffness: 600, damping: 22 },
+                    }}
                     onClick={() => setIsCreating(false)}
                     className="rounded-md px-2.5 py-1 text-[12px] text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-700"
                   >
                     取消
                   </motion.button>
                   <motion.button
-                    whileTap={{ scale: 0.95 }}
+                    whileTap={{
+                      scale: 0.95,
+                      transition: { type: 'spring', stiffness: 600, damping: 22 },
+                    }}
                     onClick={handleCreate}
                     className="rounded-md bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-white dark:bg-white dark:text-neutral-900"
                   >
@@ -479,10 +534,10 @@ function FullSidebar() {
       >
         {/* Create New Topic - Primary Action */}
         <motion.button
-          whileHover={{ scale: 1.01 }}
-          whileTap={{ scale: 0.98 }}
+          whileHover={{ scale: 1.015, transition: { type: 'spring', stiffness: 400, damping: 22 } }}
+          whileTap={{ scale: 0.975, transition: { type: 'spring', stiffness: 600, damping: 25 } }}
           onClick={() => setIsCreating(true)}
-          className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-[var(--brand)] text-[13px] font-medium text-[var(--brand-foreground)] transition-opacity hover:opacity-90"
+          className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-[var(--brand)] text-[13px] font-medium text-[var(--brand-foreground)] transition-opacity duration-200 hover:opacity-90"
         >
           <Plus className="h-4 w-4" />
           创建新主题
@@ -497,17 +552,25 @@ function FullSidebar() {
             </span>
           }
         >
-          <button
+          <motion.button
             data-more-features-trigger
             onClick={(e) => {
               e.preventDefault();
               setCreateNewPanelOpen(true);
             }}
-            className="flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-neutral-200 text-[13px] text-neutral-500 transition-colors duration-150 hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-700 active:scale-[0.98] dark:border-neutral-700 dark:text-neutral-400 dark:hover:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            whileHover={{
+              scale: 1.015,
+              transition: { type: 'spring', stiffness: 400, damping: 22 },
+            }}
+            whileTap={{
+              scale: 0.975,
+              transition: { type: 'spring', stiffness: 600, damping: 25 },
+            }}
+            className="flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-neutral-200 bg-transparent text-[13px] text-neutral-500 transition-colors duration-200 hover:bg-neutral-50 hover:text-neutral-700 dark:border-neutral-700 dark:text-neutral-400 dark:hover:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
           >
             <Grid2X2 className="h-3.5 w-3.5" />
             更多功能
-          </button>
+          </motion.button>
         </MouseFollowTooltip>
       </motion.div>
     </aside>
@@ -546,7 +609,10 @@ function SessionRow({
   return (
     <motion.div
       onClick={onSelect}
-      whileTap={{ scale: 0.99 }}
+      whileTap={{
+        scale: 0.99,
+        transition: { type: 'spring', stiffness: 600, damping: 25 },
+      }}
       className={`group relative mb-0.5 flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2.5 transition-colors duration-150 ${
         isActive
           ? 'bg-white shadow-sm dark:bg-neutral-800 dark:shadow-none'
@@ -580,10 +646,22 @@ function SessionRow({
               autoFocus
               className="h-7 flex-1 rounded-md border border-neutral-300 bg-white px-2 text-[13px] transition-colors duration-150 focus:outline-none focus:shadow-[0_0_0_3px_rgba(0,0,0,0.04)] dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-200 dark:focus:shadow-[0_0_0_3px_rgba(255,255,255,0.04)]"
             />
-            <motion.button whileTap={{ scale: 0.85 }} onClick={onSaveEdit}>
+            <motion.button
+              whileTap={{
+                scale: 0.85,
+                transition: { type: 'spring', stiffness: 600, damping: 18 },
+              }}
+              onClick={onSaveEdit}
+            >
               <Check className="h-3.5 w-3.5 text-neutral-500" />
             </motion.button>
-            <motion.button whileTap={{ scale: 0.85 }} onClick={onCancelEdit}>
+            <motion.button
+              whileTap={{
+                scale: 0.85,
+                transition: { type: 'spring', stiffness: 600, damping: 18 },
+              }}
+              onClick={onCancelEdit}
+            >
               <X className="h-3.5 w-3.5 text-neutral-500" />
             </motion.button>
           </div>
@@ -613,14 +691,20 @@ function SessionRow({
           whileHover={{ opacity: 1 }}
         >
           <motion.button
-            whileTap={{ scale: 0.85 }}
+            whileTap={{
+              scale: 0.85,
+              transition: { type: 'spring', stiffness: 600, damping: 18 },
+            }}
             onClick={e => { e.stopPropagation(); onStartEdit(); }}
             className="flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-200/80 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
           >
             <Pencil className="h-3 w-3" />
           </motion.button>
           <motion.button
-            whileTap={{ scale: 0.85 }}
+            whileTap={{
+              scale: 0.85,
+              transition: { type: 'spring', stiffness: 600, damping: 18 },
+            }}
             onClick={e => { e.stopPropagation(); onDelete(); }}
             className="flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 dark:hover:text-red-400"
           >

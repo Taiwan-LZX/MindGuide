@@ -35,18 +35,55 @@ import { ScrollProgress } from '@/components/learning/scroll-progress';
 import { formatInterval } from '@/lib/sm2';
 
 // ─── Animation Variants ─────────────────────────────────────────────────────
+//
+// Tactile ("手感") tuning for interface switching:
+//  - Entry uses a soft spring (stiffness 240, damping 28, mass 0.9) so the
+//    view "settles" into place rather than snapping — gives the user a
+//    perceptible sense of motion ("过渡感") instead of a 300ms linear slide.
+//  - A tiny scale 0.985 → 1 adds depth (the view feels like it comes
+//    "toward" the user, not just slides sideways).
+//  - Exit is a 280ms ease-in with a small leftward x + scale-down so the
+//    previous view "leaves the desk" — long enough to register but short
+//    enough not to block the new view.
+//  - Combined with `mode="wait"` on AnimatePresence, the total perceptible
+//    transition is ~0.6s, which reads as deliberate.
 
 const pageVariants = {
-  hidden: { opacity: 0, x: 30 },
-  visible: { opacity: 1, x: 0, transition: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] } },
-  exit: { opacity: 0, x: -20, transition: { duration: 0.15 } },
+  hidden: { opacity: 0, x: 24, scale: 0.985 },
+  visible: {
+    opacity: 1,
+    x: 0,
+    scale: 1,
+    transition: {
+      type: 'spring',
+      stiffness: 240,
+      damping: 28,
+      mass: 0.9,
+    },
+  },
+  exit: {
+    opacity: 0,
+    x: -16,
+    scale: 0.99,
+    transition: {
+      duration: 0.28,
+      ease: [0.4, 0, 1, 1],
+    },
+  },
 };
 
 const itemVariants = {
-  hidden: { opacity: 0, y: 12 },
+  hidden: { opacity: 0, y: 14 },
   visible: (i: number) => ({
-    opacity: 1, y: 0,
-    transition: { delay: 0.04 * i, duration: 0.25, ease: [0.25, 0.1, 0.25, 1] },
+    opacity: 1,
+    y: 0,
+    transition: {
+      delay: 0.08 + 0.045 * i,
+      type: 'spring',
+      stiffness: 320,
+      damping: 28,
+      mass: 0.8,
+    },
   }),
 };
 
@@ -107,8 +144,15 @@ function FeatureHeader({ title, icon: Icon, color }: { title: string; icon: Reac
           left edge (no stair-step when the viewport is wider than 600px). */}
       <div className="mx-auto flex w-full max-w-[600px] items-center gap-3 px-6">
         <motion.button
-          whileHover={{ scale: 1.06 }}
-          whileTap={{ scale: 0.94 }}
+          whileHover={{
+            scale: 1.06,
+            x: -2,
+            transition: { type: 'spring', stiffness: 400, damping: 22 },
+          }}
+          whileTap={{
+            scale: 0.94,
+            transition: { type: 'spring', stiffness: 600, damping: 25 },
+          }}
           onClick={() => setActiveFeatureView(null)}
           className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
           aria-label="返回"
@@ -134,9 +178,19 @@ function FeatureHeader({ title, icon: Icon, color }: { title: string; icon: Reac
 function EmptyState({ icon: Icon, title, description }: { icon: React.ElementType; title: string; description: string }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.15, duration: 0.35 }}
+      initial={{ opacity: 0, y: 14, scale: 0.985 }}
+      animate={{
+        opacity: 1,
+        y: 0,
+        scale: 1,
+        transition: {
+          delay: 0.18,
+          type: 'spring',
+          stiffness: 260,
+          damping: 26,
+          mass: 0.9,
+        },
+      }}
       className="flex flex-1 flex-col items-center justify-center px-6"
     >
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-neutral-100 text-neutral-400 dark:bg-neutral-800">
@@ -290,8 +344,14 @@ function TaskPlannerView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElem
                 className="h-9 flex-1 bg-transparent px-2 text-[13px] transition-colors duration-150 focus:outline-none dark:text-neutral-200"
               />
               <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.94 }}
+                whileHover={{
+                  scale: 1.05,
+                  transition: { type: 'spring', stiffness: 400, damping: 22 },
+                }}
+                whileTap={{
+                  scale: 0.94,
+                  transition: { type: 'spring', stiffness: 600, damping: 25 },
+                }}
                 onClick={() => { void submit(); }}
                 disabled={submitting}
                 className="flex h-9 w-9 items-center justify-center rounded-lg bg-neutral-900 text-white transition-opacity disabled:opacity-50 dark:bg-white dark:text-neutral-900"
@@ -369,7 +429,10 @@ function TaskPlannerView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElem
                   </span>
                   {/* Checkbox */}
                   <motion.button
-                    whileTap={{ scale: 0.8 }}
+                    whileTap={{
+                      scale: 0.8,
+                      transition: { type: 'spring', stiffness: 600, damping: 18 },
+                    }}
                     onClick={() => { void toggleTask(task.id); }}
                     className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${
                       task.done
@@ -411,7 +474,10 @@ function TaskPlannerView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElem
                     {PRIORITY_LABELS[task.priority]}
                   </span>
                   <motion.button
-                    whileTap={{ scale: 0.8 }}
+                    whileTap={{
+                      scale: 0.8,
+                      transition: { type: 'spring', stiffness: 600, damping: 18 },
+                    }}
                     onClick={() => { void deleteTask(task.id); }}
                     className="flex h-6 w-6 items-center justify-center rounded text-neutral-400 opacity-0 transition-opacity hover:bg-neutral-200 group-hover:opacity-100 dark:hover:bg-neutral-700"
                   >
@@ -471,8 +537,14 @@ function LearningCardsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEl
           </div>
           <div className="mx-auto mt-2.5 flex max-w-[600px]">
             <motion.button
-              whileHover={{ scale: cards.length === 0 ? 1 : 1.01 }}
-              whileTap={{ scale: cards.length === 0 ? 1 : 0.99 }}
+              whileHover={{
+                scale: cards.length === 0 ? 1 : 1.015,
+                transition: { type: 'spring', stiffness: 400, damping: 22 },
+              }}
+              whileTap={{
+                scale: cards.length === 0 ? 1 : 0.975,
+                transition: { type: 'spring', stiffness: 600, damping: 25 },
+              }}
               onClick={() => { void startReview(); }}
               disabled={cards.length === 0}
               className="flex w-full items-center justify-center gap-2 rounded-md border border-neutral-300 bg-white py-2 text-[12px] font-medium text-neutral-700 transition-colors hover:border-neutral-500 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:border-neutral-500 dark:hover:bg-neutral-800"
@@ -562,7 +634,10 @@ function LearningCardsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEl
                         )}
                       </div>
                       <motion.button
-                        whileTap={{ scale: 0.8 }}
+                        whileTap={{
+                          scale: 0.8,
+                          transition: { type: 'spring', stiffness: 600, damping: 18 },
+                        }}
                         onClick={e => { e.stopPropagation(); void toggleCardMastered(card.id); }}
                         className={`flex h-5 w-5 items-center justify-center rounded border ${
                           card.mastered ? 'border-neutral-700 bg-neutral-700 text-white dark:border-neutral-300 dark:bg-neutral-300 dark:text-neutral-900' : 'border-neutral-300 dark:border-neutral-600'
@@ -599,8 +674,14 @@ function LearningCardsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEl
                 className="h-8 w-full rounded-md border border-neutral-200 bg-white px-2 text-[12px] transition-colors duration-150 focus:border-neutral-300 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
               />
               <motion.button
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.96 }}
+                whileHover={{
+                  scale: 1.04,
+                  transition: { type: 'spring', stiffness: 400, damping: 22 },
+                }}
+                whileTap={{
+                  scale: 0.96,
+                  transition: { type: 'spring', stiffness: 600, damping: 25 },
+                }}
                 onClick={() => { void submit(); }}
                 disabled={submitting}
                 className="mt-auto flex items-center justify-center gap-1 rounded-lg bg-neutral-900 py-1.5 text-[12px] font-medium text-white transition-opacity disabled:opacity-50 dark:bg-white dark:text-neutral-900"

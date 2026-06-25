@@ -13,14 +13,14 @@ import { useLearningStore } from '@/store/learning-store';
 // the sidebar + chat surface language so the popover feels native.
 
 const panelVariants = {
-  hidden: { opacity: 0, scale: 0.96, y: -6 },
+  hidden: { opacity: 0, scale: 0.96, y: -8 },
   visible: {
     opacity: 1, scale: 1, y: 0,
-    transition: { type: 'spring', stiffness: 380, damping: 30, mass: 0.7 },
+    transition: { type: 'spring', stiffness: 320, damping: 26, mass: 0.8 },
   },
   exit: {
-    opacity: 0, scale: 0.97, y: -4,
-    transition: { duration: 0.15, ease: [0.4, 0, 1, 1] },
+    opacity: 0, scale: 0.97, y: -6,
+    transition: { duration: 0.22, ease: [0.4, 0, 1, 1] },
   },
 };
 
@@ -28,7 +28,13 @@ const itemVariants = {
   hidden: { opacity: 0, y: 6 },
   visible: (i: number) => ({
     opacity: 1, y: 0,
-    transition: { delay: 0.03 * i, duration: 0.28, ease: [0.25, 0.1, 0.25, 1] },
+    transition: {
+      delay: 0.06 + 0.04 * i,
+      type: 'spring',
+      stiffness: 380,
+      damping: 30,
+      mass: 0.7,
+    },
   }),
 };
 
@@ -53,8 +59,14 @@ function ActionRow({
       variants={itemVariants}
       initial="hidden"
       animate="visible"
-      whileHover={{ x: 2 }}
-      whileTap={{ scale: 0.98 }}
+      whileHover={{
+        x: 2,
+        transition: { type: 'spring', stiffness: 400, damping: 22 },
+      }}
+      whileTap={{
+        scale: 0.98,
+        transition: { type: 'spring', stiffness: 600, damping: 25 },
+      }}
       onClick={onClick}
       className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-[7px] text-[13px] transition-colors duration-150 ${
         danger
@@ -141,8 +153,14 @@ export function SettingsPanel() {
                 快捷菜单
               </h2>
               <motion.button
-                whileHover={{ scale: 1.08 }}
-                whileTap={{ scale: 0.9 }}
+                whileHover={{
+                  scale: 1.08,
+                  transition: { type: 'spring', stiffness: 400, damping: 22 },
+                }}
+                whileTap={{
+                  scale: 0.9,
+                  transition: { type: 'spring', stiffness: 600, damping: 25 },
+                }}
                 onClick={() => setSettingsPanelOpen(false)}
                 className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-100 text-neutral-500 transition-colors hover:bg-neutral-200 hover:text-neutral-700 dark:bg-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
                 aria-label="关闭"
@@ -158,8 +176,14 @@ export function SettingsPanel() {
                 variants={itemVariants}
                 initial="hidden"
                 animate="visible"
-                whileHover={{ x: 2 }}
-                whileTap={{ scale: 0.98 }}
+                whileHover={{
+                  x: 2,
+                  transition: { type: 'spring', stiffness: 400, damping: 22 },
+                }}
+                whileTap={{
+                  scale: 0.98,
+                  transition: { type: 'spring', stiffness: 600, damping: 25 },
+                }}
                 onClick={openSettings}
                 className="flex w-full items-center gap-2.5 rounded-lg px-3 py-[7px] text-[13px] font-medium text-neutral-800 transition-colors duration-150 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800"
               >

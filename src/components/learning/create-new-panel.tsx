@@ -1,7 +1,14 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import {
+  motion,
+  AnimatePresence,
+  useMotionValue,
+  useSpring,
+  useMotionTemplate,
+  type Variants,
+} from 'framer-motion';
 import {
   X,
   ListChecks,
@@ -27,25 +34,67 @@ const features = [
 ];
 
 // ─── Animation Variants ────────────────────────────────────────────────────
+//
+// Tactile ("手感") tuning notes:
+//  - Popover uses a soft spring (stiffness 280, damping 26, mass 0.9) so it
+//    overshoots ~2% and settles in ~520ms — feels physical rather than snapped.
+//  - Exit is a 240ms ease-in with a small y+scale drop so the panel "leaves
+//    the desk" rather than vanishing.
+//  - Row stagger uses spring entry (stiffness 380, damping 30) so each row
+//    lands with a tiny settle; delay grows by 35ms per row so the cascade
+//    reads as deliberate, not robotic.
+//  - Icon/chevron/accent-line nudges use an overshoot cubic-bezier
+//    (0.34, 1.56, 0.64, 1) so they "land" with a tiny bounce — same physical
+//    metaphor as the spring entry, but cheaper than nested motion variants.
 
-const popoverVariants = {
-  hidden: { opacity: 0, y: 6, scale: 0.98 },
+// Overshoot bezier — feels like a small spring without the runtime cost.
+const TACTILE_BEZIER = 'cubic-bezier(0.34, 1.56, 0.64, 1)';
+
+const popoverVariants: Variants = {
+  hidden: { opacity: 0, y: 14, scale: 0.965 },
   visible: {
-    opacity: 1, y: 0, scale: 1,
-    transition: { duration: 0.18, ease: [0.25, 0.1, 0.25, 1] },
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: {
+      type: 'spring',
+      stiffness: 280,
+      damping: 26,
+      mass: 0.9,
+    },
   },
   exit: {
-    opacity: 0, y: 4, scale: 0.99,
-    transition: { duration: 0.12, ease: [0.4, 0, 1, 1] },
+    opacity: 0,
+    y: 10,
+    scale: 0.975,
+    transition: {
+      duration: 0.24,
+      ease: [0.4, 0, 1, 1],
+    },
   },
 };
 
-const rowVariants = {
-  hidden: { opacity: 0, y: 4 },
+const rowVariants: Variants = {
+  hidden: { opacity: 0, y: 8 },
   visible: (i: number) => ({
-    opacity: 1, y: 0,
-    transition: { delay: 0.025 * i, duration: 0.2, ease: [0.25, 0.1, 0.25, 1] },
+    opacity: 1,
+    y: 0,
+    transition: {
+      delay: 0.05 + 0.035 * i,
+      type: 'spring',
+      stiffness: 380,
+      damping: 30,
+      mass: 0.7,
+    },
   }),
+};
+
+const footerVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { delay: 0.34, duration: 0.4, ease: [0.25, 0.1, 0.25, 1] },
+  },
 };
 
 // ─── Kbd hint ────────────────────────────────────────────────────────────────
@@ -65,11 +114,22 @@ function KbdHint({ keys }: { keys: string[] }) {
   );
 }
 
-// ─── Feature Row — soft highlight box with smooth follow animation ──────────
-// Instead of a hard bg color swap, we use a layered approach:
-//   - a motion highlight layer (absolute, rounded) that fades/slides in
-//   - the icon gently slides right and the chevron nudges, all spring-eased
-// This produces a "liquid follow" feel rather than a stiff text hover.
+// ─── Feature Row — cursor-follow spotlight + tactile nudge ─────────────────
+//
+// The "follow-through smoothness" the user asked for is produced by three
+// layered mechanisms working together:
+//
+//  1) Cursor-follow spotlight: a radial-gradient layer whose center X/Y is
+//     driven by a spring-smoothed motion value. As the mouse moves within
+//     the row, the soft glow trails it with a small lag (~80ms) — this is
+//     the "liquid follow" feel.
+//
+//  2) Tactile micro-nudge on icon + chevron + accent line: CSS transforms
+//     with an overshoot bezier (0.34, 1.56, 0.64, 1) — same physical
+//     metaphor as a spring but cheaper. Lands with a tiny bounce.
+//
+//  3) Tactile press: `whileTap` scales to 0.985 with a stiff spring,
+//     giving a "depress" feel like a physical key.
 
 function FeatureRow({
   feature,
@@ -80,6 +140,18 @@ function FeatureRow({
   index: number;
   onClick: () => void;
 }) {
+  // Cursor-follow spotlight motion values
+  const mouseX = useMotionValue(120);
+  const mouseY = useMotionValue(20);
+  const springConfig = { stiffness: 320, damping: 28, mass: 0.5 };
+  const smoothX = useSpring(mouseX, springConfig);
+  const smoothY = useSpring(mouseY, springConfig);
+
+  // Build a radial-gradient template that tracks the smoothed cursor position.
+  // Two stacked layers (one for light, one for dark) so we can tune the
+  // spotlight color per theme without flash.
+  const spotlight = useMotionTemplate`radial-gradient(110px circle at ${smoothX}px ${smoothY}px, var(--row-spotlight), transparent 70%)`;
+
   return (
     <MouseFollowTooltip
       maxWidth={240}
@@ -95,34 +167,60 @@ function FeatureRow({
         initial="hidden"
         animate="visible"
         onClick={onClick}
-        className="group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left"
+        whileTap={{ scale: 0.985, transition: { type: 'spring', stiffness: 600, damping: 30 } }}
+        onMouseMove={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          mouseX.set(e.clientX - rect.left);
+          mouseY.set(e.clientY - rect.top);
+        }}
+        className="group relative flex w-full items-center gap-3 overflow-hidden rounded-lg px-2.5 py-2 text-left"
       >
-      {/* Soft highlight layer — fades in on hover via group-hover (the motion
-          whileHover on a pointer-events-none span never fires, so CSS is the
-          correct mechanism here). */}
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-0 rounded-lg bg-neutral-100 opacity-0 transition-opacity duration-200 group-hover:opacity-100 dark:bg-neutral-800/70"
-      />
-      {/* Left accent line — appears on hover for a refined "selected" cue */}
-      <span
-        aria-hidden
-        className="pointer-events-none absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 origin-center scale-y-50 rounded-full bg-neutral-400 opacity-0 transition-all duration-200 group-hover:scale-y-100 group-hover:opacity-100 dark:bg-neutral-500"
-      />
+        {/* Base solid hover layer (CSS — fades in via group-hover) */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 rounded-lg bg-neutral-100/70 opacity-0 transition-opacity duration-300 ease-out group-hover:opacity-100 dark:bg-neutral-800/70"
+        />
+        {/* Cursor-follow spotlight layer (light mode) */}
+        <motion.span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 rounded-lg opacity-0 transition-opacity duration-300 ease-out group-hover:opacity-100 dark:hidden"
+          style={{
+            background: spotlight,
+            ['--row-spotlight' as string]: 'rgba(0,0,0,0.05)',
+          }}
+        />
+        {/* Cursor-follow spotlight layer (dark mode) */}
+        <motion.span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 hidden rounded-lg opacity-0 transition-opacity duration-300 ease-out group-hover:opacity-100 dark:block"
+          style={{
+            background: spotlight,
+            ['--row-spotlight' as string]: 'rgba(255,255,255,0.06)',
+          }}
+        />
+        {/* Left accent line — overshoot bezier scale-y + opacity on hover */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 origin-center scale-y-50 rounded-full bg-neutral-400 opacity-0 transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-y-100 group-hover:opacity-100 dark:bg-neutral-500"
+        />
 
-      {/* Icon — gentle color shift on hover */}
-      <feature.icon className="relative z-10 h-4 w-4 shrink-0 text-neutral-400 transition-colors duration-200 group-hover:text-neutral-700 dark:group-hover:text-neutral-200" />
+        {/* Icon — gentle color shift on hover (CSS) + tactile nudge (overshoot bezier) */}
+        <feature.icon
+          className="relative z-10 h-4 w-4 shrink-0 text-neutral-400 transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:translate-x-[1.5px] group-hover:text-neutral-700 dark:group-hover:text-neutral-200"
+        />
 
-      {/* Label — color lifts toward ink on hover */}
-      <span className="relative z-10 flex-1 text-[13px] font-medium text-neutral-600 transition-colors duration-200 group-hover:text-neutral-900 dark:text-neutral-300 dark:group-hover:text-neutral-50">
-        {feature.label}
-      </span>
+        {/* Label — color lifts toward ink on hover */}
+        <span className="relative z-10 flex-1 text-[13px] font-medium text-neutral-600 transition-colors duration-200 group-hover:text-neutral-900 dark:text-neutral-300 dark:group-hover:text-neutral-50">
+          {feature.label}
+        </span>
 
-      <KbdHint keys={['⌘', feature.shortcut]} />
+        <KbdHint keys={['⌘', feature.shortcut]} />
 
-      {/* Chevron — nudges right on hover via group-hover */}
-      <ChevronRight className="relative z-10 h-3.5 w-3.5 text-neutral-300 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-neutral-500 dark:text-neutral-600 dark:group-hover:text-neutral-400" />
-    </motion.button>
+        {/* Chevron — tactile nudge right on hover with overshoot */}
+        <ChevronRight
+          className="relative z-10 h-3.5 w-3.5 text-neutral-300 opacity-55 transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:translate-x-[3px] group-hover:text-neutral-500 group-hover:opacity-100 dark:text-neutral-600 dark:group-hover:text-neutral-400"
+        />
+      </motion.button>
     </MouseFollowTooltip>
   );
 }
@@ -184,23 +282,35 @@ export function MoreFeaturesPanel() {
           initial="hidden"
           animate="visible"
           exit="exit"
+          style={{ transformOrigin: 'bottom left' }}
           className="fixed bottom-3 left-3 z-[60] w-60 overflow-hidden rounded-xl border border-neutral-200/80 bg-white/95 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.18),0_2px_8px_-4px_rgba(0,0,0,0.1)] backdrop-blur-md dark:border-neutral-700/60 dark:bg-neutral-900/95 dark:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.5),0_2px_8px_-4px_rgba(0,0,0,0.4)]"
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-3 py-2.5">
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: 0.1, duration: 0.3, ease: [0.25, 0.1, 0.25, 1] } }}
+            className="flex items-center justify-between px-3 py-2.5"
+          >
             <h2 className="text-[12px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
               更多功能
             </h2>
-            <button
+            <motion.button
               onClick={() => setCreateNewPanelOpen(false)}
+              whileHover={{ scale: 1.1, transition: { type: 'spring', stiffness: 400, damping: 22 } }}
+              whileTap={{ scale: 0.9, transition: { type: 'spring', stiffness: 600, damping: 25 } }}
               className="flex h-6 w-6 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
               aria-label="关闭"
             >
               <X className="h-3.5 w-3.5" strokeWidth={2} />
-            </button>
-          </div>
+            </motion.button>
+          </motion.div>
 
-          <div className="mx-3 h-px bg-neutral-100 dark:bg-neutral-800" />
+          <motion.div
+            initial={{ scaleX: 0 }}
+            animate={{ scaleX: 1, transition: { delay: 0.15, duration: 0.45, ease: [0.25, 0.1, 0.25, 1] } }}
+            style={{ transformOrigin: 'left' }}
+            className="mx-3 h-px bg-neutral-100 dark:bg-neutral-800"
+          />
 
           <div className="p-1.5">
             {features.map((feature, i) => (
@@ -214,7 +324,12 @@ export function MoreFeaturesPanel() {
           </div>
 
           {/* Footer hint */}
-          <div className="flex items-center justify-between border-t border-neutral-100 px-3 py-1.5 dark:border-neutral-800">
+          <motion.div
+            variants={footerVariants}
+            initial="hidden"
+            animate="visible"
+            className="flex items-center justify-between border-t border-neutral-100 px-3 py-1.5 dark:border-neutral-800"
+          >
             <span className="text-[10px] text-neutral-400 dark:text-neutral-600">
               按 <kbd className="rounded border border-neutral-200 bg-neutral-50 px-1 text-[9px] font-medium dark:border-neutral-700 dark:bg-neutral-800">⌘</kbd>
               <kbd className="ml-0.5 rounded border border-neutral-200 bg-neutral-50 px-1 text-[9px] font-medium dark:border-neutral-700 dark:bg-neutral-800">1-6</kbd> 快速跳转
@@ -222,7 +337,7 @@ export function MoreFeaturesPanel() {
             <span className="text-[10px] text-neutral-300 dark:text-neutral-700">
               {features.length} 项
             </span>
-          </div>
+          </motion.div>
         </motion.div>
       )}
     </AnimatePresence>

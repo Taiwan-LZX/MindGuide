@@ -11,7 +11,13 @@ const nodeVariants = {
   visible: (i: number) => ({
     opacity: 1,
     x: 0,
-    transition: { delay: 0.04 * i, duration: 0.25, ease: [0.25, 0.1, 0.25, 1] },
+    transition: {
+      delay: 0.06 + 0.035 * i,
+      type: 'spring',
+      stiffness: 380,
+      damping: 28,
+      mass: 0.7,
+    },
   }),
 };
 
@@ -49,7 +55,10 @@ export function KnowledgeInline({ nodes }: { nodes: KnowledgeNode[] }) {
             variants={nodeVariants}
             initial="hidden"
             animate="visible"
-            whileTap={{ scale: 0.99 }}
+            whileTap={{
+              scale: 0.99,
+              transition: { type: 'spring', stiffness: 600, damping: 25 },
+            }}
             className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-[13px] transition-colors ${
               node.mastered
                 ? 'bg-neutral-50 text-neutral-400 dark:bg-neutral-800 dark:text-neutral-500'
@@ -57,7 +66,10 @@ export function KnowledgeInline({ nodes }: { nodes: KnowledgeNode[] }) {
             }`}
           >
             <motion.button
-              whileTap={{ scale: 0.85 }}
+              whileTap={{
+                scale: 0.85,
+                transition: { type: 'spring', stiffness: 600, damping: 18 },
+              }}
               onClick={() => toggleKnowledgeMastered(node.id)}
               className="flex h-4 w-4 shrink-0 items-center justify-center rounded border border-neutral-300 transition-colors dark:border-neutral-600"
             >

@@ -650,7 +650,7 @@ function WelcomeView() {
                 aria-label="开始学习"
                 className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-200 ${
                   topicInput.trim()
-                    ? 'bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-white dark:text-neutral-900'
+                    ? 'bg-[var(--brand)] text-[var(--brand-foreground)] hover:opacity-90'
                     : 'bg-neutral-100 text-neutral-300 dark:bg-neutral-800 dark:text-neutral-600'
                 }`}
               >

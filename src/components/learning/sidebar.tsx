@@ -92,7 +92,7 @@ function CollapsedSidebar() {
         variants={iconStripVariants}
         initial="hidden"
         animate="visible"
-        className="mb-6 flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900"
+        className="mb-6 flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--brand)] text-[var(--brand-foreground)]"
       >
         <MessagesSquare className="h-4 w-4" />
       </motion.div>
@@ -484,7 +484,7 @@ function FullSidebar() {
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.98 }}
           onClick={() => setIsCreating(true)}
-          className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-neutral-900 text-[13px] font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
+          className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-[var(--brand)] text-[13px] font-medium text-[var(--brand-foreground)] transition-opacity hover:opacity-90"
         >
           <Plus className="h-4 w-4" />
           创建新主题
@@ -558,7 +558,7 @@ function SessionRow({
       {/* Session icon / thumbnail — show inline spinner when loading */}
       <div className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${
         isActive
-          ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
+          ? 'bg-[var(--brand)] text-[var(--brand-foreground)]'
           : isCompleted
           ? 'bg-neutral-200/80 dark:bg-neutral-800 dark:text-neutral-500'
           : 'bg-neutral-200/60 text-neutral-500 dark:bg-neutral-800/60 dark:text-neutral-400'

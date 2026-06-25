@@ -129,6 +129,7 @@ interface LearningStore {
   knowledgePanelOpen: boolean;
   displayMode: 'side' | 'half' | 'full';
   settingsPanelOpen: boolean;
+  settingsViewOpen: boolean;
   createNewPanelOpen: boolean;
   activeFeatureView: string | null;
 
@@ -223,6 +224,7 @@ interface LearningStore {
   setKnowledgePanelOpen: (open: boolean) => void;
   setDisplayMode: (mode: 'side' | 'half' | 'full') => void;
   setSettingsPanelOpen: (open: boolean) => void;
+  setSettingsViewOpen: (open: boolean) => void;
   setCreateNewPanelOpen: (open: boolean) => void;
   setActiveFeatureView: (view: string | null) => void;
   fetchTasks: (sessionId: string) => Promise<void>;
@@ -282,6 +284,7 @@ const initialState = {
   knowledgePanelOpen: true,
   displayMode: 'side' as const,
   settingsPanelOpen: false,
+  settingsViewOpen: false,
   createNewPanelOpen: false,
   activeFeatureView: null as string | null,
   tasks: [] as Array<{ id: string; title: string; done: boolean; priority: number; order: number; createdAt: string }>,
@@ -912,6 +915,7 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
   setKnowledgePanelOpen: (open: boolean) => set({ knowledgePanelOpen: open }),
   setDisplayMode: (mode: 'side' | 'half' | 'full') => set({ displayMode: mode, sidebarOpen: mode !== 'full' }),
   setSettingsPanelOpen: (open: boolean) => set({ settingsPanelOpen: open }),
+  setSettingsViewOpen: (open: boolean) => set({ settingsViewOpen: open }),
   setCreateNewPanelOpen: (open: boolean) => set({ createNewPanelOpen: open }),
   setActiveFeatureView: (view: string | null) => {
     set({ activeFeatureView: view, createNewPanelOpen: false });

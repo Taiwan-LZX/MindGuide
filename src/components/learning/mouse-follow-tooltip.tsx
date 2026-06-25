@@ -36,6 +36,13 @@ interface MouseFollowTooltipProps {
   className?: string;
   /** Vertical anchor bias. 'auto' flips when overflowing. */
   vAlign?: 'below' | 'above' | 'auto';
+  /**
+   * Follow the cursor (default true). When false, the tooltip anchors to a
+   * fixed spot next to the trigger element and only fades in/out — no cursor
+   * chasing, no spring wobble. Use `follow={false}` for larger descriptive
+   * cards where a moving bubble feels jittery.
+   */
+  follow?: boolean;
 }
 
 export function MouseFollowTooltip({
@@ -47,6 +54,7 @@ export function MouseFollowTooltip({
   maxWidth = 280,
   className = '',
   vAlign = 'auto',
+  follow = true,
 }: MouseFollowTooltipProps) {
   const [visible, setVisible] = useState(false);
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -54,6 +62,9 @@ export function MouseFollowTooltip({
   const mounted = useSyncExternalStore(emptySubscribe, getIsClient, getIsServer);
 
   const tipRef = useRef<HTMLDivElement>(null);
+  // Wrapper span (display:contents) — its first child is the trigger element.
+  // Used to measure the trigger's rect when `follow` is false.
+  const wrapperRef = useRef<HTMLSpanElement>(null);
   const rafRef = useRef<number | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Last measured tooltip size — updated after mount so the first frame uses
@@ -107,6 +118,40 @@ export function MouseFollowTooltip({
     [offset, boundaryRef, vAlign],
   );
 
+  // Fixed-anchor placement: pin the tooltip beside the trigger element
+  // (right side preferred, flips left on overflow, vertically centered to the
+  // trigger, clamped into the boundary). No cursor tracking → no wobble.
+  const computeFixed = useCallback(() => {
+    const trigger = wrapperRef.current?.firstElementChild as HTMLElement | null;
+    if (!trigger) return;
+    const tr = trigger.getBoundingClientRect();
+    const tw = sizeRef.current.w;
+    const th = sizeRef.current.h;
+
+    let bx = 0;
+    let by = 0;
+    let bw = window.innerWidth;
+    let bh = window.innerHeight;
+    if (boundaryRef?.current) {
+      const r = boundaryRef.current.getBoundingClientRect();
+      bx = r.left;
+      by = r.top;
+      bw = r.width;
+      bh = r.height;
+    }
+
+    // Prefer right of trigger, vertically centered to it.
+    let x = tr.right + offset;
+    let y = tr.top + tr.height / 2 - th / 2;
+    // Flip left if the right side overflows.
+    if (x + tw > bx + bw) x = tr.left - tw - offset;
+    // Clamp into boundary (4px inset).
+    x = Math.max(bx + 4, Math.min(x, bx + bw - tw - 4));
+    y = Math.max(by + 4, Math.min(y, by + bh - th - 4));
+
+    setPos({ x, y });
+  }, [offset, boundaryRef]);
+
   // Once visible, measure the real tooltip size and recompute position so the
   // first frame's estimate is corrected immediately.
   useEffect(() => {
@@ -115,14 +160,25 @@ export function MouseFollowTooltip({
         w: tipRef.current.offsetWidth,
         h: tipRef.current.offsetHeight,
       };
-      compute(cursorRef.current.x, cursorRef.current.y);
+      if (follow) compute(cursorRef.current.x, cursorRef.current.y);
+      else computeFixed();
     }
-  }, [visible, content, compute]);
+  }, [visible, content, compute, computeFixed, follow]);
 
   const handleEnter = useCallback(
     (e: React.MouseEvent) => {
-      cursorRef.current = { x: e.clientX, y: e.clientY };
       if (timerRef.current) clearTimeout(timerRef.current);
+      // Fixed-anchor mode: pin beside the trigger, no cursor tracking.
+      if (!follow) {
+        const show = () => {
+          setVisible(true);
+          computeFixed();
+        };
+        if (delay > 0) timerRef.current = setTimeout(show, delay);
+        else show();
+        return;
+      }
+      cursorRef.current = { x: e.clientX, y: e.clientY };
       const show = () => {
         setVisible(true);
         compute(e.clientX, e.clientY);
@@ -130,16 +186,18 @@ export function MouseFollowTooltip({
       if (delay > 0) timerRef.current = setTimeout(show, delay);
       else show();
     },
-    [compute, delay],
+    [follow, delay, compute, computeFixed],
   );
 
   const handleMove = useCallback(
     (e: React.MouseEvent) => {
+      // Fixed-anchor mode ignores cursor movement entirely.
+      if (!follow) return;
       cursorRef.current = { x: e.clientX, y: e.clientY };
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(() => compute(e.clientX, e.clientY));
     },
-    [compute],
+    [follow, compute],
   );
 
   const handleLeave = useCallback(() => {
@@ -151,6 +209,7 @@ export function MouseFollowTooltip({
   return (
     <>
       <span
+        ref={wrapperRef}
         className="contents"
         onMouseEnter={handleEnter}
         onMouseMove={handleMove}
@@ -172,10 +231,18 @@ export function MouseFollowTooltip({
                   // Pure fade in/out — appear and disappear feel identical:
                   // a quiet opacity crossfade, no scale "pop".
                   opacity: { duration: 0.15, ease: [0.25, 0.1, 0.25, 1] },
-                  // Liquid follow: fast spring settles in ~90ms, no perceptible
-                  // lag but feels organic rather than rigidly glued to cursor.
-                  x: { type: 'spring', stiffness: 600, damping: 36, mass: 0.6 },
-                  y: { type: 'spring', stiffness: 600, damping: 36, mass: 0.6 },
+                  // Follow mode: liquid spring settles in ~90ms. Fixed mode:
+                  // position snaps instantly (duration 0) so only opacity
+                  // animates — zero wobble, pure crossfade.
+                  ...(follow
+                    ? {
+                        x: { type: 'spring', stiffness: 600, damping: 36, mass: 0.6 },
+                        y: { type: 'spring', stiffness: 600, damping: 36, mass: 0.6 },
+                      }
+                    : {
+                        x: { duration: 0 },
+                        y: { duration: 0 },
+                      }),
                 }}
                 style={{
                   position: 'fixed',

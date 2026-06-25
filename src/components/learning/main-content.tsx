@@ -664,6 +664,23 @@ function WelcomeView() {
               </motion.button>
             ))}
           </motion.div>
+
+          {/* Scholarly footnote — a quiet aphorism grounding the experience */}
+          <motion.div
+            custom={11}
+            variants={welcomeVariants}
+            initial="hidden"
+            animate="visible"
+            className="mt-14 flex flex-col items-center gap-1.5 text-neutral-400 dark:text-neutral-500"
+          >
+            <div className="h-px w-10 bg-neutral-200 dark:bg-neutral-700" />
+            <p className="font-serif text-[11.5px] italic text-neutral-400 dark:text-neutral-500">
+              “知识不是被给予的，而是被建构的。”
+            </p>
+            <p className="text-[10px] uppercase tracking-[0.18em] text-neutral-300 dark:text-neutral-600">
+              — Jean Piaget
+            </p>
+          </motion.div>
         </div>
       </div>
     </div>

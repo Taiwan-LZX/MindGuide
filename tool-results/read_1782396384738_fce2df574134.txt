@@ -1,0 +1,716 @@
+     1→'use client';
+     2→
+     3→import React from 'react';
+     4→import { motion, AnimatePresence } from 'framer-motion';
+     5→import {
+     6→  ArrowLeft,
+     7→  Plus,
+     8→  X,
+     9→  Check,
+    10→  Trash2,
+    11→  Trophy,
+    12→  Lock,
+    13→  Flame,
+    14→  MessageSquare,
+    15→  Compass,
+    16→  Crown,
+    17→  Brain,
+    18→  Layers,
+    19→  BarChart3,
+    20→  Clock,
+    21→  BookOpen,
+    22→  RotateCcw,
+    23→  StickyNote,
+    24→} from 'lucide-react';
+    25→import { useLearningStore } from '@/store/learning-store';
+    26→// PDFImportView removed during cleanup — feature replaced with notes editor
+    27→import TiptapEditor from '@/components/learning/tiptap-editor';
+    28→
+    29→// ─── Animation Variants ─────────────────────────────────────────────────────
+    30→
+    31→const pageVariants = {
+    32→  hidden: { opacity: 0, x: 30 },
+    33→  visible: { opacity: 1, x: 0, transition: { duration: 0.3, ease: [0.25, 0.1, 0.25, 1] } },
+    34→  exit: { opacity: 0, x: -20, transition: { duration: 0.15 } },
+    35→};
+    36→
+    37→const itemVariants = {
+    38→  hidden: { opacity: 0, y: 12 },
+    39→  visible: (i: number) => ({
+    40→    opacity: 1, y: 0,
+    41→    transition: { delay: 0.04 * i, duration: 0.25, ease: [0.25, 0.1, 0.25, 1] },
+    42→  }),
+    43→};
+    44→
+    45→// ─── Feature View Router ─────────────────────────────────────────────────────
+    46→
+    47→export function FeatureView() {
+    48→  const { activeFeatureView } = useLearningStore();
+    49→
+    50→  return (
+    51→    <AnimatePresence mode="wait">
+    52→      {activeFeatureView && (
+    53→        <motion.div
+    54→          key={activeFeatureView}
+    55→          variants={pageVariants}
+    56→          initial="hidden"
+    57→          animate="visible"
+    58→          exit="exit"
+    59→          className="flex h-full flex-1 flex-col"
+    60→        >
+    61→          {/* PDF import removed during cleanup */}
+    62→          {activeFeatureView === 'tasks' && <TaskPlannerView />}
+    63→          {activeFeatureView === 'cards' && <LearningCardsView />}
+    64→          {activeFeatureView === 'achievements' && <AchievementsView />}
+    65→          {activeFeatureView === 'stats' && <StatsView />}
+    66→          {activeFeatureView === 'graph' && <KnowledgeGraphView />}
+    67→          {activeFeatureView === 'notes' && <NotesView />}
+    68→        </motion.div>
+    69→      )}
+    70→    </AnimatePresence>
+    71→  );
+    72→}
+    73→
+    74→// ─── Shared Header ──────────────────────────────────────────────────────────
+    75→
+    76→function FeatureHeader({ title, icon: Icon, color }: { title: string; icon: React.ElementType; color: string }) {
+    77→  const { setActiveFeatureView } = useLearningStore();
+    78→
+    79→  return (
+    80→    <div className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-200 px-6 dark:border-neutral-800">
+    81→      <motion.button
+    82→        whileHover={{ scale: 1.08 }}
+    83→        whileTap={{ scale: 0.92 }}
+    84→        onClick={() => setActiveFeatureView(null)}
+    85→        className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+    86→      >
+    87→        <ArrowLeft className="h-4 w-4" />
+    88→      </motion.button>
+    89→      <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${color}`}>
+    90→        <Icon className="h-3.5 w-3.5" />
+    91→      </div>
+    92→      <h1 className="text-[15px] font-medium text-neutral-900 dark:text-neutral-100">{title}</h1>
+    93→    </div>
+    94→  );
+    95→}
+    96→
+    97→// ─── Empty State ────────────────────────────────────────────────────────────
+    98→
+    99→function EmptyState({ icon: Icon, title, description }: { icon: React.ElementType; title: string; description: string }) {
+   100→  return (
+   101→    <motion.div
+   102→      initial={{ opacity: 0, y: 12 }}
+   103→      animate={{ opacity: 1, y: 0 }}
+   104→      transition={{ delay: 0.15, duration: 0.35 }}
+   105→      className="flex flex-1 flex-col items-center justify-center px-6"
+   106→    >
+   107→      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-neutral-100 text-neutral-400 dark:bg-neutral-800">
+   108→        <Icon className="h-6 w-6" />
+   109→      </div>
+   110→      <p className="mb-1 text-[14px] font-medium text-neutral-500 dark:text-neutral-400">{title}</p>
+   111→      <p className="text-[13px] text-neutral-400">{description}</p>
+   112→    </motion.div>
+   113→  );
+   114→}
+   115→
+   116→// ─── 1. PDF Import View is now in pdf-import-view.tsx ──────────────────
+   117→
+   118→// ─── 2. Task Planner View ───────────────────────────────────────────────────
+   119→
+   120→function TaskPlannerView() {
+   121→  const { tasks, addTask, toggleTask, deleteTask, isLoadingTasks } = useLearningStore();
+   122→  const [newTask, setNewTask] = React.useState('');
+   123→  const [submitting, setSubmitting] = React.useState(false);
+   124→
+   125→  const submit = React.useCallback(async () => {
+   126→    const t = newTask.trim();
+   127→    if (!t || submitting) return;
+   128→    setSubmitting(true);
+   129→    setNewTask('');
+   130→    await addTask(t);
+   131→    setSubmitting(false);
+   132→  }, [newTask, submitting, addTask]);
+   133→
+   134→  const doneCount = tasks.filter(t => t.done).length;
+   135→  const pct = tasks.length > 0 ? (doneCount / tasks.length) * 100 : 0;
+   136→
+   137→  return (
+   138→    <>
+   139→      <FeatureHeader title="任务规划" icon={Check} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
+   140→      <div className="flex-1 overflow-y-auto custom-scrollbar">
+   141→        <div className="mx-auto max-w-[600px] px-6 py-5">
+   142→          {/* Progress */}
+   143→          <motion.div
+   144→            initial={{ opacity: 0, y: 8 }}
+   145→            animate={{ opacity: 1, y: 0 }}
+   146→            className="mb-5 flex items-center justify-between text-[13px]"
+   147→          >
+   148→            <span className="text-neutral-500 dark:text-neutral-400">进度 {doneCount}/{tasks.length}</span>
+   149→            <motion.div
+   150→              className="h-1.5 w-32 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800"
+   151→              initial={{ opacity: 0 }}
+   152→              animate={{ opacity: 1 }}
+   153→              transition={{ delay: 0.2 }}
+   154→            >
+   155→              <motion.div
+   156→                className="h-full rounded-full bg-neutral-900 dark:bg-white"
+   157→                initial={{ width: 0 }}
+   158→                animate={{ width: `${pct}%` }}
+   159→                transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+   160→              />
+   161→            </motion.div>
+   162→          </motion.div>
+   163→
+   164→          {/* Add task */}
+   165→          <motion.div
+   166→            initial={{ opacity: 0, y: 8 }}
+   167→            animate={{ opacity: 1, y: 0, transition: { delay: 0.05 } }}
+   168→            className="mb-4 flex gap-2"
+   169→          >
+   170→            <input
+   171→              type="text"
+   172→              placeholder="添加学习任务..."
+   173→              value={newTask}
+   174→              onChange={e => setNewTask(e.target.value)}
+   175→              onKeyDown={e => { if (e.key === 'Enter') { void submit(); } }}
+   176→              className="h-9 flex-1 rounded-lg border border-neutral-200 bg-white px-3 text-[13px] transition-colors duration-150 focus:border-neutral-300 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+   177→            />
+   178→            <motion.button
+   179→              whileHover={{ scale: 1.05 }}
+   180→              whileTap={{ scale: 0.92 }}
+   181→              onClick={() => { void submit(); }}
+   182→              disabled={submitting}
+   183→              className="flex h-9 w-9 items-center justify-center rounded-lg bg-neutral-900 text-white transition-opacity disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+   184→            >
+   185→              <Plus className="h-4 w-4" />
+   186→            </motion.button>
+   187→          </motion.div>
+   188→
+   189→          {/* Task list */}
+   190→          <AnimatePresence mode="popLayout" initial={false}>
+   191→            {isLoadingTasks && tasks.length === 0 && (
+   192→              <div className="space-y-1.5">
+   193→                {[0, 1, 2].map(i => (
+   194→                  <div key={i} className="flex items-center gap-3 rounded-lg bg-white px-3 py-2.5 dark:bg-neutral-900">
+   195→                    <div className="h-5 w-5 shrink-0 rounded-md bg-neutral-100 dark:bg-neutral-800" />
+   196→                    <div className="h-3 flex-1 rounded bg-neutral-100 dark:bg-neutral-800" style={{ width: `${60 - i * 12}%` }} />
+   197→                  </div>
+   198→                ))}
+   199→              </div>
+   200→            )}
+   201→            {!isLoadingTasks && tasks.length === 0 && <EmptyState icon={Check} title="暂无任务" description="添加学习任务来规划你的学习路径" />}
+   202→            {tasks.map((task, i) => (
+   203→              <motion.div
+   204→                key={task.id}
+   205→                custom={i}
+   206→                variants={itemVariants}
+   207→                initial="hidden"
+   208→                animate="visible"
+   209→                exit={{ opacity: 0, x: -20, scale: 0.95, transition: { duration: 0.15 } }}
+   210→                layout
+   211→                className={`group mb-1.5 flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors ${
+   212→                  task.done ? 'bg-neutral-50 dark:bg-neutral-800/50' : 'bg-white hover:bg-neutral-50 dark:bg-neutral-900 dark:hover:bg-neutral-800/50'
+   213→                }`}
+   214→              >
+   215→                <motion.button
+   216→                  whileTap={{ scale: 0.8 }}
+   217→                  onClick={() => { void toggleTask(task.id); }}
+   218→                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${
+   219→                    task.done
+   220→                      ? 'border-neutral-700 bg-neutral-700 text-white dark:border-neutral-300 dark:bg-neutral-300 dark:text-neutral-900'
+   221→                      : 'border-neutral-300 dark:border-neutral-600'
+   222→                  }`}
+   223→                >
+   224→                  {task.done && <Check className="h-3 w-3" strokeWidth={3} />}
+   225→                </motion.button>
+   226→                <span className={`flex-1 text-[13px] ${task.done ? 'text-neutral-400 line-through dark:text-neutral-500' : 'text-neutral-700 dark:text-neutral-200'}`}>
+   227→                  {task.title}
+   228→                </span>
+   229→                <motion.button
+   230→                  whileTap={{ scale: 0.8 }}
+   231→                  onClick={() => { void deleteTask(task.id); }}
+   232→                  className="opacity-0 group-hover:opacity-100 flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700"
+   233→                >
+   234→                  <Trash2 className="h-3 w-3" />
+   235→                </motion.button>
+   236→              </motion.div>
+   237→            ))}
+   238→          </AnimatePresence>
+   239→        </div>
+   240→      </div>
+   241→    </>
+   242→  );
+   243→}
+   244→
+   245→// ─── 3. Learning Cards View ────────────────────────────────────────────────
+   246→
+   247→function LearningCardsView() {
+   248→  const { cards, addCard, toggleCardMastered, deleteCard, isLoadingCards } = useLearningStore();
+   249→  const [front, setFront] = React.useState('');
+   250→  const [back, setBack] = React.useState('');
+   251→  const [flipped, setFlipped] = React.useState<string | null>(null);
+   252→  const [submitting, setSubmitting] = React.useState(false);
+   253→
+   254→  const masteredCount = cards.filter(c => c.mastered).length;
+   255→
+   256→  const submit = React.useCallback(async () => {
+   257→    const f = front.trim();
+   258→    const b = back.trim();
+   259→    if (!f || !b || submitting) return;
+   260→    setSubmitting(true);
+   261→    setFront('');
+   262→    setBack('');
+   263→    await addCard(f, b);
+   264→    setSubmitting(false);
+   265→  }, [front, back, submitting, addCard]);
+   266→
+   267→  return (
+   268→    <>
+   269→      <FeatureHeader title="学习卡片" icon={RotateCcw} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
+   270→      <div className="flex flex-1 flex-col overflow-hidden">
+   271→        {/* Stats bar */}
+   272→        <div className="shrink-0 border-b border-neutral-100 px-6 py-3 dark:border-neutral-800">
+   273→          <div className="mx-auto flex max-w-[600px] items-center justify-between text-[12px] text-neutral-400">
+   274→            <span>{cards.length} 张卡片</span>
+   275→            <span>{masteredCount} 已掌握</span>
+   276→          </div>
+   277→        </div>
+   278→
+   279→        {/* Card grid */}
+   280→        <div className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar">
+   281→          <div className="mx-auto grid max-w-[600px] grid-cols-2 gap-3">
+   282→            <AnimatePresence mode="popLayout" initial={false}>
+   283→              {isLoadingCards && cards.length === 0 && (
+   284→                <>
+   285→                  {[0, 1, 2, 3].map(i => (
+   286→                    <div key={`sk-${i}`} className="flex min-h-[120px] flex-col justify-between rounded-xl border border-neutral-100 p-3 dark:border-neutral-800">
+   287→                      <div className="h-3 w-3/4 rounded bg-neutral-100 dark:bg-neutral-800" />
+   288→                      <div className="h-3 w-1/3 rounded bg-neutral-100 dark:bg-neutral-800" />
+   289→                    </div>
+   290→                  ))}
+   291→                </>
+   292→              )}
+   293→              {!isLoadingCards && cards.length === 0 && (
+   294→                <EmptyState key="empty" icon={RotateCcw} title="暂无卡片" description="创建闪卡来强化记忆" />
+   295→              )}
+   296→              {cards.map((card, i) => (
+   297→                <motion.div
+   298→                  key={card.id}
+   299→                  custom={i}
+   300→                  variants={itemVariants}
+   301→                  initial="hidden"
+   302→                  animate="visible"
+   303→                  exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.15 } }}
+   304→                  layout
+   305→                  onClick={() => setFlipped(flipped === card.id ? null : card.id)}
+   306→                  className={`group relative flex min-h-[120px] cursor-pointer flex-col justify-between rounded-xl border p-3 transition-all ${
+   307→                    card.mastered
+   308→                      ? 'border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/50'
+   309→                      : 'border-neutral-200 bg-white hover:border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:border-neutral-600'
+   310→                  }`}
+   311→                >
+   312→                  {/* Delete button — appears on hover */}
+   313→                  <button
+   314→                    onClick={e => { e.stopPropagation(); void deleteCard(card.id); }}
+   315→                    className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded text-neutral-300 opacity-0 transition-opacity hover:bg-neutral-100 hover:text-neutral-500 group-hover:opacity-100 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+   316→                    aria-label="删除卡片"
+   317→                  >
+   318→                    <Trash2 className="h-3 w-3" />
+   319→                  </button>
+   320→                  <div>
+   321→                    <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-200">
+   322→                      {flipped === card.id ? card.back : card.front}
+   323→                    </p>
+   324→                    {flipped === card.id && (
+   325→                      <motion.p
+   326→                        initial={{ opacity: 0 }}
+   327→                        animate={{ opacity: 1 }}
+   328→                        className="mt-1.5 text-[11px] text-neutral-400"
+   329→                      >
+   330→                        {card.front}
+   331→                      </motion.p>
+   332→                    )}
+   333→                  </div>
+   334→                  <div className="flex items-center justify-between">
+   335→                    <span className="text-[11px] text-neutral-400">{card.category}</span>
+   336→                    <motion.button
+   337→                      whileTap={{ scale: 0.8 }}
+   338→                      onClick={e => { e.stopPropagation(); void toggleCardMastered(card.id); }}
+   339→                      className={`flex h-5 w-5 items-center justify-center rounded border ${
+   340→                        card.mastered ? 'border-neutral-700 bg-neutral-700 text-white dark:border-neutral-300 dark:bg-neutral-300 dark:text-neutral-900' : 'border-neutral-300 dark:border-neutral-600'
+   341→                      }`}
+   342→                    >
+   343→                      {card.mastered && <Check className="h-3 w-3" strokeWidth={3} />}
+   344→                    </motion.button>
+   345→                  </div>
+   346→                </motion.div>
+   347→              ))}
+   348→            </AnimatePresence>
+   349→
+   350→            {/* Add card form */}
+   351→            <motion.div
+   352→              initial={{ opacity: 0, scale: 0.95 }}
+   353→              animate={{ opacity: 1, scale: 1 }}
+   354→              transition={{ delay: 0.15 }}
+   355→              className="flex min-h-[120px] flex-col gap-2 rounded-xl border border-dashed border-neutral-300 p-3 dark:border-neutral-700"
+   356→            >
+   357→              <input
+   358→                type="text"
+   359→                placeholder="正面（问题）"
+   360→                value={front}
+   361→                onChange={e => setFront(e.target.value)}
+   362→                className="h-8 w-full rounded-md border border-neutral-200 bg-white px-2 text-[12px] transition-colors duration-150 focus:border-neutral-300 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+   363→              />
+   364→              <input
+   365→                type="text"
+   366→                placeholder="背面（答案）"
+   367→                value={back}
+   368→                onChange={e => setBack(e.target.value)}
+   369→                onKeyDown={e => { if (e.key === 'Enter') { void submit(); } }}
+   370→                className="h-8 w-full rounded-md border border-neutral-200 bg-white px-2 text-[12px] transition-colors duration-150 focus:border-neutral-300 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+   371→              />
+   372→              <motion.button
+   373→                whileHover={{ scale: 1.04 }}
+   374→                whileTap={{ scale: 0.96 }}
+   375→                onClick={() => { void submit(); }}
+   376→                disabled={submitting}
+   377→                className="mt-auto flex items-center justify-center gap-1 rounded-lg bg-neutral-900 py-1.5 text-[12px] font-medium text-white transition-opacity disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+   378→              >
+   379→                <Plus className="h-3 w-3" /> 添加卡片
+   380→              </motion.button>
+   381→            </motion.div>
+   382→          </div>
+   383→        </div>
+   384→      </div>
+   385→    </>
+   386→  );
+   387→}
+   388→
+   389→// ─── 4. Achievements View ──────────────────────────────────────────────────
+   390→
+   391→const achievementIcons: Record<string, React.ElementType> = {
+   392→  message: MessageSquare,
+   393→  compass: Compass,
+   394→  flame: Flame,
+   395→  crown: Crown,
+   396→  brain: Brain,
+   397→  layers: Layers,
+   398→};
+   399→
+   400→function AchievementsView() {
+   401→  const { achievements, stats, fetchStats, isLoadingStats } = useLearningStore();
+   402→
+   403→  // Fetch fresh stats on mount (achievements are derived from real DB data)
+   404→  React.useEffect(() => {
+   405→    fetchStats();
+   406→  }, [fetchStats]);
+   407→
+   408→  const unlockedCount = achievements.filter(a => a.unlocked).length;
+   409→  const totalProgressPct = achievements.length > 0
+   410→    ? Math.round((unlockedCount / achievements.length) * 100)
+   411→    : 0;
+   412→
+   413→  return (
+   414→    <>
+   415→      <FeatureHeader title="成就系统" icon={Trophy} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
+   416→      <div className="flex-1 overflow-y-auto custom-scrollbar">
+   417→        <div className="mx-auto max-w-[600px] px-6 py-5">
+   418→          {/* Summary with circular progress */}
+   419→          <motion.div
+   420→            initial={{ opacity: 0, y: 8 }}
+   421→            animate={{ opacity: 1, y: 0 }}
+   422→            className="mb-5 rounded-xl border border-neutral-200/70 bg-neutral-50/60 p-4 dark:border-neutral-800/70 dark:bg-neutral-900/50"
+   423→          >
+   424→            <div className="flex items-center gap-4">
+   425→              <div className="relative flex h-14 w-14 items-center justify-center">
+   426→                <svg className="h-14 w-14 -rotate-90" viewBox="0 0 56 56">
+   427→                  <circle cx="28" cy="28" r="24" fill="none" strokeWidth="4" className="stroke-neutral-200 dark:stroke-neutral-800" />
+   428→                  <motion.circle
+   429→                    cx="28" cy="28" r="24" fill="none" strokeWidth="4" strokeLinecap="round"
+   430→                    className="stroke-neutral-700 dark:stroke-neutral-300"
+   431→                    initial={{ strokeDasharray: '0 150.8' }}
+   432→                    animate={{ strokeDasharray: `${(totalProgressPct / 100) * 150.8} 150.8` }}
+   433→                    transition={{ duration: 0.8, ease: 'easeOut' }}
+   434→                  />
+   435→                </svg>
+   436→                <div className="absolute inset-0 flex flex-col items-center justify-center">
+   437→                  <span className="text-[12px] font-bold text-neutral-900 dark:text-neutral-100">{totalProgressPct}%</span>
+   438→                </div>
+   439→              </div>
+   440→              <div className="flex-1">
+   441→                <p className="text-[14px] font-semibold text-neutral-900 dark:text-neutral-100">{unlockedCount}/{achievements.length} 成就</p>
+   442→                <p className="text-[12px] text-neutral-500 dark:text-neutral-400">
+   443→                  {isLoadingStats ? '统计中...' : (unlockedCount === achievements.length ? '全部解锁' : '继续学习来解锁更多成就')}
+   444→                </p>
+   445→              </div>
+   446→              <div className="flex flex-col items-end gap-0.5 text-right">
+   447→                <span className="text-[10px] uppercase tracking-wider text-neutral-400">连续学习</span>
+   448→                <span className="text-[16px] font-bold text-neutral-900 dark:text-neutral-100">{stats?.currentStreak ?? 0}<span className="text-[11px] font-normal text-neutral-400 ml-0.5">天</span></span>
+   449→              </div>
+   450→            </div>
+   451→          </motion.div>
+   452→
+   453→          {/* Achievement list */}
+   454→          <div className="space-y-2">
+   455→            <AnimatePresence initial={false}>
+   456→              {achievements.length === 0 && (
+   457→                <EmptyState icon={Trophy} title="加载中" description="正在获取成就数据..." />
+   458→              )}
+   459→              {achievements.map((ach, i) => {
+   460→                const Icon = achievementIcons[ach.icon] || Trophy;
+   461→                const pct = ach.maxProgress > 0 ? Math.min((ach.progress / ach.maxProgress) * 100, 100) : 0;
+   462→                return (
+   463→                  <motion.div
+   464→                    key={ach.id}
+   465→                    custom={i}
+   466→                    variants={itemVariants}
+   467→                    initial="hidden"
+   468→                    animate="visible"
+   469→                    layout
+   470→                    className={`flex items-center gap-3 rounded-xl border p-3.5 transition-colors ${
+   471→                      ach.unlocked
+   472→                        ? 'border-neutral-300 bg-neutral-50/80 dark:border-neutral-700 dark:bg-neutral-800/40'
+   473→                        : 'border-neutral-100 bg-white dark:border-neutral-800 dark:bg-neutral-900'
+   474→                    }`}
+   475→                  >
+   476→                    <div className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition-colors ${
+   477→                      ach.unlocked
+   478→                        ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
+   479→                        : 'bg-neutral-100 text-neutral-400 dark:bg-neutral-800 dark:text-neutral-500'
+   480→                    }`}>
+   481→                      {ach.unlocked ? <Icon className="h-5 w-5" /> : <Lock className="h-4 w-4" />}
+   482→                    </div>
+   483→                    <div className="flex-1 min-w-0">
+   484→                      <p className={`text-[13px] font-medium ${ach.unlocked ? 'text-neutral-900 dark:text-neutral-100' : 'text-neutral-500 dark:text-neutral-400'}`}>
+   485→                        {ach.title}
+   486→                      </p>
+   487→                      <p className="text-[11px] text-neutral-400 truncate">{ach.description}</p>
+   488→                    </div>
+   489→                    <div className="shrink-0">
+   490→                      {ach.unlocked ? (
+   491→                        <span className="rounded-full border border-neutral-200 px-2 py-0.5 text-[11px] font-medium text-neutral-600 dark:border-neutral-700 dark:text-neutral-400">已解锁</span>
+   492→                      ) : (
+   493→                        <div className="flex items-center gap-2">
+   494→                          <div className="h-1.5 w-20 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
+   495→                            <motion.div
+   496→                              className="h-full rounded-full bg-neutral-700 dark:bg-neutral-300"
+   497→                              initial={{ width: 0 }}
+   498→                              animate={{ width: `${pct}%` }}
+   499→                              transition={{ delay: 0.3, duration: 0.6, ease: 'easeOut' }}
+   500→                            />
+   501→                          </div>
+   502→                          <span className="text-[10px] font-medium text-neutral-500 dark:text-neutral-400 tabular-nums w-10 text-right">{ach.progress}/{ach.maxProgress}</span>
+   503→                        </div>
+   504→                      )}
+   505→                    </div>
+   506→                  </motion.div>
+   507→                );
+   508→              })}
+   509→            </AnimatePresence>
+   510→          </div>
+   511→        </div>
+   512→      </div>
+   513→    </>
+   514→  );
+   515→}
+   516→
+   517→// ─── 5. Stats View ───────────────────────────────────────────────────────────
+   518→
+   519→function StatsView() {
+   520→  const { stats, weeklyActivity, fetchStats, isLoadingStats } = useLearningStore();
+   521→
+   522→  React.useEffect(() => {
+   523→    fetchStats();
+   524→  }, [fetchStats]);
+   525→
+   526→  const statsCards = [
+   527→    { label: '学习会话', value: stats?.sessions ?? 0, icon: BookOpen, color: 'text-neutral-700 dark:text-neutral-200' },
+   528→    { label: '对话轮数', value: stats?.messages ?? 0, icon: MessageSquare, color: 'text-neutral-700 dark:text-neutral-200' },
+   529→    { label: '知识点', value: stats?.knowledgeNodes ?? 0, icon: Layers, color: 'text-neutral-700 dark:text-neutral-200', sub: `${stats?.masteredKnowledge ?? 0} 已掌握` },
+   530→    { label: '学习时长', value: stats?.learningTimeLabel ?? '0m', icon: Clock, color: 'text-neutral-700 dark:text-neutral-200' },
+   531→  ];
+   532→
+   533→  // Compute weekly activity max for bar scaling
+   534→  const maxWeekly = Math.max(1, ...(weeklyActivity?.map(d => d.count) || [1]));
+   535→
+   536→  return (
+   537→    <>
+   538→      <FeatureHeader title="学习统计" icon={BarChart3} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
+   539→      <div className="flex-1 overflow-y-auto custom-scrollbar">
+   540→        <div className="mx-auto max-w-[600px] px-6 py-5">
+   541→          {/* Hero metric: current streak */}
+   542→          <motion.div
+   543→            initial={{ opacity: 0, y: 8 }}
+   544→            animate={{ opacity: 1, y: 0 }}
+   545→            className="mb-5 rounded-xl border border-neutral-200/70 bg-neutral-50/60 p-5 dark:border-neutral-800/70 dark:bg-neutral-900/50"
+   546→          >
+   547→            <div className="flex items-center justify-between">
+   548→              <div>
+   549→                <p className="text-[11px] uppercase tracking-wider text-neutral-400 dark:text-neutral-500">当前连续学习</p>
+   550→                <div className="mt-1 flex items-baseline gap-1.5">
+   551→                  <motion.span
+   552→                    initial={{ scale: 0.5, opacity: 0 }}
+   553→                    animate={{ scale: 1, opacity: 1 }}
+   554→                    transition={{ delay: 0.15, type: 'spring', stiffness: 200, damping: 18 }}
+   555→                    className="text-[32px] font-bold leading-none text-neutral-900 dark:text-neutral-100"
+   556→                  >
+   557→                    {stats?.currentStreak ?? 0}
+   558→                  </motion.span>
+   559→                  <span className="text-[13px] text-neutral-500 dark:text-neutral-400">天</span>
+   560→                </div>
+   561→                <p className="mt-1.5 text-[11px] text-neutral-400">
+   562→                  {(stats?.currentStreak ?? 0) >= 3 ? '保持下去' : '继续学习来培养习惯'}
+   563→                </p>
+   564→              </div>
+   565→            </div>
+   566→          </motion.div>
+   567→
+   568→          {/* Stats grid */}
+   569→          <div className="mb-6 grid grid-cols-2 gap-3">
+   570→            {statsCards.map((s, i) => (
+   571→              <motion.div
+   572→                key={s.label}
+   573→                custom={i}
+   574→                variants={itemVariants}
+   575→                initial="hidden"
+   576→                animate="visible"
+   577→                className="group relative overflow-hidden rounded-xl border border-neutral-100 bg-white p-4 transition-all hover:border-neutral-200 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700"
+   578→              >
+   579→                <div className="flex items-start justify-between">
+   580→                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-50 transition-colors group-hover:bg-neutral-100 dark:bg-neutral-800 dark:group-hover:bg-neutral-700">
+   581→                    <s.icon className={`h-5 w-5 ${s.color}`} />
+   582→                  </div>
+   583→                  {'sub' in s && s.sub && (
+   584→                    <span className="rounded-full border border-neutral-200 px-1.5 py-0.5 text-[10px] font-medium text-neutral-600 dark:border-neutral-700 dark:text-neutral-400">
+   585→                      {s.sub}
+   586→                    </span>
+   587→                  )}
+   588→                </div>
+   589→                <div className="mt-2.5">
+   590→                  <p className="text-[20px] font-semibold tabular-nums text-neutral-900 dark:text-neutral-100">{s.value}</p>
+   591→                  <p className="text-[11px] text-neutral-400">{s.label}</p>
+   592→                </div>
+   593→              </motion.div>
+   594→            ))}
+   595→          </div>
+   596→
+   597→          {/* Weekly activity (real data from /api/stats) */}
+   598→          <motion.div
+   599→            initial={{ opacity: 0, y: 12 }}
+   600→            animate={{ opacity: 1, y: 0, transition: { delay: 0.25 } }}
+   601→            className="rounded-xl border border-neutral-100 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
+   602→          >
+   603→            <div className="mb-4 flex items-center justify-between">
+   604→              <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">本周学习活动</p>
+   605→              <span className="text-[11px] text-neutral-400">
+   606→                {isLoadingStats ? '加载中...' : `共 ${weeklyActivity?.reduce((s, d) => s + d.count, 0) ?? 0} 条消息`}
+   607→              </span>
+   608→            </div>
+   609→            <div className="flex items-end justify-between gap-2 px-2">
+   610→              {(weeklyActivity && weeklyActivity.length > 0 ? weeklyActivity : [
+   611→                { label: '一', count: 0 }, { label: '二', count: 0 }, { label: '三', count: 0 },
+   612→                { label: '四', count: 0 }, { label: '五', count: 0 }, { label: '六', count: 0 }, { label: '日', count: 0 },
+   613→              ]).map((day, i) => {
+   614→                const heightPct = Math.max(4, (day.count / maxWeekly) * 100);
+   615→                const isToday = i === 6; // last bucket is "today"
+   616→                return (
+   617→                  <motion.div
+   618→                    key={i}
+   619→                    initial={{ scaleY: 0 }}
+   620→                    animate={{ scaleY: 1 }}
+   621→                    transition={{ delay: 0.3 + i * 0.05, duration: 0.4 }}
+   622→                    className="flex flex-1 flex-col items-center gap-1.5"
+   623→                    style={{ transformOrigin: 'bottom' }}
+   624→                  >
+   625→                    <div className="relative flex w-full flex-col justify-end" style={{ height: '80px' }}>
+   626→                      <motion.div
+   627→                        className={`w-full rounded-md transition-colors ${
+   628→                          day.count > 0
+   629→                            ? (isToday ? 'bg-neutral-800 dark:bg-neutral-200' : 'bg-neutral-300 dark:bg-neutral-600')
+   630→                            : 'bg-neutral-100 dark:bg-neutral-800'
+   631→                        }`}
+   632→                        style={{ height: `${heightPct}%` }}
+   633→                      >
+   634→                        {day.count > 0 && (
+   635→                          <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[9px] font-medium text-neutral-500 dark:text-neutral-400 tabular-nums">
+   636→                            {day.count}
+   637→                          </span>
+   638→                        )}
+   639→                      </motion.div>
+   640→                    </div>
+   641→                    <span className={`text-[10px] ${isToday ? 'font-bold text-neutral-900 dark:text-neutral-100' : 'text-neutral-400'}`}>{day.label}</span>
+   642→                  </motion.div>
+   643→                );
+   644→              })}
+   645→            </div>
+   646→          </motion.div>
+   647→        </div>
+   648→      </div>
+   649→    </>
+   650→  );
+   651→}
+   652→
+   653→// ─── 6. Knowledge Graph View ───────────────────────────────────────────────
+   654→
+   655→function KnowledgeGraphView() {
+   656→  const { knowledgeNodes } = useLearningStore();
+   657→
+   658→  return (
+   659→    <>
+   660→      <FeatureHeader title="知识图谱" icon={Layers} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
+   661→      <div className="flex-1 overflow-y-auto custom-scrollbar">
+   662→        <div className="mx-auto max-w-[600px] px-6 py-5">
+   663→          {knowledgeNodes.length === 0 ? (
+   664→            <EmptyState icon={Layers} title="知识图谱为空" description="开始学习来构建你的知识网络" />
+   665→          ) : (
+   666→            <div className="space-y-3">
+   667→              <AnimatePresence initial={false}>
+   668→                {knowledgeNodes.map((node, i) => (
+   669→                  <motion.div
+   670→                    key={node.id}
+   671→                    custom={i}
+   672→                    variants={itemVariants}
+   673→                    initial="hidden"
+   674→                    animate="visible"
+   675→                    className={`flex items-center gap-3 rounded-xl border p-3.5 ${
+   676→                      node.mastered
+   677→                        ? 'border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/50'
+   678→                        : 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900'
+   679→                    }`}
+   680→                  >
+   681→                    <div className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+   682→                      node.mastered
+   683→                        ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
+   684→                        : 'border border-neutral-200 text-neutral-400 dark:border-neutral-700'
+   685→                    }`}>
+   686→                      {node.mastered ? <Check className="h-4 w-4" strokeWidth={2.5} /> : <span className="text-[12px] leading-none">·</span>}
+   687→                    </div>
+   688→                    <div className="flex-1 min-w-0">
+   689→                      <p className="truncate text-[13px] font-medium text-neutral-700 dark:text-neutral-200">{node.title}</p>
+   690→                      {node.category && <p className="text-[11px] text-neutral-400">{node.category}</p>}
+   691→                    </div>
+   692→                    <div className="text-[11px] text-neutral-400 tabular-nums">
+   693→                      重要度 {node.importance}/5
+   694→                    </div>
+   695→                  </motion.div>
+   696→                ))}
+   697→              </AnimatePresence>
+   698→            </div>
+   699→          )}
+   700→        </div>
+   701→      </div>
+   702→    </>
+   703→  );
+   704→}
+   705→
+   706→// ─── 7. Notes View ─────────────────────────────────────────────────────────
+   707→
+   708→function NotesView() {
+   709→  return (
+   710→    <>
+   711→      <FeatureHeader title="学习笔记" icon={StickyNote} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
+   712→      <TiptapEditor />
+   713→    </>
+   714→  );
+   715→}
+   716→

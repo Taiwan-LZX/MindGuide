@@ -22,7 +22,9 @@
 // These are common AI-decoration symbols that aren't caught by
 // Extended_Pictographic.
 const DECORATIVE_SYMBOL_RE =
-  /[\u2700-\u27BF\u2600-\u26FF\u2B00-\u2BFF\u2190-\u21FF\u27F5-\u27FF\u2B05-\u2B07\uFE0F\u200D\u20E3]/g;
+  /[\u2700-\u27BF\u2600-\u26FF\u2B00-\u2BFF\u2190-\u21FF\u27F5-\u27FF\u2B05-\u2B07\uFE0F\u200D\u20E3\uFFFD\uFFF9-\uFFFB]/g;
+// \uFFFD         REPLACEMENT CHARACTER (left over from bad UTF-8 decoding of emoji bytes)
+// \uFFF9-\uFFFB  Interlinear annotation characters (rare, but occasionally emitted)
 // \u2700-\u27BF  Dingbats (✨ ✏ ✓ ✔ ✗ ★ ☆ ☀ ☁ ☂ ☃ ✉ ✂ ✊ ✋ ...)
 // \u2600-\u26FF  Miscellaneous symbols (☀ ☁ ☂ ☃ ☺ ☻ ☼ ☽ ☾ ★ ☆ ☎ ☏ ☐ ☑ ☒ ...)
 // \u2B00-\u2BFF  Misc symbols and arrows (⬀⬁⬂⬃⬄⬅⬆⬇⬈⬉⬊⬋ ⭕ ⭖ ...)
@@ -43,6 +45,7 @@ const EMOJI_RE =
 //   - collapse runs of spaces/tabs into one
 //   - remove spaces before sentence punctuation
 //   - remove leading separator+space ("- " with nothing after the dash)
+//   - collapse ", ," → "," and "。," → "。" (orphan commas left by stripped bullets)
 //   - trim line ends
 function tidy(s: string): string {
   return s
@@ -51,6 +54,7 @@ function tidy(s: string): string {
     .replace(/^[\s]*[-•·][\s]+$/gm, '')
     .replace(/[ \t]+$/gm, '')
     .replace(/\n{3,}/g, '\n\n')
+    .replace(/([,，])\s+(?=[,，])/g, '$1')
     .trim();
 }
 

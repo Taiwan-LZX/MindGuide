@@ -124,11 +124,43 @@ interface LearningStore {
   activeFeatureView: string | null;
 
   // Feature state
-  tasks: Array<{ id: string; title: string; done: boolean; priority: number; createdAt: string }>;
-  cards: Array<{ id: string; front: string; back: string; category: string; mastered: boolean; createdAt: string }>;
+  tasks: Array<{ id: string; title: string; done: boolean; priority: number; order: number; createdAt: string }>;
+  cards: Array<{
+    id: string;
+    front: string;
+    back: string;
+    category: string;
+    mastered: boolean;
+    ease: number;
+    interval: number;
+    repetition: number;
+    dueAt: string | null;
+    lastReviewedAt: string | null;
+    createdAt: string;
+  }>;
   isLoadingTasks: boolean;
   isLoadingCards: boolean;
   achievements: Achievement[];
+
+  // Card review (SM-2) session state
+  reviewQueue: Array<{
+    id: string;
+    front: string;
+    back: string;
+    category: string;
+    ease: number;
+    interval: number;
+    repetition: number;
+    dueAt: string | null;
+    lastReviewedAt: string | null;
+  }>;
+  reviewIndex: number;
+  reviewFlipped: boolean;
+  reviewStats: { forgot: number; hard: number; good: number; easy: number };
+  isReviewing: boolean;
+  isFetchingReview: boolean;
+  isSubmittingReview: boolean;
+  reviewLastQuality: number | null;
 
   // Stats state
   stats: LearningStats | null;
@@ -184,10 +216,17 @@ interface LearningStore {
   addTask: (title: string, priority?: number) => Promise<void>;
   toggleTask: (id: string) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
+  setTaskPriority: (id: string, priority: number) => Promise<void>;
+  reorderTasks: (orderedIds: string[]) => Promise<void>;
   fetchCards: (sessionId: string) => Promise<void>;
   addCard: (front: string, back: string, category?: string) => Promise<void>;
   toggleCardMastered: (id: string) => Promise<void>;
   deleteCard: (id: string) => Promise<void>;
+  // SM-2 review
+  startReview: () => Promise<void>;
+  flipReviewCard: () => void;
+  submitReview: (quality: 0 | 2 | 4 | 5) => Promise<void>;
+  exitReview: () => void;
   reset: () => void;
 }
 
@@ -225,10 +264,40 @@ const initialState = {
   settingsPanelOpen: false,
   createNewPanelOpen: false,
   activeFeatureView: null as string | null,
-  tasks: [] as Array<{ id: string; title: string; done: boolean; priority: number; createdAt: string }>,
-  cards: [] as Array<{ id: string; front: string; back: string; category: string; mastered: boolean; createdAt: string }>,
+  tasks: [] as Array<{ id: string; title: string; done: boolean; priority: number; order: number; createdAt: string }>,
+  cards: [] as Array<{
+    id: string;
+    front: string;
+    back: string;
+    category: string;
+    mastered: boolean;
+    ease: number;
+    interval: number;
+    repetition: number;
+    dueAt: string | null;
+    lastReviewedAt: string | null;
+    createdAt: string;
+  }>,
   isLoadingTasks: false,
   isLoadingCards: false,
+  reviewQueue: [] as Array<{
+    id: string;
+    front: string;
+    back: string;
+    category: string;
+    ease: number;
+    interval: number;
+    repetition: number;
+    dueAt: string | null;
+    lastReviewedAt: string | null;
+  }>,
+  reviewIndex: 0,
+  reviewFlipped: false,
+  reviewStats: { forgot: 0, hard: 0, good: 0, easy: 0 },
+  isReviewing: false,
+  isFetchingReview: false,
+  isSubmittingReview: false,
+  reviewLastQuality: null as number | null,
   notesContent: '',
   notesPanelOpen: false,
   isSavingNotes: false,
@@ -838,11 +907,12 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       const res = await fetch(`/api/sessions/${sessionId}/tasks`);
       if (!res.ok) { console.error('fetchTasks failed:', res.status); return; }
       const data = await res.json();
-      set({ tasks: (data.tasks || []).map((t: { id: string; title: string; done: boolean; priority: number; createdAt: string }) => ({
+      set({ tasks: (data.tasks || []).map((t: { id: string; title: string; done: boolean; priority: number; order?: number; createdAt: string }) => ({
         id: t.id,
         title: t.title,
         done: t.done,
         priority: t.priority,
+        order: typeof t.order === 'number' ? t.order : 0,
         createdAt: typeof t.createdAt === 'string' ? t.createdAt : new Date(t.createdAt as unknown as string).toISOString(),
       })) });
     } catch (e) {
@@ -871,6 +941,7 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
           title: task.title,
           done: task.done,
           priority: task.priority,
+          order: typeof task.order === 'number' ? task.order : s.tasks.length,
           createdAt: typeof task.createdAt === 'string' ? task.createdAt : new Date(task.createdAt).toISOString(),
         }],
       }));
@@ -902,6 +973,55 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
     }
   },
 
+  setTaskPriority: async (id: string, priority: number) => {
+    const p = Math.min(5, Math.max(1, Math.floor(priority)));
+    const prev = get().tasks;
+    set({ tasks: prev.map(t => t.id === id ? { ...t, priority: p } : t) });
+    try {
+      const res = await fetch(`/api/tasks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ priority: p }),
+      });
+      if (!res.ok) {
+        set({ tasks: prev });
+        console.error('setTaskPriority failed:', res.status);
+      }
+    } catch (e) {
+      set({ tasks: prev });
+      console.error('setTaskPriority error:', e);
+    }
+  },
+
+  reorderTasks: async (orderedIds: string[]) => {
+    // Optimistic: assign new sequential `order` values to all tasks
+    const prev = get().tasks;
+    const byId = new Map(prev.map(t => [t.id, t]));
+    const next = orderedIds
+      .map((id, idx) => {
+        const t = byId.get(id);
+        return t ? { ...t, order: idx } : null;
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+    // Append any tasks not in orderedIds at the end (defensive)
+    for (const t of prev) {
+      if (!orderedIds.includes(t.id)) next.push({ ...t, order: next.length });
+    }
+    set({ tasks: next });
+    // Persist: send all order updates (PATCH each, batched fire-and-forget)
+    try {
+      await Promise.all(orderedIds.map((id, idx) =>
+        fetch(`/api/tasks/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order: idx }),
+        }).catch(e => console.error('reorderTasks persist error:', e))
+      ));
+    } catch (e) {
+      console.error('reorderTasks error:', e);
+    }
+  },
+
   deleteTask: async (id: string) => {
     const prev = get().tasks;
     set({ tasks: prev.filter(t => t.id !== id) });
@@ -921,12 +1041,22 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       const res = await fetch(`/api/sessions/${sessionId}/cards`);
       if (!res.ok) { console.error('fetchCards failed:', res.status); return; }
       const data = await res.json();
-      set({ cards: (data.cards || []).map((c: { id: string; front: string; back: string; category: string; mastered: boolean; createdAt: string }) => ({
+      set({ cards: (data.cards || []).map((c: {
+        id: string; front: string; back: string; category: string; mastered: boolean;
+        ease?: number; interval?: number; repetition?: number;
+        dueAt?: string | null; lastReviewedAt?: string | null;
+        createdAt: string;
+      }) => ({
         id: c.id,
         front: c.front,
         back: c.back,
         category: c.category,
         mastered: c.mastered,
+        ease: typeof c.ease === 'number' ? c.ease : 2.5,
+        interval: typeof c.interval === 'number' ? c.interval : 0,
+        repetition: typeof c.repetition === 'number' ? c.repetition : 0,
+        dueAt: c.dueAt ? (typeof c.dueAt === 'string' ? c.dueAt : new Date(c.dueAt as unknown as string).toISOString()) : null,
+        lastReviewedAt: c.lastReviewedAt ? (typeof c.lastReviewedAt === 'string' ? c.lastReviewedAt : new Date(c.lastReviewedAt as unknown as string).toISOString()) : null,
         createdAt: typeof c.createdAt === 'string' ? c.createdAt : new Date(c.createdAt as unknown as string).toISOString(),
       })) });
     } catch (e) {
@@ -957,6 +1087,11 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
           back: card.back,
           category: card.category,
           mastered: card.mastered,
+          ease: typeof card.ease === 'number' ? card.ease : 2.5,
+          interval: typeof card.interval === 'number' ? card.interval : 0,
+          repetition: typeof card.repetition === 'number' ? card.repetition : 0,
+          dueAt: card.dueAt ? (typeof card.dueAt === 'string' ? card.dueAt : new Date(card.dueAt).toISOString()) : null,
+          lastReviewedAt: card.lastReviewedAt ? (typeof card.lastReviewedAt === 'string' ? card.lastReviewedAt : new Date(card.lastReviewedAt).toISOString()) : null,
           createdAt: typeof card.createdAt === 'string' ? card.createdAt : new Date(card.createdAt).toISOString(),
         }],
       }));
@@ -996,6 +1131,107 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       console.error('deleteCard error:', e);
     }
   },
+
+  // ── SM-2 Card Review ────────────────────────────────────────────────────
+
+  startReview: async () => {
+    const { currentSessionId } = get();
+    if (!currentSessionId) return;
+    set({
+      isFetchingReview: true,
+      isReviewing: true,
+      reviewIndex: 0,
+      reviewFlipped: false,
+      reviewStats: { forgot: 0, hard: 0, good: 0, easy: 0 },
+      reviewLastQuality: null,
+      reviewQueue: [],
+    });
+    try {
+      const res = await fetch(`/api/sessions/${currentSessionId}/cards/review?limit=50`);
+      if (!res.ok) { console.error('startReview failed:', res.status); return; }
+      const data = await res.json();
+      const queue: Array<{
+        id: string; front: string; back: string; category: string;
+        ease: number; interval: number; repetition: number;
+        dueAt: string | null; lastReviewedAt: string | null;
+      }> = (data.queue || []).map((c: {
+        id: string; front: string; back: string; category: string;
+        ease?: number; interval?: number; repetition?: number;
+        dueAt?: string | null; lastReviewedAt?: string | null;
+      }) => ({
+        id: c.id,
+        front: c.front,
+        back: c.back,
+        category: c.category,
+        ease: typeof c.ease === 'number' ? c.ease : 2.5,
+        interval: typeof c.interval === 'number' ? c.interval : 0,
+        repetition: typeof c.repetition === 'number' ? c.repetition : 0,
+        dueAt: c.dueAt ? (typeof c.dueAt === 'string' ? c.dueAt : new Date(c.dueAt as unknown as string).toISOString()) : null,
+        lastReviewedAt: c.lastReviewedAt ? (typeof c.lastReviewedAt === 'string' ? c.lastReviewedAt : new Date(c.lastReviewedAt as unknown as string).toISOString()) : null,
+      }));
+      set({ reviewQueue: queue });
+    } catch (e) {
+      console.error('startReview error:', e);
+    } finally {
+      set({ isFetchingReview: false });
+    }
+  },
+
+  flipReviewCard: () => set((s) => ({ reviewFlipped: !s.reviewFlipped })),
+
+  submitReview: async (quality: 0 | 2 | 4 | 5) => {
+    const { reviewQueue, reviewIndex } = get();
+    const card = reviewQueue[reviewIndex];
+    if (!card || get().isSubmittingReview) return;
+    set({ isSubmittingReview: true, reviewLastQuality: quality });
+    try {
+      const res = await fetch(`/api/cards/${card.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ review: { quality } }),
+      });
+      if (!res.ok) { console.error('submitReview failed:', res.status); }
+      else {
+        const data = await res.json();
+        // Update card in the main cards array with new SM-2 state
+        const updated = data.card;
+        if (updated) {
+          set((s) => ({
+            cards: s.cards.map(c => c.id === card.id ? {
+              ...c,
+              mastered: updated.mastered,
+              ease: typeof updated.ease === 'number' ? updated.ease : c.ease,
+              interval: typeof updated.interval === 'number' ? updated.interval : c.interval,
+              repetition: typeof updated.repetition === 'number' ? updated.repetition : c.repetition,
+              dueAt: updated.dueAt ? (typeof updated.dueAt === 'string' ? updated.dueAt : new Date(updated.dueAt).toISOString()) : null,
+              lastReviewedAt: updated.lastReviewedAt ? (typeof updated.lastReviewedAt === 'string' ? updated.lastReviewedAt : new Date(updated.lastReviewedAt).toISOString()) : null,
+            } : c),
+          }));
+        }
+      }
+    } catch (e) {
+      console.error('submitReview error:', e);
+    } finally {
+      // Advance to next card
+      const bucket = quality === 0 ? 'forgot' : quality === 2 ? 'hard' : quality === 4 ? 'good' : 'easy';
+      set((s) => ({
+        reviewStats: { ...s.reviewStats, [bucket]: s.reviewStats[bucket] + 1 },
+        reviewIndex: s.reviewIndex + 1,
+        reviewFlipped: false,
+        isSubmittingReview: false,
+      }));
+    }
+  },
+
+  exitReview: () => set({
+    isReviewing: false,
+    reviewQueue: [],
+    reviewIndex: 0,
+    reviewFlipped: false,
+    reviewLastQuality: null,
+    isSubmittingReview: false,
+    isFetchingReview: false,
+  }),
 
   // ── Reset ─────────────────────────────────────────────────────────────────
 

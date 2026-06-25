@@ -574,3 +574,159 @@ GET /api/sessions/[id]/messages 200 in 55ms  (re-fetch after AI response)
 - `src/components/learning/main-content.tsx` — 聊天头部课程按钮 + 提示框
 - `src/components/learning/command-palette.tsx` — 「打开课程面板」命令
 - `src/components/learning/unified-search.tsx` — 替换 mock 为真实 API + debounce + 骨架屏
+
+---
+
+## 第七轮迭代 — Cron webDevReview：SM-2 卡片复习 + 任务优先级与拖拽 + 学术字体 + 章节编号 (自动评审驱动)
+
+### 触发与判断
+本轮为定时 webDevReview 自动触发。读取 worklog.md 了解前 6 轮进展后，用 agent-browser 对所有视图做端到端 QA。项目状态稳定（lint 通过、无运行时错误），按"样式越做越细 / 功能越做越多"的要求，本轮聚焦于：
+1. QA 中发现的小 bug 修复
+2. 完成 worklog 第六轮列出的中优先项「卡片复习模式 + 任务优先级 UI」
+3. 学术论文风字体与排版细节增强
+
+### QA 发现的问题
+
+**QA 1（数据残留 bug）：emoji-sanitize 残留 U+FFFD 替换字符**
+- 复现：在聊天历史中，部分 AI 回复显示 "之前，想先" 之间夹着 `�`（Unicode 替换字符）
+- 根因：历史消息中包含的 emoji 字节在被 stripEmoji 后留下 U+FFFD；该字符未被纳入 DECORATIVE_SYMBOL_RE 清洗范围
+- 影响：破坏论文风文字洁净度
+
+**QA 2（HTML 结构 bug）：button-in-button 导致 React hydration error**
+- 复现：进入任务规划视图后，Next.js Dev Tools 弹出 "2 Issues" 警告
+- 根因：`PriorityBar` 组件外层是 `<button>`，内部又渲染 5 个 `<button>` 段——HTML 规范禁止 button 嵌套，React hydration 检测到后报错
+- 影响：控制台噪音 + 潜在的 SEO/可访问性问题
+
+### 已完成的修改
+
+**1. 修复 emoji-sanitize U+FFFD 残留 (`src/lib/emoji-sanitize.ts`)**
+- DECORATIVE_SYMBOL_RE 增加 `\uFFFD`（替换字符）和 `\uFFF9-\uFFFB`（行间注释字符）
+- tidy() 增加 `([,，])\s+(?=[,，])` 折叠孤立逗号（剥离 bullet 后留下的 ", ,"）
+- 验证：刷新会话后历史消息 "之前，想先" 之间 `�` 消失 ✅
+
+**2. 修复 button-in-button hydration error (`feature-views.tsx`)**
+- PriorityBar 外层从 `<button>` 改为 `<span role="button" tabIndex={0}>`，配套 onKeyDown 处理 Enter/Space
+- 内部 PriorityBar 5 个段按钮保持可点击，onClick stopPropagation 防止冒泡到外层
+- 添加 `focus-visible:ring-1` 提供键盘聚焦反馈
+- 验证：刷新后 issues 数量为 0 ✅
+
+**3. SM-2 间隔重复算法实现 (`src/lib/sm2.ts` 新建)**
+- 经典 SM-2 公式：EF' = EF + (0.1 - (5 - q)(0.08 + (5 - q) * 0.025))
+- 4 档评级映射：忘了(0) / 困难(2) / 良好(4) / 简单(5)
+- Lapse（q<3）重置 repetition、interval；Recall（q≥3）按 1/6/interval*EF 推进
+- Ease 限制在 [1.3, 3.0] 防止失控
+- dueAt 计算：interval=0 → 1 分钟后；interval≥1 → N 天后
+- `formatInterval(days)` 辅助函数：1分钟 / N天 / N个月 / N年
+
+**4. Card 模型扩展 SM-2 字段 (`prisma/schema.prisma`)**
+- Card 新增：ease (Float, default 2.5) / interval (Int, default 0) / repetition (Int, default 0) / dueAt (DateTime?) / lastReviewedAt (DateTime?)
+- `bun run db:push` 同步 schema + 重启 dev server 让新 Prisma Client 生效
+
+**5. SM-2 复习 API**
+- `GET /api/sessions/[id]/cards/review` — 返回到期队列（dueAt IS NULL OR dueAt <= now），Fisher-Yates 洗牌，支持 ?limit 参数
+- `PATCH /api/cards/[id]` 扩展：body `{ review: { quality: 0|2|4|5 } }` → 调用 sm2Next 计算新状态并持久化；interval≥21 自动 mastered
+- `PATCH /api/tasks/[id]` 扩展：支持 `order` 字段（拖拽排序持久化）
+
+**6. Store 扩展 SM-2 review 会话状态 (`store/learning-store.ts`)**
+- 新状态：reviewQueue / reviewIndex / reviewFlipped / reviewStats / isReviewing / isFetchingReview / isSubmittingReview / reviewLastQuality
+- 新 actions：startReview() 拉取到期队列 / flipReviewCard() 翻面 / submitReview(q) 提交评级并推进 / exitReview() 退出
+- submitReview 乐观更新 cards 数组的 SM-2 字段
+- 新 actions：setTaskPriority(id, p) / reorderTasks(orderedIds) — 任务优先级与排序持久化
+- cards/tasks 类型扩展 ease/interval/repetition/dueAt/lastReviewedAt/order 字段
+
+**7. 卡片复习模式 UI (`card-review-mode.tsx` 新建)**
+- 状态机：loading → empty（无到期卡片）→ active（翻牌+评级）→ done（总结）
+- 3D 翻牌动画：`rotateY 0/180deg` + `backfaceVisibility:hidden` + `transformStyle:preserve-3d` + `perspective:1200px`
+- 卡片正面：问题（serif 字体）+ SM-2 元信息（第 N 次复习 · 难度 X.XX · 上次间隔）
+- 卡片背面：答案（serif）+ 问题回显
+- 4 档评级按钮：忘了/困难/良好/简单，每个带提示文案 + 下次出现时间 + 键盘快捷键 (1/2/3/4)
+- 键盘：Space/Enter 翻面，1-4 评级，Esc 退出
+- 完成总结：正确率 + 4 档分布水平条形图（学术单色）
+- 头部：进度条 "1 / N" + 退出按钮
+- 底部：Esc 退出提示
+
+**8. 学习卡片视图增强 (`feature-views.tsx`)**
+- 卡片网格上方新增"开始复习"按钮（含到期数提示），点击切换到复习模式
+- 状态栏增加"待复习"计数
+- 每张卡片右下角增加到期徽章：「待复习」/「N 天后」/「未复习」
+- LearningCardsView 接收 scrollRef 用于 ScrollProgress
+
+**9. 任务优先级 UI + 拖拽排序 (`feature-views.tsx`)**
+- PriorityBar 组件：5 段竖向 bar，点击段设置优先级；filled 段为深色，empty 段为浅色
+- 添加任务表单下方新增优先级选择器（1-5 数字按钮 + 中文标签：很低/较低/中等/较高/很高）
+- 每个任务行：拖拽手柄（GripVertical）+ 复选框 + 优先级 bar + 标题 + 优先级标签 + 删除按钮
+- 原生 HTML5 拖拽：draggable + onDragStart/onDragOver/onDrop，dragOver 时高亮目标行
+- reorderTasks 乐观更新本地顺序 + 批量 PATCH 持久化
+- 验证：点击段 5 → 任务标签变为 "很高" ✅
+
+**10. 学术论文风字体与排版 (`layout.tsx` + `globals.css`)**
+- 引入 Lora（next/font/google）作为 serif 拉丁字体，CSS 变量 `--font-lora`
+- `--font-serif` 字体栈：Lora → Noto Serif SC → Source Han Serif SC → Songti SC → STSong → ui-serif → Georgia → serif
+- 验证 Noto Serif SC 已安装（fc-list :lang=zh）→ 中文也以衬线呈现
+- 重启 dev server + 清空 `.next` 让 CSS 重新生成
+
+**11. 章节编号 + 衬线标题 (`feature-views.tsx`)**
+- FeatureHeader 增加 `§01`-`§06` 章节序号（font-serif + tabular-nums + 浅灰）
+- 标题从 `text-[15px] font-medium` 改为 `font-serif text-[16px] font-medium`
+- FEATURES_SECTION_NUMBER 映射：tasks=01, cards=02, achievements=03, stats=04, graph=05, notes=06
+
+**12. 滚动进度条 (`scroll-progress.tsx` 新建)**
+- 1px 极细水平线，位于功能视图顶部，宽度随滚动位置 spring 动画填充
+- 用 framer-motion `useScroll({ container: targetRef })` + `useSpring` 平滑
+- FeatureView 顶层管理 scrollRef，传给各子视图的可滚动容器
+- 学术风：相当于书页边缘的"当前位置"指示
+
+**13. Welcome 视图学术脚注 (`main-content.tsx`)**
+- Quick Start 按钮下方新增 Piaget 名言：'\"知识不是被给予的，而是被建构的。\" — Jean Piaget'
+- 10px 细线分隔 + 衬线斜体引文 + 全大写小字署名
+- 营造学术阅读体验的"题记"感
+
+### 验证结果
+- `bun run lint` ✅ 零错误零警告
+- `bun run db:push` ✅ schema 同步 + Prisma Client 重新生成
+- agent-browser + VLM 端到端：
+  - 任务规划 §01：优先级 bar + 拖拽 + 1-5 选择器 ✅
+  - 学习卡片 §02：开始复习按钮 + 到期徽章 + 未复习/待复习/N天后 ✅
+  - 复习模式：3D 翻牌 + 4 档评级 + 完成总结（正确率 + 分布条形图）✅
+  - 成就系统 §03：serif 标题 + 章节号 ✅
+  - 学习统计 §04：serif 标题 + 章节号 ✅
+  - 知识图谱 §05：serif 标题 + 章节号 ✅
+  - 首页：MindGuide 标题 Lora 衬线 + Piaget 名言 ✅
+  - 历史 AI 回复 `�` 替换字符消失 ✅
+  - Next.js issues 计数为 0（hydration 修复）✅
+  - 深色模式：所有视图正确渲染，对比度良好 ✅
+- API 端到端：
+  - GET /api/sessions/[id]/cards/review → 200，返回洗牌后的到期队列 ✅
+  - PATCH /api/cards/[id] {review:{quality:4}} → 200，返回新 SM-2 状态 ✅
+  - PATCH /api/tasks/[id] {priority:5} → 200，持久化优先级 ✅
+- dev.log 无运行时错误
+
+### 当前项目状态
+- Dev server: PID 31283，运行在 http://localhost:3000（清空 .next 后重启）
+- 字体：Geist (sans) + Geist Mono (mono) + Lora (serif latin) + Noto Serif SC (serif CJK)
+- 完整数据持久化：会话/消息/知识/参考/笔记/课程/任务（含优先级与排序）/卡片（含 SM-2 状态）
+- 完整交互：⌘K 命令面板 + 鼠标跟随提示 + 滚动到底部 + 任务拖拽 + 卡片 3D 翻牌 + SM-2 间隔重复
+- 学术论文风：Lora + Noto Serif SC 衬线 + §N 章节编号 + 滚动进度条 + 题记脚注
+
+### 未解决问题 / 下一阶段建议
+1. **【中】任务拖拽排序在长列表中体验**：当前拖拽时仅高亮目标行，无插入位置指示器；可加 framer-motion Reorder 或 dnd-kit 做更精细的拖拽体验
+2. **【中】复习模式 - "困难"卡片立即重出**：SM-2 quality=0 时 interval=0（1分钟后到期），但当前复习会话不会重新插入队列；可考虑 lapse 后立即重新插入队尾
+3. **【中】卡片复习统计页**：长期 SM-2 数据（保留率曲线、热图）目前仅在单次复习结束时展示；可加一个独立的"复习统计"视图
+4. **【低】认证系统**：NextAuth.js v4
+5. **【低】daemonize.py watchdog**：端口健康检查 + 自动重启
+6. **【低】命令面板扩展**：复习模式入口命令、最近复习的卡片快捷访问
+
+### 关键文件变更清单
+- `prisma/schema.prisma` — Card 模型新增 SM-2 字段（ease/interval/repetition/dueAt/lastReviewedAt）
+- `src/lib/sm2.ts` — 新建：SM-2 算法 + formatInterval
+- `src/lib/emoji-sanitize.ts` — 修复 U+FFFD 残留 + 孤立逗号折叠
+- `src/app/api/sessions/[id]/cards/review/route.ts` — 新建：到期队列 API
+- `src/app/api/cards/[id]/route.ts` — 扩展 SM-2 review PATCH
+- `src/app/api/tasks/[id]/route.ts` — 扩展 order PATCH
+- `src/store/learning-store.ts` — SM-2 review 会话状态 + 优先级/排序 actions
+- `src/components/learning/card-review-mode.tsx` — 新建：3D 翻牌复习模式
+- `src/components/learning/scroll-progress.tsx` — 新建：1px 滚动进度条
+- `src/components/learning/feature-views.tsx` — PriorityBar + 任务拖拽 + §N 章节号 + 卡片到期徽章 + ScrollProgress 接入
+- `src/components/learning/main-content.tsx` — Welcome Piaget 题记
+- `src/app/layout.tsx` — Lora 字体引入
+- `src/app/globals.css` — --font-serif 字体栈修正

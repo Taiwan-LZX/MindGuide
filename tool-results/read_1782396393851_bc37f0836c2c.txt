@@ -1,0 +1,1004 @@
+     1→import { create } from 'zustand';
+     2→import { stripEmoji } from '@/lib/emoji-sanitize';
+     3→
+     4→// ─── Types ──────────────────────────────────────────────────────────────────
+     5→
+     6→export interface LearningSession {
+     7→  id: string;
+     8→  title: string;
+     9→  description?: string | null;
+    10→  topic?: string | null;
+    11→  status: string;
+    12→  createdAt: string;
+    13→  updatedAt: string;
+    14→}
+    15→
+    16→export interface LearningMessage {
+    17→  id: string;
+    18→  sessionId: string;
+    19→  role: 'user' | 'assistant' | 'system';
+    20→  content: string;
+    21→  type: 'dialogue' | 'question' | 'explanation' | 'summary' | 'encouragement' | 'follow_up';
+    22→  thinking?: string | null;
+    23→  createdAt: string;
+    24→}
+    25→
+    26→export interface KnowledgeNode {
+    27→  id: string;
+    28→  sessionId: string;
+    29→  title: string;
+    30→  content: string;
+    31→  category?: string | null;
+    32→  importance: number;
+    33→  mastered: boolean;
+    34→  tags?: string | null;
+    35→  createdAt: string;
+    36→}
+    37→
+    38→export interface Reference {
+    39→  id: string;
+    40→  sessionId: string;
+    41→  title: string;
+    42→  url?: string | null;
+    43→  type: string;
+    44→  note?: string | null;
+    45→  createdAt: string;
+    46→}
+    47→
+    48→export interface CourseLesson {
+    49→  id: string;
+    50→  moduleId: string;
+    51→  title: string;
+    52→  type: 'theory' | 'practice' | 'quiz';
+    53→  duration: string;
+    54→  status: 'locked' | 'available' | 'active' | 'completed';
+    55→  content: string;
+    56→  order: number;
+    57→}
+    58→
+    59→export interface CourseModule {
+    60→  id: string;
+    61→  sessionId: string;
+    62→  title: string;
+    63→  order: number;
+    64→  lessons: CourseLesson[];
+    65→}
+    66→
+    67→export interface Achievement {
+    68→  id: string;
+    69→  title: string;
+    70→  description: string;
+    71→  icon: string;
+    72→  unlocked: boolean;
+    73→  progress: number;
+    74→  maxProgress: number;
+    75→}
+    76→
+    77→export interface WeeklyActivityItem {
+    78→  label: string;
+    79→  count: number;
+    80→}
+    81→
+    82→export interface LearningStats {
+    83→  sessions: number;
+    84→  messages: number;
+    85→  userMessages: number;
+    86→  knowledgeNodes: number;
+    87→  masteredKnowledge: number;
+    88→  learningTimeLabel: string;
+    89→  maxRoundsInOneSession: number;
+    90→  currentStreak: number;
+    91→}
+    92→
+    93→// ─── Store Interface ────────────────────────────────────────────────────────
+    94→
+    95→interface LearningStore {
+    96→  // Sessions
+    97→  sessions: LearningSession[];
+    98→  currentSessionId: string | null;
+    99→  isLoading: boolean;
+   100→
+   101→  // Messages
+   102→  messages: LearningMessage[];
+   103→  isLoadingMessages: boolean;
+   104→  isStreaming: boolean;
+   105→  streamingContent: string;
+   106→
+   107→  // Knowledge
+   108→  knowledgeNodes: KnowledgeNode[];
+   109→  references: Reference[];
+   110→
+   111→  // Course state
+   112→  coursePanelOpen: boolean;
+   113→  courseModules: CourseModule[];
+   114→  activeLessonId: string | null;
+   115→  isCourseGenerated: boolean;
+   116→  isGeneratingCourse: boolean;
+   117→
+   118→  // UI state
+   119→  sidebarOpen: boolean;
+   120→  knowledgePanelOpen: boolean;
+   121→  displayMode: 'side' | 'half' | 'full';
+   122→  settingsPanelOpen: boolean;
+   123→  createNewPanelOpen: boolean;
+   124→  activeFeatureView: string | null;
+   125→
+   126→  // Feature state
+   127→  tasks: Array<{ id: string; title: string; done: boolean; priority: number; createdAt: string }>;
+   128→  cards: Array<{ id: string; front: string; back: string; category: string; mastered: boolean; createdAt: string }>;
+   129→  isLoadingTasks: boolean;
+   130→  isLoadingCards: boolean;
+   131→  achievements: Achievement[];
+   132→
+   133→  // Stats state
+   134→  stats: LearningStats | null;
+   135→  weeklyActivity: WeeklyActivityItem[];
+   136→  isLoadingStats: boolean;
+   137→
+   138→  // Notes state
+   139→  notesContent: string;
+   140→  notesPanelOpen: boolean;
+   141→  isSavingNotes: boolean;
+   142→  notesSaveStatus: 'idle' | 'saving' | 'saved' | 'error';
+   143→
+   144→  // Actions - Sessions
+   145→  fetchSessions: () => Promise<void>;
+   146→  createSession: (title: string, topic?: string) => Promise<LearningSession | null>;
+   147→  selectSession: (id: string) => Promise<void>;
+   148→  deleteSession: (id: string) => Promise<void>;
+   149→  updateSessionTitle: (id: string, title: string) => Promise<void>;
+   150→
+   151→  // Actions - Messages
+   152→  sendMessage: (content: string) => Promise<void>;
+   153→  fetchMessages: (sessionId: string) => Promise<void>;
+   154→
+   155→  // Actions - Knowledge
+   156→  fetchKnowledgeNodes: (sessionId: string) => Promise<void>;
+   157→  fetchReferences: (sessionId: string) => Promise<void>;
+   158→  toggleKnowledgeMastered: (nodeId: string) => Promise<void>;
+   159→
+   160→  // Actions - Course
+   161→  setCoursePanelOpen: (open: boolean) => void;
+   162→  setActiveLessonId: (id: string | null) => void;
+   163→  generateCourse: () => Promise<void>;
+   164→  fetchCourse: (sessionId: string) => Promise<void>;
+   165→  updateLessonStatus: (moduleId: string, lessonId: string, status: CourseLesson['status']) => void;
+   166→
+   167→  // Actions - Notes
+   168→  fetchNotes: (sessionId: string) => Promise<void>;
+   169→  saveNotes: (sessionId: string, content: string) => Promise<void>;
+   170→  setNotesContent: (content: string) => void;
+   171→  setNotesPanelOpen: (open: boolean) => void;
+   172→
+   173→  // Actions - Stats
+   174→  fetchStats: () => Promise<void>;
+   175→
+   176→  // Actions - UI
+   177→  setSidebarOpen: (open: boolean) => void;
+   178→  setKnowledgePanelOpen: (open: boolean) => void;
+   179→  setDisplayMode: (mode: 'side' | 'half' | 'full') => void;
+   180→  setSettingsPanelOpen: (open: boolean) => void;
+   181→  setCreateNewPanelOpen: (open: boolean) => void;
+   182→  setActiveFeatureView: (view: string | null) => void;
+   183→  fetchTasks: (sessionId: string) => Promise<void>;
+   184→  addTask: (title: string, priority?: number) => Promise<void>;
+   185→  toggleTask: (id: string) => Promise<void>;
+   186→  deleteTask: (id: string) => Promise<void>;
+   187→  fetchCards: (sessionId: string) => Promise<void>;
+   188→  addCard: (front: string, back: string, category?: string) => Promise<void>;
+   189→  toggleCardMastered: (id: string) => Promise<void>;
+   190→  deleteCard: (id: string) => Promise<void>;
+   191→  reset: () => void;
+   192→}
+   193→
+   194→// ─── Initial State ──────────────────────────────────────────────────────────
+   195→
+   196→const initialStats: LearningStats = {
+   197→  sessions: 0,
+   198→  messages: 0,
+   199→  userMessages: 0,
+   200→  knowledgeNodes: 0,
+   201→  masteredKnowledge: 0,
+   202→  learningTimeLabel: '0m',
+   203→  maxRoundsInOneSession: 0,
+   204→  currentStreak: 0,
+   205→};
+   206→
+   207→const initialState = {
+   208→  sessions: [] as LearningSession[],
+   209→  currentSessionId: null as string | null,
+   210→  isLoading: false,
+   211→  messages: [] as LearningMessage[],
+   212→  isLoadingMessages: false,
+   213→  isStreaming: false,
+   214→  streamingContent: '',
+   215→  knowledgeNodes: [] as KnowledgeNode[],
+   216→  references: [] as Reference[],
+   217→  coursePanelOpen: false,
+   218→  courseModules: [] as CourseModule[],
+   219→  activeLessonId: null as string | null,
+   220→  isCourseGenerated: false,
+   221→  isGeneratingCourse: false,
+   222→  sidebarOpen: true,
+   223→  knowledgePanelOpen: true,
+   224→  displayMode: 'side' as const,
+   225→  settingsPanelOpen: false,
+   226→  createNewPanelOpen: false,
+   227→  activeFeatureView: null as string | null,
+   228→  tasks: [] as Array<{ id: string; title: string; done: boolean; priority: number; createdAt: string }>,
+   229→  cards: [] as Array<{ id: string; front: string; back: string; category: string; mastered: boolean; createdAt: string }>,
+   230→  isLoadingTasks: false,
+   231→  isLoadingCards: false,
+   232→  notesContent: '',
+   233→  notesPanelOpen: false,
+   234→  isSavingNotes: false,
+   235→  notesSaveStatus: 'idle' as 'idle' | 'saving' | 'saved' | 'error',
+   236→  stats: initialStats,
+   237→  weeklyActivity: [] as WeeklyActivityItem[],
+   238→  isLoadingStats: false,
+   239→  achievements: [] as Achievement[],
+   240→};
+   241→
+   242→// ─── Notes Save Debounce Tracker ────────────────────────────────────────────
+   243→// Module-level timer to debounce notes auto-save across store instances
+   244→let notesSaveTimer: ReturnType<typeof setTimeout> | null = null;
+   245→const NOTES_SAVE_DELAY_MS = 800;
+   246→
+   247→// ─── Achievement Unlock Tracking ────────────────────────────────────────────
+   248→// Persisted set of achievement IDs the user has already unlocked, so we can
+   249→// detect newly-unlocked achievements across page reloads and trigger toasts.
+   250→const UNLOCKED_ACH_KEY = 'mindguide:unlocked-achievements';
+   251→function loadUnlockedAchievements(): Set<string> {
+   252→  if (typeof window === 'undefined') return new Set();
+   253→  try {
+   254→    const raw = window.localStorage.getItem(UNLOCKED_ACH_KEY);
+   255→    return new Set(raw ? JSON.parse(raw) : []);
+   256→  } catch {
+   257→    return new Set();
+   258→  }
+   259→}
+   260→function saveUnlockedAchievements(ids: Set<string>) {
+   261→  if (typeof window === 'undefined') return;
+   262→  try {
+   263→    window.localStorage.setItem(UNLOCKED_ACH_KEY, JSON.stringify([...ids]));
+   264→  } catch {
+   265→    // ignore quota errors
+   266→  }
+   267→}
+   268→// In-memory snapshot so we don't re-read localStorage on every fetchStats
+   269→let knownUnlocked = loadUnlockedAchievements();
+   270→
+   271→// ─── Store ──────────────────────────────────────────────────────────────────
+   272→
+   273→export const useLearningStore = create<LearningStore>((set, get) => ({
+   274→  ...initialState,
+   275→
+   276→  // ── Sessions ──────────────────────────────────────────────────────────────
+   277→
+   278→  fetchSessions: async () => {
+   279→    set({ isLoading: true });
+   280→    try {
+   281→      const res = await fetch('/api/sessions');
+   282→      if (!res.ok) { console.error('fetchSessions failed:', res.status); return; }
+   283→      const data = await res.json();
+   284→      set({ sessions: data.sessions || [] });
+   285→    } catch (error) {
+   286→      console.error('Failed to fetch sessions:', error);
+   287→    } finally {
+   288→      set({ isLoading: false });
+   289→    }
+   290→  },
+   291→
+   292→  createSession: async (title: string, topic?: string) => {
+   293→    try {
+   294→      const res = await fetch('/api/sessions', {
+   295→        method: 'POST',
+   296→        headers: { 'Content-Type': 'application/json' },
+   297→        body: JSON.stringify({ title, topic }),
+   298→      });
+   299→      if (!res.ok) { console.error('createSession failed:', res.status); return null; }
+   300→      const data = await res.json();
+   301→      if (data.session) {
+   302→        set((state) => ({
+   303→          sessions: [data.session, ...state.sessions],
+   304→        }));
+   305→        await get().selectSession(data.session.id);
+   306→        return data.session;
+   307→      }
+   308→      return null;
+   309→    } catch (error) {
+   310→      console.error('Failed to create session:', error);
+   311→      return null;
+   312→    }
+   313→  },
+   314→
+   315→  selectSession: async (id: string) => {
+   316→    // Preserve notes save state from previous session if needed
+   317→    set({
+   318→      currentSessionId: id,
+   319→      // Returning to a conversation should always show the chat view, not
+   320→      // whatever feature view (notes/stats/etc.) was open before.
+   321→      activeFeatureView: null,
+   322→      messages: [],
+   323→      knowledgeNodes: [],
+   324→      references: [],
+   325→      courseModules: [],
+   326→      isCourseGenerated: false,
+   327→      notesContent: '',
+   328→      notesSaveStatus: 'idle',
+   329→      tasks: [],
+   330→      cards: [],
+   331→    });
+   332→    await Promise.all([
+   333→      get().fetchMessages(id),
+   334→      get().fetchKnowledgeNodes(id),
+   335→      get().fetchReferences(id),
+   336→      get().fetchCourse(id),
+   337→      get().fetchNotes(id),
+   338→      get().fetchTasks(id),
+   339→      get().fetchCards(id),
+   340→    ]);
+   341→  },
+   342→
+   343→  deleteSession: async (id: string) => {
+   344→    try {
+   345→      const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+   346→      if (!res.ok) { console.error('deleteSession failed:', res.status); return; }
+   347→      const { currentSessionId, sessions } = get();
+   348→      const isCurrent = currentSessionId === id;
+   349→      set({
+   350→        sessions: sessions.filter((s) => s.id !== id),
+   351→        currentSessionId: isCurrent ? null : currentSessionId,
+   352→        // Also clear related data when deleting current session
+   353→        ...(isCurrent ? {
+   354→          messages: [],
+   355→          knowledgeNodes: [],
+   356→          references: [],
+   357→          courseModules: [],
+   358→          isCourseGenerated: false,
+   359→          notesContent: '',
+   360→        } : {}),
+   361→      });
+   362→    } catch (error) {
+   363→      console.error('Failed to delete session:', error);
+   364→    }
+   365→  },
+   366→
+   367→  updateSessionTitle: async (id: string, title: string) => {
+   368→    if (!title.trim()) return;
+   369→    try {
+   370→      const res = await fetch(`/api/sessions/${id}`, {
+   371→        method: 'PATCH',
+   372→        headers: { 'Content-Type': 'application/json' },
+   373→        body: JSON.stringify({ title: title.trim().slice(0, 100) }),
+   374→      });
+   375→      if (!res.ok) { console.error('updateSessionTitle failed:', res.status); return; }
+   376→      set((state) => ({
+   377→        sessions: state.sessions.map((s) =>
+   378→          s.id === id ? { ...s, title: title.trim().slice(0, 100) } : s
+   379→        ),
+   380→      }));
+   381→    } catch (error) {
+   382→      console.error('Failed to update session title:', error);
+   383→    }
+   384→  },
+   385→
+   386→  // ── Messages ───────────────────────────────────────────────────────────────
+   387→
+   388→  sendMessage: async (content: string) => {
+   389→    const { currentSessionId } = get();
+   390→    if (!currentSessionId) return;
+   391→
+   392→    // Optimistic: show user message immediately
+   393→    const userMessage: LearningMessage = {
+   394→      id: `temp-${Date.now()}`,
+   395→      sessionId: currentSessionId,
+   396→      role: 'user',
+   397→      content,
+   398→      type: 'dialogue',
+   399→      createdAt: new Date().toISOString(),
+   400→    };
+   401→
+   402→    set((state) => ({
+   403→      messages: [...state.messages, userMessage],
+   404→      isStreaming: true,
+   405→      streamingContent: '',
+   406→    }));
+   407→
+   408→    try {
+   409→      const res = await fetch('/api/chat', {
+   410→        method: 'POST',
+   411→        headers: { 'Content-Type': 'application/json' },
+   412→        body: JSON.stringify({
+   413→          sessionId: currentSessionId,
+   414→          message: content,
+   415→          messages: get().messages.map((m) => ({
+   416→            role: m.role,
+   417→            content: m.content,
+   418→            type: m.type,
+   419→          })),
+   420→          knowledgeNodes: get().knowledgeNodes.map((n) => ({
+   421→            title: n.title,
+   422→            content: n.content,
+   423→            category: n.category,
+   424→            mastered: n.mastered,
+   425→          })),
+   426→        }),
+   427→      });
+   428→
+   429→      if (!res.ok) {
+   430→        throw new Error(`Chat API returned ${res.status}`);
+   431→      }
+   432→
+   433→      if (!res.body) {
+   434→        throw new Error('No response body');
+   435→      }
+   436→
+   437→      const reader = res.body.getReader();
+   438→      const decoder = new TextDecoder();
+   439→      let fullContent = '';
+   440→
+   441→      while (true) {
+   442→        const { done, value } = await reader.read();
+   443→        if (done) break;
+   444→
+   445→        const chunk = decoder.decode(value, { stream: true });
+   446→        const lines = chunk.split('\n');
+   447→
+   448→        for (const line of lines) {
+   449→          if (line.startsWith('data: ')) {
+   450→            const data = line.slice(6);
+   451→            if (data === '[DONE]') continue;
+   452→            try {
+   453→              const parsed = JSON.parse(data);
+   454→              if (parsed.content) {
+   455→                if (parsed.full) {
+   456→                  // Server sends the full sanitized accumulator; replace
+   457→                  // rather than append to avoid drift.
+   458→                  fullContent = parsed.content;
+   459→                } else {
+   460→                  fullContent += parsed.content;
+   461→                }
+   462→                // Strip emoji / decorative symbols so the live-streaming
+   463→                // bubble stays thesis-monochrome even if the model emits
+   464→                // them despite the system prompt.
+   465→                set({ streamingContent: stripEmoji(fullContent) });
+   466→              }
+   467→            } catch {
+   468→              // Skip malformed JSON chunks
+   469→            }
+   470→          }
+   471→        }
+   472→      }
+   473→
+   474→      // Re-fetch from DB to get server-side IDs (prevents duplicates)
+   475→      set({
+   476→        isStreaming: false,
+   477→        streamingContent: '',
+   478→      });
+   479→      await get().fetchMessages(currentSessionId);
+   480→
+   481→      // Refresh knowledge nodes and references
+   482→      get().fetchKnowledgeNodes(currentSessionId);
+   483→      get().fetchReferences(currentSessionId);
+   484→
+   485→      // Refresh global stats in the background (achievement progress may have changed)
+   486→      get().fetchStats();
+   487→
+   488→    } catch (error) {
+   489→      console.error('Failed to send message:', error);
+   490→      set({ isStreaming: false, streamingContent: '' });
+   491→    }
+   492→  },
+   493→
+   494→  fetchMessages: async (sessionId: string) => {
+   495→    set({ isLoadingMessages: true });
+   496→    try {
+   497→      const res = await fetch(`/api/sessions/${sessionId}/messages`);
+   498→      if (!res.ok) { console.error('fetchMessages failed:', res.status); return; }
+   499→      const data = await res.json();
+   500→      // Sanitize historical assistant messages too, so old emoji-laden
+   501→      // replies (generated before the system-prompt rule) also appear
+   502→      // monochrome. User messages are left untouched.
+   503→      const cleaned = (data.messages || []).map((m: { role: string; content: string }) =>
+   504→        m.role === 'assistant' ? { ...m, content: stripEmoji(m.content || '') } : m
+   505→      );
+   506→      set({ messages: cleaned });
+   507→    } catch (error) {
+   508→      console.error('Failed to fetch messages:', error);
+   509→    } finally {
+   510→      set({ isLoadingMessages: false });
+   511→    }
+   512→  },
+   513→
+   514→  // ── Knowledge ────────────────────────────────────────────────────────────
+   515→
+   516→  fetchKnowledgeNodes: async (sessionId: string) => {
+   517→    try {
+   518→      const res = await fetch(`/api/sessions/${sessionId}/knowledge`);
+   519→      if (!res.ok) { console.error('fetchKnowledgeNodes failed:', res.status); return; }
+   520→      const data = await res.json();
+   521→      set({ knowledgeNodes: data.nodes || [] });
+   522→    } catch (error) {
+   523→      console.error('Failed to fetch knowledge nodes:', error);
+   524→    }
+   525→  },
+   526→
+   527→  fetchReferences: async (sessionId: string) => {
+   528→    try {
+   529→      const res = await fetch(`/api/sessions/${sessionId}/references`);
+   530→      if (!res.ok) { console.error('fetchReferences failed:', res.status); return; }
+   531→      const data = await res.json();
+   532→      set({ references: data.references || [] });
+   533→    } catch (error) {
+   534→      console.error('Failed to fetch references:', error);
+   535→    }
+   536→  },
+   537→
+   538→  toggleKnowledgeMastered: async (nodeId: string) => {
+   539→    // Optimistic update
+   540→    const prevNodes = get().knowledgeNodes;
+   541→    set((state) => ({
+   542→      knowledgeNodes: state.knowledgeNodes.map((n) =>
+   543→        n.id === nodeId ? { ...n, mastered: !n.mastered } : n
+   544→      ),
+   545→    }));
+   546→    try {
+   547→      const res = await fetch(`/api/knowledge/${nodeId}`, {
+   548→        method: 'PATCH',
+   549→        headers: { 'Content-Type': 'application/json' },
+   550→      });
+   551→      if (!res.ok) {
+   552→        // Rollback on failure
+   553→        set({ knowledgeNodes: prevNodes });
+   554→        console.error('toggleKnowledgeMastered failed:', res.status);
+   555→      } else {
+   556→        // Refresh global stats (mastery counts may have changed)
+   557→        get().fetchStats();
+   558→      }
+   559→    } catch (error) {
+   560→      // Rollback on network error
+   561→      set({ knowledgeNodes: prevNodes });
+   562→      console.error('Failed to update knowledge node:', error);
+   563→    }
+   564→  },
+   565→
+   566→  // ── Course ────────────────────────────────────────────────────────────────
+   567→
+   568→  setCoursePanelOpen: (open: boolean) => set({ coursePanelOpen: open }),
+   569→  setActiveLessonId: (id: string | null) => set({ activeLessonId: id }),
+   570→
+   571→  fetchCourse: async (sessionId: string) => {
+   572→    try {
+   573→      const res = await fetch(`/api/sessions/${sessionId}/course`);
+   574→      if (!res.ok) { console.error('fetchCourse failed:', res.status); return; }
+   575→      const data = await res.json();
+   576→      const modules: CourseModule[] = (data.modules || []).map((m: any) => ({
+   577→        id: m.id,
+   578→        sessionId: m.sessionId,
+   579→        title: m.title,
+   580→        order: m.order,
+   581→        lessons: (m.lessons || []).map((l: any) => ({
+   582→          id: l.id,
+   583→          moduleId: l.moduleId,
+   584→          title: l.title,
+   585→          type: l.type,
+   586→          duration: l.duration,
+   587→          status: l.status,
+   588→          content: l.content,
+   589→          order: l.order,
+   590→        })),
+   591→      }));
+   592→      set({
+   593→        courseModules: modules,
+   594→        isCourseGenerated: modules.length > 0,
+   595→      });
+   596→    } catch (error) {
+   597→      console.error('Failed to fetch course:', error);
+   598→    }
+   599→  },
+   600→
+   601→  generateCourse: async () => {
+   602→    const state = get();
+   603→    if (!state.currentSessionId || state.isGeneratingCourse) return;
+   604→    set({ isGeneratingCourse: true });
+   605→    try {
+   606→      const res = await fetch('/api/course/generate', {
+   607→        method: 'POST',
+   608→        headers: { 'Content-Type': 'application/json' },
+   609→        body: JSON.stringify({
+   610→          sessionId: state.currentSessionId,
+   611→          messages: state.messages.map(m => ({ role: m.role, content: m.content, type: m.type })),
+   612→          knowledgeNodes: state.knowledgeNodes.map(n => ({
+   613→            title: n.title, content: n.content, category: n.category,
+   614→            importance: n.importance, mastered: n.mastered,
+   615→          })),
+   616→        }),
+   617→      });
+   618→      if (!res.ok) { console.error('generateCourse failed:', res.status); return; }
+   619→      const data = await res.json();
+   620→      if (data.modules && data.modules.length > 0) {
+   621→        // Normalize the response (which should be persisted DB rows when sessionId was provided)
+   622→        const modules: CourseModule[] = data.modules.map((m: any) => ({
+   623→          id: m.id,
+   624→          sessionId: m.sessionId || state.currentSessionId,
+   625→          title: m.title,
+   626→          order: m.order,
+   627→          lessons: (m.lessons || []).map((l: any) => ({
+   628→            id: l.id,
+   629→            moduleId: l.moduleId,
+   630→            title: l.title,
+   631→            type: l.type,
+   632→            duration: l.duration,
+   633→            status: l.status,
+   634→            content: l.content,
+   635→            order: l.order,
+   636→          })),
+   637→        }));
+   638→        set({ courseModules: modules, isCourseGenerated: true, coursePanelOpen: true });
+   639→      }
+   640→    } catch (error) {
+   641→      console.error('Failed to generate course:', error);
+   642→    } finally {
+   643→      set({ isGeneratingCourse: false });
+   644→    }
+   645→  },
+   646→
+   647→  updateLessonStatus: (moduleId: string, lessonId: string, status: CourseLesson['status']) => {
+   648→    const { currentSessionId, courseModules } = get();
+   649→    if (!currentSessionId) return;
+   650→
+   651→    // Find the lesson to persist its new status
+   652→    const targetModule = courseModules.find(m => m.id === moduleId);
+   653→    const targetLesson = targetModule?.lessons.find(l => l.id === lessonId);
+   654→    if (!targetLesson) return;
+   655→
+   656→    // Optimistic local update (auto-unlock next lesson if completed)
+   657→    set((state) => ({
+   658→      courseModules: state.courseModules.map(m => {
+   659→        if (m.id !== moduleId) return m;
+   660→        const updatedLessons = m.lessons.map(l => {
+   661→          if (l.id !== lessonId) return l;
+   662→          return { ...l, status };
+   663→        });
+   664→        if (status === 'completed') {
+   665→          const completedIdx = updatedLessons.findIndex(l => l.id === lessonId);
+   666→          if (completedIdx >= 0 && completedIdx + 1 < updatedLessons.length) {
+   667→            const nextLesson = updatedLessons[completedIdx + 1];
+   668→            if (nextLesson.status === 'locked') {
+   669→              updatedLessons[completedIdx + 1] = { ...nextLesson, status: 'available' };
+   670→              // Persist the auto-unlock too
+   671→              fetch(`/api/sessions/${currentSessionId}/course`, {
+   672→                method: 'PATCH',
+   673→                headers: { 'Content-Type': 'application/json' },
+   674→                body: JSON.stringify({ lessonId: nextLesson.id, status: 'available' }),
+   675→              }).catch(err => console.error('Auto-unlock persist failed:', err));
+   676→            }
+   677→          }
+   678→        }
+   679→        return { ...m, lessons: updatedLessons };
+   680→      }),
+   681→    }));
+   682→
+   683→    // Persist the user-triggered status change
+   684→    fetch(`/api/sessions/${currentSessionId}/course`, {
+   685→      method: 'PATCH',
+   686→      headers: { 'Content-Type': 'application/json' },
+   687→      body: JSON.stringify({ lessonId, status }),
+   688→    }).catch(err => console.error('Lesson status persist failed:', err));
+   689→
+   690→    // Stats may need refresh (for "depth thinker" achievement)
+   691→    get().fetchStats();
+   692→  },
+   693→
+   694→  // ── Notes ─────────────────────────────────────────────────────────────────
+   695→
+   696→  fetchNotes: async (sessionId: string) => {
+   697→    try {
+   698→      const res = await fetch(`/api/sessions/${sessionId}/notes`);
+   699→      if (!res.ok) { console.error('fetchNotes failed:', res.status); return; }
+   700→      const data = await res.json();
+   701→      const content = data.note?.content || '';
+   702→      set({ notesContent: content, notesSaveStatus: 'idle' });
+   703→    } catch (error) {
+   704→      console.error('Failed to fetch notes:', error);
+   705→    }
+   706→  },
+   707→
+   708→  saveNotes: async (sessionId: string, content: string) => {
+   709→    set({ isSavingNotes: true, notesSaveStatus: 'saving' });
+   710→    try {
+   711→      const res = await fetch(`/api/sessions/${sessionId}/notes`, {
+   712→        method: 'PUT',
+   713→        headers: { 'Content-Type': 'application/json' },
+   714→        body: JSON.stringify({ content }),
+   715→      });
+   716→      if (!res.ok) {
+   717→        set({ notesSaveStatus: 'error' });
+   718→        console.error('saveNotes failed:', res.status);
+   719→        return;
+   720→      }
+   721→      set({ notesSaveStatus: 'saved' });
+   722→      // Clear "saved" indicator after a short delay
+   723→      setTimeout(() => {
+   724→        if (get().notesSaveStatus === 'saved') {
+   725→          set({ notesSaveStatus: 'idle' });
+   726→        }
+   727→      }, 1500);
+   728→    } catch (error) {
+   729→      set({ notesSaveStatus: 'error' });
+   730→      console.error('Failed to save notes:', error);
+   731→    } finally {
+   732→      set({ isSavingNotes: false });
+   733→    }
+   734→  },
+   735→
+   736→  setNotesContent: (content: string) => {
+   737→    const { currentSessionId } = get();
+   738→    set({ notesContent: content });
+   739→
+   740→    if (!currentSessionId) return;
+   741→
+   742→    // Debounced auto-save: clear any pending timer, set a new one
+   743→    if (notesSaveTimer) {
+   744→      clearTimeout(notesSaveTimer);
+   745→    }
+   746→    set({ notesSaveStatus: 'saving' });
+   747→    notesSaveTimer = setTimeout(() => {
+   748→      get().saveNotes(currentSessionId, content);
+   749→    }, NOTES_SAVE_DELAY_MS);
+   750→  },
+   751→
+   752→  setNotesPanelOpen: (open: boolean) => set({ notesPanelOpen: open }),
+   753→
+   754→  // ── Stats ─────────────────────────────────────────────────────────────────
+   755→
+   756→  fetchStats: async () => {
+   757→    set({ isLoadingStats: true });
+   758→    try {
+   759→      const res = await fetch('/api/stats');
+   760→      if (!res.ok) { console.error('fetchStats failed:', res.status); return; }
+   761→      const data = await res.json();
+   762→      const newAchievements = data.achievements || [];
+   763→      set({
+   764→        stats: data.totals,
+   765→        weeklyActivity: data.weeklyActivity || [],
+   766→        achievements: newAchievements,
+   767→      });
+   768→
+   769→      // Detect newly-unlocked achievements and fire celebratory toasts.
+   770→      // We only consider it a "new unlock" if the achievement transitioned
+   771→      // from locked → unlocked since the last fetchStats.
+   772→      const newlyUnlocked = newAchievements.filter(
+   773→        (a: Achievement) => a.unlocked && !knownUnlocked.has(a.id)
+   774→      );
+   775→      if (newlyUnlocked.length > 0) {
+   776→        // Update the known set BEFORE firing toasts so a re-render can't double-fire
+   777→        const next = new Set(knownUnlocked);
+   778→        for (const a of newlyUnlocked) next.add(a.id);
+   779→        knownUnlocked = next;
+   780→        saveUnlockedAchievements(next);
+   781→
+   782→        // Fire celebratory toasts. `toast()` is a plain dispatcher from the
+   783→        // client-only use-toast hook; the <Toaster /> component mounted in the
+   784→        // root layout subscribes and renders them. Safe to call from the store
+   785→        // because it only mutates in-memory state + notifies mounted listeners.
+   786→        try {
+   787→          const { toast } = await import('@/hooks/use-toast');
+   788→          for (const a of newlyUnlocked) {
+   789→            toast({
+   790→              title: `成就解锁：${a.title}`,
+   791→              description: a.description,
+   792→              duration: 6000,
+   793→              className:
+   794→                'border-neutral-200 bg-white text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100',
+   795→            });
+   796→          }
+   797→        } catch (e) {
+   798→          console.warn('Achievement toast skipped (hook unavailable):', e);
+   799→        }
+   800→      } else {
+   801→        // Make sure already-unlocked achievements are recorded (first load)
+   802→        const next = new Set(knownUnlocked);
+   803→        let changed = false;
+   804→        for (const a of newAchievements) {
+   805→          if (a.unlocked && !next.has(a.id)) { next.add(a.id); changed = true; }
+   806→        }
+   807→        if (changed) { knownUnlocked = next; saveUnlockedAchievements(next); }
+   808→      }
+   809→    } catch (error) {
+   810→      console.error('Failed to fetch stats:', error);
+   811→    } finally {
+   812→      set({ isLoadingStats: false });
+   813→    }
+   814→  },
+   815→
+   816→  // ── UI ────────────────────────────────────────────────────────────────────
+   817→
+   818→  setSidebarOpen: (open: boolean) => set({ sidebarOpen: open }),
+   819→  setKnowledgePanelOpen: (open: boolean) => set({ knowledgePanelOpen: open }),
+   820→  setDisplayMode: (mode: 'side' | 'half' | 'full') => set({ displayMode: mode, sidebarOpen: mode !== 'full' }),
+   821→  setSettingsPanelOpen: (open: boolean) => set({ settingsPanelOpen: open }),
+   822→  setCreateNewPanelOpen: (open: boolean) => set({ createNewPanelOpen: open }),
+   823→  setActiveFeatureView: (view: string | null) => {
+   824→    set({ activeFeatureView: view, createNewPanelOpen: false });
+   825→    // Pre-fetch stats when entering stats or achievements view
+   826→    if (view === 'stats' || view === 'achievements') {
+   827→      get().fetchStats();
+   828→    }
+   829→  },
+   830→
+   831→  // ── Feature Actions ─────────────────────────────────────────────────────
+   832→
+   833→  // ── Tasks (persisted) ────────────────────────────────────────────────────
+   834→
+   835→  fetchTasks: async (sessionId: string) => {
+   836→    set({ isLoadingTasks: true });
+   837→    try {
+   838→      const res = await fetch(`/api/sessions/${sessionId}/tasks`);
+   839→      if (!res.ok) { console.error('fetchTasks failed:', res.status); return; }
+   840→      const data = await res.json();
+   841→      set({ tasks: (data.tasks || []).map((t: { id: string; title: string; done: boolean; priority: number; createdAt: string }) => ({
+   842→        id: t.id,
+   843→        title: t.title,
+   844→        done: t.done,
+   845→        priority: t.priority,
+   846→        createdAt: typeof t.createdAt === 'string' ? t.createdAt : new Date(t.createdAt as unknown as string).toISOString(),
+   847→      })) });
+   848→    } catch (e) {
+   849→      console.error('fetchTasks error:', e);
+   850→    } finally {
+   851→      set({ isLoadingTasks: false });
+   852→    }
+   853→  },
+   854→
+   855→  addTask: async (title: string, priority: number = 3) => {
+   856→    const { currentSessionId } = get();
+   857→    if (!currentSessionId) return;
+   858→    const t = title.trim();
+   859→    if (!t) return;
+   860→    try {
+   861→      const res = await fetch(`/api/sessions/${currentSessionId}/tasks`, {
+   862→        method: 'POST',
+   863→        headers: { 'Content-Type': 'application/json' },
+   864→        body: JSON.stringify({ title: t, priority }),
+   865→      });
+   866→      if (!res.ok) { console.error('addTask failed:', res.status); return; }
+   867→      const { task } = await res.json();
+   868→      set((s) => ({
+   869→        tasks: [...s.tasks, {
+   870→          id: task.id,
+   871→          title: task.title,
+   872→          done: task.done,
+   873→          priority: task.priority,
+   874→          createdAt: typeof task.createdAt === 'string' ? task.createdAt : new Date(task.createdAt).toISOString(),
+   875→        }],
+   876→      }));
+   877→    } catch (e) {
+   878→      console.error('addTask error:', e);
+   879→    }
+   880→  },
+   881→
+   882→  toggleTask: async (id: string) => {
+   883→    // Optimistic update
+   884→    const prev = get().tasks;
+   885→    const target = prev.find(t => t.id === id);
+   886→    if (!target) return;
+   887→    set({ tasks: prev.map(t => t.id === id ? { ...t, done: !t.done } : t) });
+   888→    try {
+   889→      const res = await fetch(`/api/tasks/${id}`, {
+   890→        method: 'PATCH',
+   891→        headers: { 'Content-Type': 'application/json' },
+   892→        body: JSON.stringify({ done: !target.done }),
+   893→      });
+   894→      if (!res.ok) {
+   895→        // Rollback on failure
+   896→        set({ tasks: prev });
+   897→        console.error('toggleTask failed:', res.status);
+   898→      }
+   899→    } catch (e) {
+   900→      set({ tasks: prev });
+   901→      console.error('toggleTask error:', e);
+   902→    }
+   903→  },
+   904→
+   905→  deleteTask: async (id: string) => {
+   906→    const prev = get().tasks;
+   907→    set({ tasks: prev.filter(t => t.id !== id) });
+   908→    try {
+   909→      await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+   910→    } catch (e) {
+   911→      set({ tasks: prev });
+   912→      console.error('deleteTask error:', e);
+   913→    }
+   914→  },
+   915→
+   916→  // ── Cards (persisted) ────────────────────────────────────────────────────
+   917→
+   918→  fetchCards: async (sessionId: string) => {
+   919→    set({ isLoadingCards: true });
+   920→    try {
+   921→      const res = await fetch(`/api/sessions/${sessionId}/cards`);
+   922→      if (!res.ok) { console.error('fetchCards failed:', res.status); return; }
+   923→      const data = await res.json();
+   924→      set({ cards: (data.cards || []).map((c: { id: string; front: string; back: string; category: string; mastered: boolean; createdAt: string }) => ({
+   925→        id: c.id,
+   926→        front: c.front,
+   927→        back: c.back,
+   928→        category: c.category,
+   929→        mastered: c.mastered,
+   930→        createdAt: typeof c.createdAt === 'string' ? c.createdAt : new Date(c.createdAt as unknown as string).toISOString(),
+   931→      })) });
+   932→    } catch (e) {
+   933→      console.error('fetchCards error:', e);
+   934→    } finally {
+   935→      set({ isLoadingCards: false });
+   936→    }
+   937→  },
+   938→
+   939→  addCard: async (front: string, back: string, category: string = '概念') => {
+   940→    const { currentSessionId } = get();
+   941→    if (!currentSessionId) return;
+   942→    const f = front.trim();
+   943→    const b = back.trim();
+   944→    if (!f || !b) return;
+   945→    try {
+   946→      const res = await fetch(`/api/sessions/${currentSessionId}/cards`, {
+   947→        method: 'POST',
+   948→        headers: { 'Content-Type': 'application/json' },
+   949→        body: JSON.stringify({ front: f, back: b, category }),
+   950→      });
+   951→      if (!res.ok) { console.error('addCard failed:', res.status); return; }
+   952→      const { card } = await res.json();
+   953→      set((s) => ({
+   954→        cards: [...s.cards, {
+   955→          id: card.id,
+   956→          front: card.front,
+   957→          back: card.back,
+   958→          category: card.category,
+   959→          mastered: card.mastered,
+   960→          createdAt: typeof card.createdAt === 'string' ? card.createdAt : new Date(card.createdAt).toISOString(),
+   961→        }],
+   962→      }));
+   963→    } catch (e) {
+   964→      console.error('addCard error:', e);
+   965→    }
+   966→  },
+   967→
+   968→  toggleCardMastered: async (id: string) => {
+   969→    const prev = get().cards;
+   970→    const target = prev.find(c => c.id === id);
+   971→    if (!target) return;
+   972→    set({ cards: prev.map(c => c.id === id ? { ...c, mastered: !c.mastered } : c) });
+   973→    try {
+   974→      const res = await fetch(`/api/cards/${id}`, {
+   975→        method: 'PATCH',
+   976→        headers: { 'Content-Type': 'application/json' },
+   977→        body: JSON.stringify({ mastered: !target.mastered }),
+   978→      });
+   979→      if (!res.ok) {
+   980→        set({ cards: prev });
+   981→        console.error('toggleCardMastered failed:', res.status);
+   982→      }
+   983→    } catch (e) {
+   984→      set({ cards: prev });
+   985→      console.error('toggleCardMastered error:', e);
+   986→    }
+   987→  },
+   988→
+   989→  deleteCard: async (id: string) => {
+   990→    const prev = get().cards;
+   991→    set({ cards: prev.filter(c => c.id !== id) });
+   992→    try {
+   993→      await fetch(`/api/cards/${id}`, { method: 'DELETE' });
+   994→    } catch (e) {
+   995→      set({ cards: prev });
+   996→      console.error('deleteCard error:', e);
+   997→    }
+   998→  },
+   999→
+  1000→  // ── Reset ─────────────────────────────────────────────────────────────────
+  1001→
+  1002→  reset: () => set(initialState),
+  1003→}));
+  1004→

@@ -20,11 +20,16 @@ import {
   Clock,
   BookOpen,
   RotateCcw,
+  RotateCw,
   StickyNote,
+  GripVertical,
 } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 // PDFImportView removed during cleanup — feature replaced with notes editor
 import TiptapEditor from '@/components/learning/tiptap-editor';
+import { CardReviewMode } from '@/components/learning/card-review-mode';
+import { ScrollProgress } from '@/components/learning/scroll-progress';
+import { formatInterval } from '@/lib/sm2';
 
 // ─── Animation Variants ─────────────────────────────────────────────────────
 
@@ -46,6 +51,7 @@ const itemVariants = {
 
 export function FeatureView() {
   const { activeFeatureView } = useLearningStore();
+  const scrollRef = React.useRef<HTMLDivElement>(null);
 
   return (
     <AnimatePresence mode="wait">
@@ -56,14 +62,15 @@ export function FeatureView() {
           initial="hidden"
           animate="visible"
           exit="exit"
-          className="flex h-full flex-1 flex-col"
+          className="relative flex h-full flex-1 flex-col"
         >
+          <ScrollProgress targetRef={scrollRef} />
           {/* PDF import removed during cleanup */}
-          {activeFeatureView === 'tasks' && <TaskPlannerView />}
-          {activeFeatureView === 'cards' && <LearningCardsView />}
-          {activeFeatureView === 'achievements' && <AchievementsView />}
-          {activeFeatureView === 'stats' && <StatsView />}
-          {activeFeatureView === 'graph' && <KnowledgeGraphView />}
+          {activeFeatureView === 'tasks' && <TaskPlannerView scrollRef={scrollRef} />}
+          {activeFeatureView === 'cards' && <LearningCardsView scrollRef={scrollRef} />}
+          {activeFeatureView === 'achievements' && <AchievementsView scrollRef={scrollRef} />}
+          {activeFeatureView === 'stats' && <StatsView scrollRef={scrollRef} />}
+          {activeFeatureView === 'graph' && <KnowledgeGraphView scrollRef={scrollRef} />}
           {activeFeatureView === 'notes' && <NotesView />}
         </motion.div>
       )}
@@ -72,9 +79,23 @@ export function FeatureView() {
 }
 
 // ─── Shared Header ──────────────────────────────────────────────────────────
+//
+// The header follows an academic-paper convention: a small section ordinal
+// (§N) in tabular-nums + a serif title. The hairline divider underneath
+// matches the rule used above footnotes in printed journals.
+
+const FEATURE_SECTION_NUMBER: Record<string, string> = {
+  tasks: '01',
+  cards: '02',
+  achievements: '03',
+  stats: '04',
+  graph: '05',
+  notes: '06',
+};
 
 function FeatureHeader({ title, icon: Icon, color }: { title: string; icon: React.ElementType; color: string }) {
-  const { setActiveFeatureView } = useLearningStore();
+  const { activeFeatureView, setActiveFeatureView } = useLearningStore();
+  const sectionNo = activeFeatureView ? FEATURE_SECTION_NUMBER[activeFeatureView] ?? '' : '';
 
   return (
     <div className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-200 px-6 dark:border-neutral-800">
@@ -83,13 +104,19 @@ function FeatureHeader({ title, icon: Icon, color }: { title: string; icon: Reac
         whileTap={{ scale: 0.92 }}
         onClick={() => setActiveFeatureView(null)}
         className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+        aria-label="返回"
       >
         <ArrowLeft className="h-4 w-4" />
       </motion.button>
       <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${color}`}>
         <Icon className="h-3.5 w-3.5" />
       </div>
-      <h1 className="text-[15px] font-medium text-neutral-900 dark:text-neutral-100">{title}</h1>
+      {sectionNo && (
+        <span className="font-serif text-[11px] tabular-nums text-neutral-400 dark:text-neutral-500">
+          §{sectionNo}
+        </span>
+      )}
+      <h1 className="font-serif text-[16px] font-medium text-neutral-900 dark:text-neutral-100">{title}</h1>
     </div>
   );
 }
@@ -116,28 +143,106 @@ function EmptyState({ icon: Icon, title, description }: { icon: React.ElementTyp
 // ─── 1. PDF Import View is now in pdf-import-view.tsx ──────────────────
 
 // ─── 2. Task Planner View ───────────────────────────────────────────────────
+//
+// Each task has a priority 1–5 (visible as a vertical 5-segment bar; click to
+// cycle). Tasks can be reordered by dragging the grip handle on the left.
+// Drag-and-drop is implemented with native HTML5 DnD (no extra deps) to keep
+// the bundle thin and the academic aesthetic uncluttered.
 
-function TaskPlannerView() {
-  const { tasks, addTask, toggleTask, deleteTask, isLoadingTasks } = useLearningStore();
+const PRIORITY_LABELS: Record<number, string> = {
+  1: '很低',
+  2: '较低',
+  3: '中等',
+  4: '较高',
+  5: '很高',
+};
+
+function PriorityBar({ value, onChange, disabled }: { value: number; onChange: (v: number) => void; disabled?: boolean }) {
+  // 5 stacked segments; the bottom `value` are filled (dark), the rest neutral.
+  // Click on segment N sets priority to N.
+  return (
+    <div
+      className="flex flex-col-reverse gap-[2px]"
+      role="slider"
+      aria-label={`优先级 ${value} / 5`}
+      aria-valuenow={value}
+      aria-valuemin={1}
+      aria-valuemax={5}
+    >
+      {[1, 2, 3, 4, 5].map((n) => {
+        const filled = n <= value;
+        return (
+          <button
+            key={n}
+            type="button"
+            disabled={disabled}
+            onClick={(e) => { e.stopPropagation(); onChange(n); }}
+            className={`h-[3px] w-3.5 rounded-[1px] transition-colors ${
+              filled
+                ? 'bg-neutral-800 dark:bg-neutral-200'
+                : 'bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-700 dark:hover:bg-neutral-600'
+            } ${disabled ? 'cursor-default opacity-60' : 'cursor-pointer'}`}
+            aria-label={`设为优先级 ${n}`}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function TaskPlannerView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
+  const { tasks, addTask, toggleTask, deleteTask, setTaskPriority, reorderTasks, isLoadingTasks } = useLearningStore();
   const [newTask, setNewTask] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
+  const [newPriority, setNewPriority] = React.useState(3);
+  const [draggingId, setDraggingId] = React.useState<string | null>(null);
+  const [dragOverId, setDragOverId] = React.useState<string | null>(null);
 
   const submit = React.useCallback(async () => {
     const t = newTask.trim();
     if (!t || submitting) return;
     setSubmitting(true);
     setNewTask('');
-    await addTask(t);
+    await addTask(t, newPriority);
     setSubmitting(false);
-  }, [newTask, submitting, addTask]);
+  }, [newTask, submitting, addTask, newPriority]);
 
   const doneCount = tasks.filter(t => t.done).length;
   const pct = tasks.length > 0 ? (doneCount / tasks.length) * 100 : 0;
 
+  // Sort by order (fallback to createdAt)
+  const sortedTasks = React.useMemo(() => {
+    return [...tasks].sort((a, b) => {
+      if (a.order !== b.order) return a.order - b.order;
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
+  }, [tasks]);
+
+  const handleDrop = (targetId: string) => {
+    if (!draggingId || draggingId === targetId) {
+      setDraggingId(null);
+      setDragOverId(null);
+      return;
+    }
+    const ids = sortedTasks.map(t => t.id);
+    const fromIdx = ids.indexOf(draggingId);
+    const toIdx = ids.indexOf(targetId);
+    if (fromIdx < 0 || toIdx < 0) {
+      setDraggingId(null);
+      setDragOverId(null);
+      return;
+    }
+    ids.splice(fromIdx, 1);
+    ids.splice(toIdx, 0, draggingId);
+    void reorderTasks(ids);
+    setDraggingId(null);
+    setDragOverId(null);
+  };
+
   return (
     <>
       <FeatureHeader title="任务规划" icon={Check} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
         <div className="mx-auto max-w-[600px] px-6 py-5">
           {/* Progress */}
           <motion.div
@@ -161,29 +266,52 @@ function TaskPlannerView() {
             </motion.div>
           </motion.div>
 
-          {/* Add task */}
+          {/* Add task — with priority picker */}
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0, transition: { delay: 0.05 } }}
-            className="mb-4 flex gap-2"
+            className="mb-4 rounded-lg border border-neutral-200 bg-white p-2 dark:border-neutral-700 dark:bg-neutral-900"
           >
-            <input
-              type="text"
-              placeholder="添加学习任务..."
-              value={newTask}
-              onChange={e => setNewTask(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { void submit(); } }}
-              className="h-9 flex-1 rounded-lg border border-neutral-200 bg-white px-3 text-[13px] transition-colors duration-150 focus:border-neutral-300 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
-            />
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.92 }}
-              onClick={() => { void submit(); }}
-              disabled={submitting}
-              className="flex h-9 w-9 items-center justify-center rounded-lg bg-neutral-900 text-white transition-opacity disabled:opacity-50 dark:bg-white dark:text-neutral-900"
-            >
-              <Plus className="h-4 w-4" />
-            </motion.button>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                placeholder="添加学习任务..."
+                value={newTask}
+                onChange={e => setNewTask(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { void submit(); } }}
+                className="h-9 flex-1 bg-transparent px-2 text-[13px] transition-colors duration-150 focus:outline-none dark:text-neutral-200"
+              />
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.92 }}
+                onClick={() => { void submit(); }}
+                disabled={submitting}
+                className="flex h-9 w-9 items-center justify-center rounded-lg bg-neutral-900 text-white transition-opacity disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+              >
+                <Plus className="h-4 w-4" />
+              </motion.button>
+            </div>
+            {/* Priority selector for new task */}
+            <div className="mt-1.5 flex items-center gap-3 border-t border-neutral-100 px-2 pt-2 dark:border-neutral-800">
+              <span className="text-[10px] uppercase tracking-wider text-neutral-400 dark:text-neutral-500">优先级</span>
+              <div className="flex gap-1">
+                {[1, 2, 3, 4, 5].map(n => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setNewPriority(n)}
+                    className={`h-5 w-5 rounded-md border text-[10px] tabular-nums transition-colors ${
+                      newPriority === n
+                        ? 'border-neutral-800 bg-neutral-800 text-white dark:border-neutral-200 dark:bg-neutral-200 dark:text-neutral-900'
+                        : 'border-neutral-200 text-neutral-400 hover:border-neutral-300 dark:border-neutral-700 dark:text-neutral-500'
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[11px] text-neutral-500 dark:text-neutral-400">{PRIORITY_LABELS[newPriority]}</span>
+            </div>
           </motion.div>
 
           {/* Task list */}
@@ -199,42 +327,91 @@ function TaskPlannerView() {
               </div>
             )}
             {!isLoadingTasks && tasks.length === 0 && <EmptyState icon={Check} title="暂无任务" description="添加学习任务来规划你的学习路径" />}
-            {tasks.map((task, i) => (
-              <motion.div
-                key={task.id}
-                custom={i}
-                variants={itemVariants}
-                initial="hidden"
-                animate="visible"
-                exit={{ opacity: 0, x: -20, scale: 0.95, transition: { duration: 0.15 } }}
-                layout
-                className={`group mb-1.5 flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors ${
-                  task.done ? 'bg-neutral-50 dark:bg-neutral-800/50' : 'bg-white hover:bg-neutral-50 dark:bg-neutral-900 dark:hover:bg-neutral-800/50'
-                }`}
-              >
-                <motion.button
-                  whileTap={{ scale: 0.8 }}
-                  onClick={() => { void toggleTask(task.id); }}
-                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${
-                    task.done
-                      ? 'border-neutral-700 bg-neutral-700 text-white dark:border-neutral-300 dark:bg-neutral-300 dark:text-neutral-900'
-                      : 'border-neutral-300 dark:border-neutral-600'
+            {sortedTasks.map((task, i) => {
+              const isDragging = draggingId === task.id;
+              const isDragOver = dragOverId === task.id && draggingId !== task.id;
+              return (
+                <motion.div
+                  key={task.id}
+                  custom={i}
+                  variants={itemVariants}
+                  initial="hidden"
+                  animate="visible"
+                  exit={{ opacity: 0, x: -20, scale: 0.95, transition: { duration: 0.15 } }}
+                  layout
+                  draggable
+                  onDragStart={() => setDraggingId(task.id)}
+                  onDragEnd={() => { setDraggingId(null); setDragOverId(null); }}
+                  onDragOver={(e) => { e.preventDefault(); setDragOverId(task.id); }}
+                  onDrop={() => handleDrop(task.id)}
+                  className={`group mb-1.5 flex items-center gap-2 rounded-lg border px-2.5 py-2.5 transition-all ${
+                    isDragging ? 'opacity-50' : ''
+                  } ${
+                    isDragOver ? 'border-neutral-400 bg-neutral-50 dark:border-neutral-500 dark:bg-neutral-800' : 'border-transparent'
+                  } ${
+                    task.done ? 'bg-neutral-50 dark:bg-neutral-800/50' : 'bg-white hover:bg-neutral-50 dark:bg-neutral-900 dark:hover:bg-neutral-800/50'
                   }`}
                 >
-                  {task.done && <Check className="h-3 w-3" strokeWidth={3} />}
-                </motion.button>
-                <span className={`flex-1 text-[13px] ${task.done ? 'text-neutral-400 line-through dark:text-neutral-500' : 'text-neutral-700 dark:text-neutral-200'}`}>
-                  {task.title}
-                </span>
-                <motion.button
-                  whileTap={{ scale: 0.8 }}
-                  onClick={() => { void deleteTask(task.id); }}
-                  className="opacity-0 group-hover:opacity-100 flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </motion.button>
-              </motion.div>
-            ))}
+                  {/* Drag handle */}
+                  <span
+                    className="flex h-5 w-3 cursor-grab items-center justify-center text-neutral-300 opacity-0 transition-opacity hover:text-neutral-500 group-hover:opacity-100 active:cursor-grabbing dark:text-neutral-600 dark:hover:text-neutral-300"
+                    aria-hidden="true"
+                  >
+                    <GripVertical className="h-3.5 w-3.5" />
+                  </span>
+                  {/* Checkbox */}
+                  <motion.button
+                    whileTap={{ scale: 0.8 }}
+                    onClick={() => { void toggleTask(task.id); }}
+                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                      task.done
+                        ? 'border-neutral-700 bg-neutral-700 text-white dark:border-neutral-300 dark:bg-neutral-300 dark:text-neutral-900'
+                        : 'border-neutral-300 dark:border-neutral-600'
+                    }`}
+                  >
+                    {task.done && <Check className="h-3 w-3" strokeWidth={3} />}
+                  </motion.button>
+                  {/* Priority bar — interactive 5-segment slider. We use a
+                      non-button wrapper (span) so we don't generate invalid
+                      <button><button></button></button> HTML, which React
+                      hydration will reject. */}
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void setTaskPriority(task.id, task.priority >= 5 ? 1 : task.priority + 1);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        void setTaskPriority(task.id, task.priority >= 5 ? 1 : task.priority + 1);
+                      }
+                    }}
+                    className="shrink-0 cursor-pointer px-1 py-1 outline-none focus-visible:rounded focus-visible:ring-1 focus-visible:ring-neutral-400"
+                    title={`优先级 ${task.priority} / 5 — 点击切换`}
+                    aria-label={`切换优先级，当前 ${task.priority}`}
+                  >
+                    <PriorityBar value={task.priority} onChange={(v) => { void setTaskPriority(task.id, v); }} />
+                  </span>
+                  {/* Title */}
+                  <span className={`flex-1 text-[13px] ${task.done ? 'text-neutral-400 line-through dark:text-neutral-500' : 'text-neutral-700 dark:text-neutral-200'}`}>
+                    {task.title}
+                  </span>
+                  <span className="shrink-0 text-[10px] uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+                    {PRIORITY_LABELS[task.priority]}
+                  </span>
+                  <motion.button
+                    whileTap={{ scale: 0.8 }}
+                    onClick={() => { void deleteTask(task.id); }}
+                    className="flex h-6 w-6 items-center justify-center rounded text-neutral-400 opacity-0 transition-opacity hover:bg-neutral-200 group-hover:opacity-100 dark:hover:bg-neutral-700"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </motion.button>
+                </motion.div>
+              );
+            })}
           </AnimatePresence>
         </div>
       </div>
@@ -244,14 +421,18 @@ function TaskPlannerView() {
 
 // ─── 3. Learning Cards View ────────────────────────────────────────────────
 
-function LearningCardsView() {
-  const { cards, addCard, toggleCardMastered, deleteCard, isLoadingCards } = useLearningStore();
+function LearningCardsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
+  const { cards, addCard, toggleCardMastered, deleteCard, isLoadingCards, isReviewing, startReview } = useLearningStore();
   const [front, setFront] = React.useState('');
   const [back, setBack] = React.useState('');
   const [flipped, setFlipped] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
 
   const masteredCount = cards.filter(c => c.mastered).length;
+  const dueCount = React.useMemo(() => {
+    const now = Date.now();
+    return cards.filter(c => c.dueAt === null || new Date(c.dueAt).getTime() <= now).length;
+  }, [cards]);
 
   const submit = React.useCallback(async () => {
     const f = front.trim();
@@ -264,20 +445,41 @@ function LearningCardsView() {
     setSubmitting(false);
   }, [front, back, submitting, addCard]);
 
+  // If review mode is active, render the dedicated review UI instead.
+  if (isReviewing) {
+    return <CardReviewMode />;
+  }
+
   return (
     <>
       <FeatureHeader title="学习卡片" icon={RotateCcw} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Stats bar */}
+        {/* Stats bar + review button */}
         <div className="shrink-0 border-b border-neutral-100 px-6 py-3 dark:border-neutral-800">
           <div className="mx-auto flex max-w-[600px] items-center justify-between text-[12px] text-neutral-400">
             <span>{cards.length} 张卡片</span>
             <span>{masteredCount} 已掌握</span>
+            <span>{dueCount} 待复习</span>
+          </div>
+          <div className="mx-auto mt-2.5 flex max-w-[600px]">
+            <motion.button
+              whileHover={{ scale: cards.length === 0 ? 1 : 1.01 }}
+              whileTap={{ scale: cards.length === 0 ? 1 : 0.99 }}
+              onClick={() => { void startReview(); }}
+              disabled={cards.length === 0}
+              className="flex w-full items-center justify-center gap-2 rounded-md border border-neutral-300 bg-white py-2 text-[12px] font-medium text-neutral-700 transition-colors hover:border-neutral-500 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:border-neutral-500 dark:hover:bg-neutral-800"
+            >
+              <RotateCw className="h-3.5 w-3.5" />
+              开始复习
+              <span className="text-[10px] text-neutral-400 dark:text-neutral-500">
+                {dueCount > 0 ? `· ${dueCount} 张到期` : '· 全部卡片'}
+              </span>
+            </motion.button>
           </div>
         </div>
 
         {/* Card grid */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4 custom-scrollbar">
           <div className="mx-auto grid max-w-[600px] grid-cols-2 gap-3">
             <AnimatePresence mode="popLayout" initial={false}>
               {isLoadingCards && cards.length === 0 && (
@@ -293,58 +495,77 @@ function LearningCardsView() {
               {!isLoadingCards && cards.length === 0 && (
                 <EmptyState key="empty" icon={RotateCcw} title="暂无卡片" description="创建闪卡来强化记忆" />
               )}
-              {cards.map((card, i) => (
-                <motion.div
-                  key={card.id}
-                  custom={i}
-                  variants={itemVariants}
-                  initial="hidden"
-                  animate="visible"
-                  exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.15 } }}
-                  layout
-                  onClick={() => setFlipped(flipped === card.id ? null : card.id)}
-                  className={`group relative flex min-h-[120px] cursor-pointer flex-col justify-between rounded-xl border p-3 transition-all ${
-                    card.mastered
-                      ? 'border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/50'
-                      : 'border-neutral-200 bg-white hover:border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:border-neutral-600'
-                  }`}
-                >
-                  {/* Delete button — appears on hover */}
-                  <button
-                    onClick={e => { e.stopPropagation(); void deleteCard(card.id); }}
-                    className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded text-neutral-300 opacity-0 transition-opacity hover:bg-neutral-100 hover:text-neutral-500 group-hover:opacity-100 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
-                    aria-label="删除卡片"
+              {cards.map((card, i) => {
+                const isDue = card.dueAt === null || new Date(card.dueAt).getTime() <= Date.now();
+                return (
+                  <motion.div
+                    key={card.id}
+                    custom={i}
+                    variants={itemVariants}
+                    initial="hidden"
+                    animate="visible"
+                    exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.15 } }}
+                    layout
+                    onClick={() => setFlipped(flipped === card.id ? null : card.id)}
+                    className={`group relative flex min-h-[120px] cursor-pointer flex-col justify-between rounded-xl border p-3 transition-all ${
+                      card.mastered
+                        ? 'border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/50'
+                        : 'border-neutral-200 bg-white hover:border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:border-neutral-600'
+                    }`}
                   >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                  <div>
-                    <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-200">
-                      {flipped === card.id ? card.back : card.front}
-                    </p>
-                    {flipped === card.id && (
-                      <motion.p
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="mt-1.5 text-[11px] text-neutral-400"
-                      >
-                        {card.front}
-                      </motion.p>
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-neutral-400">{card.category}</span>
-                    <motion.button
-                      whileTap={{ scale: 0.8 }}
-                      onClick={e => { e.stopPropagation(); void toggleCardMastered(card.id); }}
-                      className={`flex h-5 w-5 items-center justify-center rounded border ${
-                        card.mastered ? 'border-neutral-700 bg-neutral-700 text-white dark:border-neutral-300 dark:bg-neutral-300 dark:text-neutral-900' : 'border-neutral-300 dark:border-neutral-600'
-                      }`}
+                    {/* Delete button — appears on hover */}
+                    <button
+                      onClick={e => { e.stopPropagation(); void deleteCard(card.id); }}
+                      className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded text-neutral-300 opacity-0 transition-opacity hover:bg-neutral-100 hover:text-neutral-500 group-hover:opacity-100 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+                      aria-label="删除卡片"
                     >
-                      {card.mastered && <Check className="h-3 w-3" strokeWidth={3} />}
-                    </motion.button>
-                  </div>
-                </motion.div>
-              ))}
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                    <div>
+                      <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-200">
+                        {flipped === card.id ? card.back : card.front}
+                      </p>
+                      {flipped === card.id && (
+                        <motion.p
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          className="mt-1.5 text-[11px] text-neutral-400"
+                        >
+                          {card.front}
+                        </motion.p>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-[11px] text-neutral-400">
+                        <span>{card.category}</span>
+                        {/* Due badge: shows next review info */}
+                        {card.dueAt ? (
+                          <span className={`rounded border px-1 py-0.5 text-[9px] tabular-nums ${
+                            isDue
+                              ? 'border-neutral-400 text-neutral-600 dark:border-neutral-500 dark:text-neutral-300'
+                              : 'border-neutral-200 text-neutral-400 dark:border-neutral-700 dark:text-neutral-500'
+                          }`}>
+                            {isDue ? '待复习' : `${formatInterval(card.interval)}后`}
+                          </span>
+                        ) : (
+                          <span className="rounded border border-neutral-200 px-1 py-0.5 text-[9px] text-neutral-400 dark:border-neutral-700">
+                            未复习
+                          </span>
+                        )}
+                      </div>
+                      <motion.button
+                        whileTap={{ scale: 0.8 }}
+                        onClick={e => { e.stopPropagation(); void toggleCardMastered(card.id); }}
+                        className={`flex h-5 w-5 items-center justify-center rounded border ${
+                          card.mastered ? 'border-neutral-700 bg-neutral-700 text-white dark:border-neutral-300 dark:bg-neutral-300 dark:text-neutral-900' : 'border-neutral-300 dark:border-neutral-600'
+                        }`}
+                      >
+                        {card.mastered && <Check className="h-3 w-3" strokeWidth={3} />}
+                      </motion.button>
+                    </div>
+                  </motion.div>
+                );
+              })}
             </AnimatePresence>
 
             {/* Add card form */}
@@ -397,7 +618,7 @@ const achievementIcons: Record<string, React.ElementType> = {
   layers: Layers,
 };
 
-function AchievementsView() {
+function AchievementsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
   const { achievements, stats, fetchStats, isLoadingStats } = useLearningStore();
 
   // Fetch fresh stats on mount (achievements are derived from real DB data)
@@ -413,7 +634,7 @@ function AchievementsView() {
   return (
     <>
       <FeatureHeader title="成就系统" icon={Trophy} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
         <div className="mx-auto max-w-[600px] px-6 py-5">
           {/* Summary with circular progress */}
           <motion.div
@@ -516,7 +737,7 @@ function AchievementsView() {
 
 // ─── 5. Stats View ───────────────────────────────────────────────────────────
 
-function StatsView() {
+function StatsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
   const { stats, weeklyActivity, fetchStats, isLoadingStats } = useLearningStore();
 
   React.useEffect(() => {
@@ -536,7 +757,7 @@ function StatsView() {
   return (
     <>
       <FeatureHeader title="学习统计" icon={BarChart3} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
         <div className="mx-auto max-w-[600px] px-6 py-5">
           {/* Hero metric: current streak */}
           <motion.div
@@ -652,13 +873,13 @@ function StatsView() {
 
 // ─── 6. Knowledge Graph View ───────────────────────────────────────────────
 
-function KnowledgeGraphView() {
+function KnowledgeGraphView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
   const { knowledgeNodes } = useLearningStore();
 
   return (
     <>
       <FeatureHeader title="知识图谱" icon={Layers} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
         <div className="mx-auto max-w-[600px] px-6 py-5">
           {knowledgeNodes.length === 0 ? (
             <EmptyState icon={Layers} title="知识图谱为空" description="开始学习来构建你的知识网络" />

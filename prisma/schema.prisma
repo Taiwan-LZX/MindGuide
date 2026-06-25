@@ -127,6 +127,8 @@ model Task {
 }
 
 // Per-session flashcard. Persisted for spaced-repetition review.
+// SM-2 algorithm fields track ease/interval/repetition and a due date so
+// the review queue can surface only the cards the learner needs to see today.
 model Card {
   id        String   @id @default(cuid())
   sessionId String
@@ -135,8 +137,14 @@ model Card {
   category  String   @default("general")
   mastered  Boolean  @default(false)
   order     Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // SM-2 spaced-repetition state
+  ease        Float    @default(2.5)        // ease factor (1.3 .. 3.0)
+  interval    Int      @default(0)          // days until next review
+  repetition Int      @default(0)          // consecutive correct recalls
+  dueAt       DateTime?                     // next-due timestamp (null = never reviewed)
+  lastReviewedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 }

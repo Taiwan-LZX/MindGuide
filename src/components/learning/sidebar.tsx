@@ -17,6 +17,7 @@ import {
 import { useLearningStore, type LearningSession } from '@/store/learning-store';
 import { UnifiedSearch } from './unified-search';
 import { MouseFollowTooltip } from './mouse-follow-tooltip';
+import { AppearanceButton } from './appearance-popover';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -145,6 +146,17 @@ function CollapsedSidebar() {
           <Search className="h-4 w-4" />
         </motion.button>
       </MouseFollowTooltip>
+
+      {/* Appearance — pushed to the bottom; it's a settings-type control. */}
+      <motion.div
+        custom={4}
+        variants={iconStripVariants}
+        initial="hidden"
+        animate="visible"
+        className="mt-auto"
+      >
+        <AppearanceButton />
+      </motion.div>
     </aside>
   );
 }
@@ -490,6 +502,11 @@ function FullSidebar() {
             更多功能
           </button>
         </MouseFollowTooltip>
+
+        {/* Appearance — quiet utility row, right-aligned */}
+        <div className="flex items-center justify-end pt-1">
+          <AppearanceButton />
+        </div>
       </motion.div>
     </aside>
   );

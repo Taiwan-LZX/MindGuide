@@ -3,6 +3,7 @@
 import React, { useState, useRef, useCallback, useEffect, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { usePreferences } from '@/store/preferences-store';
 
 // ─── SSR-safe client detection (no setState-in-effect) ────────────────────
 const emptySubscribe = () => () => {};
@@ -60,6 +61,10 @@ export function MouseFollowTooltip({
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   // SSR-safe: false on server + first hydration render, true after.
   const mounted = useSyncExternalStore(emptySubscribe, getIsClient, getIsServer);
+  // When 动态效果 is off, the tooltip should appear/disappear instantly (no
+  // opacity fade). MotionConfig's reducedMotion only strips transform/layout
+  // — opacity still animates — so we gate it explicitly here.
+  const motionEnabled = usePreferences(s => s.motionEnabled);
 
   const tipRef = useRef<HTMLDivElement>(null);
   // Wrapper span (display:contents) — its first child is the trigger element.
@@ -235,8 +240,12 @@ export function MouseFollowTooltip({
                 exit={{ opacity: 0 }}
                 transition={{
                   // Pure fade in/out — appear and disappear feel identical:
-                  // a quiet opacity crossfade, no scale "pop".
-                  opacity: { duration: 0.15, ease: [0.25, 0.1, 0.25, 1] },
+                  // a quiet opacity crossfade, no scale "pop". When 动态效果
+                  // is off, collapse the fade to 0 so the tooltip is instant.
+                  opacity: {
+                    duration: motionEnabled ? 0.15 : 0,
+                    ease: [0.25, 0.1, 0.25, 1],
+                  },
                   // Follow mode: liquid spring settles in ~90ms, no perceptible
                   // lag but feels organic rather than rigidly glued to cursor.
                   // On appear, x/y already equal pos (initial == animate value)

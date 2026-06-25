@@ -236,6 +236,30 @@ const initialState = {
 let notesSaveTimer: ReturnType<typeof setTimeout> | null = null;
 const NOTES_SAVE_DELAY_MS = 800;
 
+// ─── Achievement Unlock Tracking ────────────────────────────────────────────
+// Persisted set of achievement IDs the user has already unlocked, so we can
+// detect newly-unlocked achievements across page reloads and trigger toasts.
+const UNLOCKED_ACH_KEY = 'mindguide:unlocked-achievements';
+function loadUnlockedAchievements(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = window.localStorage.getItem(UNLOCKED_ACH_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+function saveUnlockedAchievements(ids: Set<string>) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(UNLOCKED_ACH_KEY, JSON.stringify([...ids]));
+  } catch {
+    // ignore quota errors
+  }
+}
+// In-memory snapshot so we don't re-read localStorage on every fetchStats
+let knownUnlocked = loadUnlockedAchievements();
+
 // ─── Store ──────────────────────────────────────────────────────────────────
 
 export const useLearningStore = create<LearningStore>((set, get) => ({
@@ -705,11 +729,53 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       const res = await fetch('/api/stats');
       if (!res.ok) { console.error('fetchStats failed:', res.status); return; }
       const data = await res.json();
+      const newAchievements = data.achievements || [];
       set({
         stats: data.totals,
         weeklyActivity: data.weeklyActivity || [],
-        achievements: data.achievements || [],
+        achievements: newAchievements,
       });
+
+      // Detect newly-unlocked achievements and fire celebratory toasts.
+      // We only consider it a "new unlock" if the achievement transitioned
+      // from locked → unlocked since the last fetchStats.
+      const newlyUnlocked = newAchievements.filter(
+        (a: Achievement) => a.unlocked && !knownUnlocked.has(a.id)
+      );
+      if (newlyUnlocked.length > 0) {
+        // Update the known set BEFORE firing toasts so a re-render can't double-fire
+        const next = new Set(knownUnlocked);
+        for (const a of newlyUnlocked) next.add(a.id);
+        knownUnlocked = next;
+        saveUnlockedAchievements(next);
+
+        // Fire celebratory toasts. `toast()` is a plain dispatcher from the
+        // client-only use-toast hook; the <Toaster /> component mounted in the
+        // root layout subscribes and renders them. Safe to call from the store
+        // because it only mutates in-memory state + notifies mounted listeners.
+        try {
+          const { toast } = await import('@/hooks/use-toast');
+          for (const a of newlyUnlocked) {
+            toast({
+              title: `🏆 成就解锁：${a.title}`,
+              description: a.description,
+              duration: 6000,
+              className:
+                'border-emerald-200 bg-white text-neutral-900 dark:border-emerald-900/40 dark:bg-neutral-900 dark:text-neutral-100',
+            });
+          }
+        } catch (e) {
+          console.warn('Achievement toast skipped (hook unavailable):', e);
+        }
+      } else {
+        // Make sure already-unlocked achievements are recorded (first load)
+        const next = new Set(knownUnlocked);
+        let changed = false;
+        for (const a of newAchievements) {
+          if (a.unlocked && !next.has(a.id)) { next.add(a.id); changed = true; }
+        }
+        if (changed) { knownUnlocked = next; saveUnlockedAchievements(next); }
+      }
     } catch (error) {
       console.error('Failed to fetch stats:', error);
     } finally {

@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MoreVertical, Loader2, BookOpen, GraduationCap, Sparkles, Send, Square } from 'lucide-react';
+import { MoreVertical, BookOpen, GraduationCap, Sparkles, Send, Square, ArrowDown } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 import { KnowledgeInline } from '@/components/learning/knowledge-inline';
 import { MarkdownRenderer, CopyAllButton } from '@/components/learning/markdown-renderer';
@@ -70,7 +70,9 @@ export function MainContent() {
   } = useLearningStore();
 
   const [input, setInput] = useState('');
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const session = sessions.find(s => s.id === currentSessionId);
 
@@ -78,6 +80,18 @@ export function MainContent() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
+
+  // Track whether the user has scrolled up from the bottom
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollBottom(distFromBottom > 200);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
 
   const handleSend = useCallback(async () => {
     const t = input.trim();
@@ -130,14 +144,27 @@ export function MainContent() {
                 initial={{ opacity: 0, x: 8 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 8 }}
-                className="flex items-center gap-2 px-2 text-[12px] text-neutral-400"
+                className="flex items-center gap-1.5 px-2 text-[12px] text-neutral-400"
               >
-                <motion.div
-                  className="h-1.5 w-1.5 rounded-full bg-neutral-400"
-                  animate={{ scale: [1, 1.3, 1], opacity: [1, 0.5, 1] }}
-                  transition={{ repeat: Infinity, duration: 1.2 }}
-                />
-                思考中
+                {streamingContent ? (
+                  <>
+                    <motion.div
+                      className="h-1.5 w-1.5 rounded-full bg-emerald-400"
+                      animate={{ opacity: [1, 0.3, 1] }}
+                      transition={{ repeat: Infinity, duration: 0.9 }}
+                    />
+                    回复中
+                  </>
+                ) : (
+                  <>
+                    <motion.div
+                      className="h-1.5 w-1.5 rounded-full bg-neutral-400"
+                      animate={{ scale: [1, 1.3, 1], opacity: [1, 0.5, 1] }}
+                      transition={{ repeat: Infinity, duration: 1.2 }}
+                    />
+                    思考中
+                  </>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -202,6 +229,41 @@ export function MainContent() {
             })}
           </AnimatePresence>
 
+          {/* Thinking bubble — shown while waiting for the first streamed token */}
+          <AnimatePresence>
+            {isStreaming && !streamingContent && lastMsgRole !== 'assistant' && (
+              <motion.div
+                variants={streamingBubbleVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="my-3 flex gap-3"
+              >
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-[11px] text-white dark:bg-white dark:text-neutral-900">
+                  <GraduationCap className="h-3.5 w-3.5" />
+                </div>
+                <div className="flex items-center gap-1.5 rounded-xl rounded-tl-sm bg-neutral-100 px-4 py-3 dark:bg-neutral-800">
+                  {[0, 1, 2].map((dot) => (
+                    <motion.span
+                      key={dot}
+                      className="h-1.5 w-1.5 rounded-full bg-neutral-400 dark:bg-neutral-500"
+                      animate={{
+                        y: [0, -3, 0],
+                        opacity: [0.4, 1, 0.4],
+                      }}
+                      transition={{
+                        repeat: Infinity,
+                        duration: 0.9,
+                        delay: dot * 0.15,
+                        ease: 'easeInOut',
+                      }}
+                    />
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* Streaming response */}
           <AnimatePresence>
             {isStreaming && lastMsgRole !== 'assistant' && streamingContent && (
@@ -213,12 +275,7 @@ export function MainContent() {
                 className="my-3 flex gap-3"
               >
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-[11px] text-white dark:bg-white dark:text-neutral-900">
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}
-                  >
-                    <Loader2 className="h-3 w-3" />
-                  </motion.div>
+                  <GraduationCap className="h-3.5 w-3.5" />
                 </div>
                 <div className="group relative min-w-0 max-w-[85%] rounded-xl rounded-tl-sm bg-neutral-100 px-3.5 py-2.5 text-[14px] leading-relaxed text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200">
                   <MarkdownRenderer content={streamingContent} streaming />

@@ -64,7 +64,7 @@ function buildMessageContext(
   userMessages: Array<{ role: string; content: string; type?: string }>,
   knowledgeNodes: Array<{ title: string; content: string; category?: string; mastered: boolean }>
 ) {
-  const contextParts: Array<{ role: string; content: string }> = [];
+  const contextParts: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
 
   contextParts.push({
     role: 'system',
@@ -101,13 +101,49 @@ function buildMessageContext(
   const trimmedMessages = userMessages.slice(-maxHistoryMessages);
 
   for (const msg of trimmedMessages) {
-    contextParts.push({
-      role: msg.role,
-      content: msg.content,
-    });
+    // Normalize: the client may send type-tagged messages; only role+content matter for the model
+    const role = (msg.role === 'assistant' ? 'assistant' : msg.role === 'system' ? 'system' : 'user') as
+      | 'system'
+      | 'user'
+      | 'assistant';
+    contextParts.push({ role, content: msg.content });
   }
 
   return contextParts;
+}
+
+// Parse an upstream SSE byte chunk and extract delta content pieces.
+// Buffers incomplete lines and returns them via the carried-over buffer string.
+function parseUpstreamSse(
+  chunkStr: string,
+  bufferRef: { buf: string }
+): string[] {
+  bufferRef.buf += chunkStr;
+  const pieces: string[] = [];
+  // SSE events are separated by a blank line (\n\n)
+  const events = bufferRef.buf.split('\n\n');
+  // The last element is the incomplete tail (no trailing \n\n yet)
+  bufferRef.buf = events.pop() || '';
+
+  for (const evt of events) {
+    const lines = evt.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      const data = trimmed.slice(5).trim();
+      if (!data || data === '[DONE]') continue;
+      try {
+        const parsed = JSON.parse(data);
+        const delta = parsed?.choices?.[0]?.delta?.content;
+        if (typeof delta === 'string' && delta.length > 0) {
+          pieces.push(delta);
+        }
+      } catch {
+        // skip malformed JSON
+      }
+    }
+  }
+  return pieces;
 }
 
 export async function POST(req: NextRequest) {
@@ -141,59 +177,108 @@ export async function POST(req: NextRequest) {
     const zai = await ZAI.create();
     const messageHistory = buildMessageContext(historyMessages || [], knowledgeNodes || []);
 
-    // Get AI completion (non-streaming first for reliability)
-    const completion = await zai.chat.completions.create({
+    // Real streaming: SDK returns the upstream ReadableStream when stream:true
+    const upstream = (await zai.chat.completions.create({
       messages: messageHistory,
       thinking: { type: 'disabled' },
-    });
+      stream: true,
+    } as any)) as ReadableStream<Uint8Array> | undefined;
 
-    const aiContent = completion.choices?.[0]?.message?.content || '';
-
-    if (!aiContent) {
-      return new Response(JSON.stringify({ error: 'Empty AI response' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
+    // Fallback: if the SDK didn't return a stream (unexpected), use non-streaming
+    if (!upstream || typeof upstream.getReader !== 'function') {
+      const completion = await zai.chat.completions.create({
+        messages: messageHistory,
+        thinking: { type: 'disabled' },
+      });
+      const aiContent: string = completion?.choices?.[0]?.message?.content || '';
+      if (!aiContent) {
+        return new Response(JSON.stringify({ error: 'Empty AI response' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      await db.learningMessage.create({
+        data: { sessionId, role: 'assistant', content: aiContent, type: 'dialogue' },
+      });
+      const encoder = new TextEncoder();
+      const fallback = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: aiContent })}\n\n`));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      });
+      return new Response(fallback, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
       });
     }
 
-    // Save AI message to database
-    await db.learningMessage.create({
-      data: {
-        sessionId,
-        role: 'assistant',
-        content: aiContent,
-        type: 'dialogue',
-      },
-    });
-
-    // Stream the response back to client using SSE
     const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      start(controller) {
-        // Send content in chunks to simulate streaming
-        const chunkSize = 8;
-        let i = 0;
-        const sendChunk = () => {
-          while (i < aiContent.length) {
-            const chunk = aiContent.slice(i, i + chunkSize);
-            i += chunkSize;
-            const data = JSON.stringify({ content: chunk });
-            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+    const bufferRef = { buf: '' };
+    let fullContent = '';
+
+    // Build a streaming response that:
+    //   1. reads from upstream SDK stream
+    //   2. parses OpenAI-style SSE deltas
+    //   3. re-emits in our own SSE format ({content: string})
+    //   4. accumulates full content and persists to DB when the stream ends
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const reader = upstream.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunkStr = new TextDecoder().decode(value, { stream: true });
+            const pieces = parseUpstreamSse(chunkStr, bufferRef);
+            for (const piece of pieces) {
+              fullContent += piece;
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ content: piece })}\n\n`)
+              );
+            }
+          }
+          // Flush any trailing buffered event
+          if (bufferRef.buf.trim()) {
+            const tail = parseUpstreamSse('\n\n', bufferRef);
+            for (const piece of tail) {
+              fullContent += piece;
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ content: piece })}\n\n`)
+              );
+            }
           }
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        } catch (err) {
+          console.error('Stream read error:', err);
+          // Try to send an error event then close gracefully
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({ error: 'stream_interrupted' })}\n\n`
+            )
+          );
+        } finally {
           controller.close();
-        };
-        // Use setTimeout to yield between chunks for visual streaming effect
-        if (aiContent.length <= 200) {
-          // Short response: send all at once
-          const data = JSON.stringify({ content: aiContent });
-          controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-          controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
-          controller.close();
-        } else {
-          // Longer response: stream in chunks
-          sendChunk();
+          // Persist the accumulated AI message (only if we got something)
+          if (fullContent.trim().length > 0) {
+            try {
+              await db.learningMessage.create({
+                data: {
+                  sessionId,
+                  role: 'assistant',
+                  content: fullContent,
+                  type: 'dialogue',
+                },
+              });
+            } catch (dbErr) {
+              console.error('Failed to persist AI message:', dbErr);
+            }
+          }
         }
+      },
+      cancel() {
+        // Client navigated away; nothing more to do. The DB write in finally
+        // still fires for whatever content was accumulated.
       },
     });
 
@@ -202,6 +287,8 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         Connection: 'keep-alive',
+        // Disable proxy buffering so chunks flush to the client immediately
+        'X-Accel-Buffering': 'no',
       },
     });
   } catch (error) {

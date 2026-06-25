@@ -40,8 +40,9 @@ export function KnowledgeInline({ nodes }: { nodes: KnowledgeNode[] }) {
         <div className="h-1 w-24 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
           <motion.div
             className="h-full rounded-full bg-neutral-900 dark:bg-white"
-            initial={{ width: 0 }}
-            animate={{ width: `${pct}%` }}
+            style={{ transformOrigin: 'left' }}
+            initial={{ scaleX: 0 }}
+            animate={{ scaleX: Math.max(0, Math.min(1, pct / 100)) }}
             transition={{ type: 'spring', stiffness: 300, damping: 25, delay: 0.2 }}
           />
         </div>

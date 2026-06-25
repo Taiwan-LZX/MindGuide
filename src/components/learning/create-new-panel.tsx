@@ -63,12 +63,16 @@ const popoverVariants: Variants = {
       mass: 0.9,
     },
   },
+  // Exit "recedes" toward the trigger (bottom-left). The previous 0.975 scale
+  // was too subtle to read as "going back inside" — bumped to 0.93 so the
+  // recession is perceptible. y:14 + opacity 0 = drops down + fades out,
+  // matching the bottom-left transformOrigin.
   exit: {
     opacity: 0,
-    y: 10,
-    scale: 0.975,
+    y: 14,
+    scale: 0.93,
     transition: {
-      duration: 0.24,
+      duration: 0.26,
       ease: [0.4, 0, 1, 1],
     },
   },
@@ -282,8 +286,11 @@ export function MoreFeaturesPanel() {
           initial="hidden"
           animate="visible"
           exit="exit"
-          style={{ transformOrigin: 'bottom left' }}
-          className="fixed bottom-3 left-3 z-[60] w-60 overflow-hidden rounded-xl border border-neutral-200/80 bg-white/95 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.18),0_2px_8px_-4px_rgba(0,0,0,0.1)] backdrop-blur-md dark:border-neutral-700/60 dark:bg-neutral-900/95 dark:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.5),0_2px_8px_-4px_rgba(0,0,0,0.4)]"
+          style={{ transformOrigin: 'bottom left', willChange: 'transform, opacity' }}
+          // backdrop-blur-sm (vs -md) — cheaper on the GPU, visually identical
+          // at this small popover size. The solid bg-white/95 already provides
+          // the opacity; the blur is just for the soft focus effect behind.
+          className="fixed bottom-3 left-3 z-[60] w-60 overflow-hidden rounded-xl border border-neutral-200/80 bg-white/95 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.18),0_2px_8px_-4px_rgba(0,0,0,0.1)] backdrop-blur-sm dark:border-neutral-700/60 dark:bg-neutral-900/95 dark:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.5),0_2px_8px_-4px_rgba(0,0,0,0.4)]"
         >
           {/* Header */}
           <motion.div

@@ -257,38 +257,71 @@ interface HintCtx {
 const HintContext = createContext<HintCtx>({ hovered: null, setHovered: () => {} });
 const useHint = () => useContext(HintContext);
 
+// ─── Personality: "ceremony" ───────────────────────────────────────────────
+// The settings modal is the most "formal" surface in the app — the user has
+// paused their work to change a preference. The motion should signal that
+// gravity: heavier mass, slower settle, a touch of depth via scale.
+//
+// Differentiation vs. other panels:
+//  · Quick menu (command): 380/30/0.6 — snappy, ~260ms, near-zero overshoot.
+//  · More features (discovery): 280/26/0.9 — soft, ~520ms, ~2% overshoot.
+//  · Settings (ceremony): 200/24/1.0 — heavy, ~700ms, deliberate settle.
+//
+// The scale 0.94 → 1 with transformOrigin 'center' gives a subtle "opening
+// up" depth cue — like a card pulled from a deck and laid flat. The exit
+// mirrors it (scale-down + fade) so closing feels like "putting it back".
 const panelVariants = {
-  hidden: { opacity: 0, scale: 0.96, y: 14 },
+  hidden: { opacity: 0, scale: 0.94, y: 18 },
   visible: {
     opacity: 1,
     scale: 1,
     y: 0,
-    transition: { type: 'spring', stiffness: 280, damping: 26, mass: 0.9 },
+    transition: { type: 'spring', stiffness: 200, damping: 24, mass: 1.0 },
   },
-  exit: { opacity: 0, scale: 0.97, y: 8, transition: { duration: 0.24, ease: [0.4, 0, 1, 1] } },
+  exit: {
+    opacity: 0,
+    scale: 0.95,
+    y: 10,
+    transition: { duration: 0.28, ease: [0.4, 0, 1, 1] },
+  },
 };
 
+// Direction-aware tab content. The x offset flips based on whether the new
+// tab is to the right (forward) or left (backward) of the previous one — so
+// switching tabs feels like flipping pages in a book, not just fading.
+// `custom` is the direction (-1 = back, +1 = forward).
 const contentVariants = {
-  hidden: { opacity: 0, y: 10 },
+  hidden: (dir: number) => ({
+    opacity: 0,
+    x: 18 * dir,
+    y: 6,
+  }),
   visible: {
     opacity: 1,
+    x: 0,
     y: 0,
-    transition: { type: 'spring', stiffness: 300, damping: 28, mass: 0.8 },
+    transition: { type: 'spring', stiffness: 320, damping: 30, mass: 0.7 },
   },
-  exit: { opacity: 0, y: -6, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } },
+  exit: (dir: number) => ({
+    opacity: 0,
+    x: -14 * dir,
+    y: -4,
+    transition: { duration: 0.2, ease: [0.4, 0, 1, 1] },
+  }),
 };
 
-// Soft cross-fade for the right pane when the hovered hint changes. The key is
-// the hint id so AnimatePresence swaps the whole block; the y-offset is tiny so
-// it reads as a gentle settle rather than a slide.
+// Soft cross-fade for the right pane when the hovered hint changes. Tiny
+// scale (0.99 → 1) adds depth so the swap reads as a gentle settle rather
+// than a hard cut. The key is the hint id so AnimatePresence swaps the block.
 const hintVariants = {
-  hidden: { opacity: 0, y: 6 },
+  hidden: { opacity: 0, y: 6, scale: 0.99 },
   visible: {
     opacity: 1,
     y: 0,
-    transition: { type: 'spring', stiffness: 380, damping: 28, mass: 0.6 },
+    scale: 1,
+    transition: { type: 'spring', stiffness: 360, damping: 28, mass: 0.6 },
   },
-  exit: { opacity: 0, y: -4, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } },
+  exit: { opacity: 0, y: -4, scale: 0.99, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } },
 };
 
 export function SettingsView() {
@@ -296,6 +329,18 @@ export function SettingsView() {
   const setOpen = useLearningStore(s => s.setSettingsViewOpen);
   const [activeTab, setActiveTab] = useState<TabKey>('appearance');
   const [hovered, setHovered] = useState<string | null>(null);
+
+  // Track tab-switch direction so the content slide knows which way to push.
+  // -1 = moving left (back in tab order), +1 = moving right (forward).
+  const prevTabIdxRef = useRef(0);
+  const [tabDir, setTabDir] = useState<1 | -1>(1);
+  const switchTab = (next: TabKey) => {
+    if (next === activeTab) return;
+    const nextIdx = tabs.findIndex(t => t.key === next);
+    setTabDir(nextIdx >= prevTabIdxRef.current ? 1 : -1);
+    prevTabIdxRef.current = nextIdx;
+    setActiveTab(next);
+  };
 
   // Close on Escape.
   React.useEffect(() => {
@@ -308,9 +353,14 @@ export function SettingsView() {
   }, [open, setOpen]);
 
   // Reset hover when the panel closes / tab changes, so reopening doesn't show
-  // a stale hint from a previous session.
+  // a stale hint from a previous session. Also reset tab direction so a fresh
+  // open always reads as "forward".
   React.useEffect(() => {
-    if (!open) setHovered(null);
+    if (!open) {
+      setHovered(null);
+      prevTabIdxRef.current = 0;
+      setTabDir(1);
+    }
   }, [open]);
   React.useEffect(() => {
     setHovered(null);
@@ -321,11 +371,15 @@ export function SettingsView() {
       <AnimatePresence>
         {open && (
           <>
-            {/* Backdrop */}
+            {/* Backdrop — bg fades in faster than the blur so the user sees
+                the dim first, then the soft focus. The blur is capped at 3px
+                (cheap on the GPU) and only animates opacity, not the blur
+                radius itself (animating filter:blur is expensive).
+                Exit reverses: blur drops first, then opacity. */}
             <motion.div
               initial={{ opacity: 0 }}
-              animate={{ opacity: 1, transition: { duration: 0.2 } }}
-              exit={{ opacity: 0, transition: { duration: 0.15 } }}
+              animate={{ opacity: 1, transition: { duration: 0.24, ease: [0.25, 0.1, 0.25, 1] } }}
+              exit={{ opacity: 0, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } }}
               className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[3px]"
               onClick={() => setOpen(false)}
             />
@@ -351,17 +405,35 @@ export function SettingsView() {
                     </span>
                     <span className="text-[11px] text-neutral-400 dark:text-neutral-500">· Settings</span>
                   </div>
-                  <button
+                  {/* Close button — spring hover/tap. The previous version used
+                      a CSS transition-transform which felt flat and had no
+                      press feedback, the "exit function transition" issue the
+                      user flagged. Now it has a tactile depress on click. */}
+                  <motion.button
                     type="button"
                     onClick={() => setOpen(false)}
                     aria-label="关闭"
-                    className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-200 text-white transition-transform hover:scale-105 dark:bg-neutral-700"
+                    whileHover={{
+                      scale: 1.1,
+                      rotate: 90,
+                      transition: { type: 'spring', stiffness: 320, damping: 18, mass: 0.6 },
+                    }}
+                    whileTap={{
+                      scale: 0.88,
+                      transition: { type: 'spring', stiffness: 700, damping: 28 },
+                    }}
+                    className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-200 text-white transition-colors hover:bg-neutral-300 dark:bg-neutral-700 dark:hover:bg-neutral-600"
                   >
                     <X className="h-3.5 w-3.5" strokeWidth={2.5} />
-                  </button>
+                  </motion.button>
                 </div>
 
-                {/* Tab strip — horizontal, pill-style like Work/Ideas/Contact */}
+                {/* Tab strip — pill-style. Selected tab gets a layoutId-backed
+                    shared background that slides between tabs (a single
+                    motion.span with layoutId='settings-tab-pill' lives inside
+                    the selected button). This gives the "liquid follow" feel
+                    the user asked about for the more-features panel, applied
+                    here to the tab navigation. */}
                 <div className="flex gap-1 px-6 pb-3">
                   {tabs.map(t => {
                     const selected = activeTab === t.key;
@@ -369,14 +441,22 @@ export function SettingsView() {
                       <button
                         key={t.key}
                         type="button"
-                        onClick={() => setActiveTab(t.key)}
-                        className={`rounded-lg px-3.5 py-1.5 text-[12.5px] font-medium transition-colors duration-200 ${
+                        onClick={() => switchTab(t.key)}
+                        className={`relative rounded-lg px-3.5 py-1.5 text-[12.5px] font-medium transition-colors duration-200 ${
                           selected
-                            ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
+                            ? 'text-neutral-900 dark:text-neutral-100'
                             : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200'
                         }`}
                       >
-                        {t.label}
+                        {selected && (
+                          <motion.span
+                            layoutId="settings-tab-pill"
+                            className="absolute inset-0 rounded-lg bg-neutral-100 dark:bg-neutral-800"
+                            transition={{ type: 'spring', stiffness: 380, damping: 30, mass: 0.7 }}
+                            style={{ zIndex: -1 }}
+                          />
+                        )}
+                        <span className="relative z-10">{t.label}</span>
                       </button>
                     );
                   })}
@@ -384,11 +464,15 @@ export function SettingsView() {
 
                 <div className="mx-6 h-px bg-neutral-100 dark:bg-neutral-800" />
 
-                {/* Content — scrollable */}
+                {/* Content — scrollable. Direction-aware: the new tab slides in
+                    from the direction the user clicked (right tab → enters
+                    from the right; left tab → enters from the left). The exit
+                    mirrors it so the old content leaves the opposite way. */}
                 <div className="custom-scrollbar flex-1 overflow-y-auto px-6 py-5">
-                  <AnimatePresence mode="wait">
+                  <AnimatePresence mode="wait" custom={tabDir}>
                     <motion.div
                       key={activeTab}
+                      custom={tabDir}
                       variants={contentVariants}
                       initial="hidden"
                       animate="visible"

@@ -138,8 +138,9 @@ export function CardReviewMode() {
                 <div className="h-2 flex-1 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
                   <motion.div
                     className={`h-full rounded-full ${row.accent}`}
-                    initial={{ width: 0 }}
-                    animate={{ width: `${pct}%` }}
+                    style={{ transformOrigin: 'left' }}
+                    initial={{ scaleX: 0 }}
+                    animate={{ scaleX: Math.max(0, Math.min(1, pct / 100)) }}
                     transition={{ type: 'spring', stiffness: 200, damping: 28, mass: 1 }}
                   />
                 </div>
@@ -185,8 +186,9 @@ export function CardReviewMode() {
             <div className="h-[2px] w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
               <motion.div
                 className="h-full rounded-full bg-neutral-700 dark:bg-neutral-200"
+                style={{ transformOrigin: 'left' }}
                 initial={false}
-                animate={{ width: `${progressPct}%` }}
+                animate={{ scaleX: Math.max(0, Math.min(1, progressPct / 100)) }}
                 transition={{ type: 'spring', stiffness: 200, damping: 28, mass: 1 }}
               />
             </div>

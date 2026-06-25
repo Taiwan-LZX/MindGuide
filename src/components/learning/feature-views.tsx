@@ -36,40 +36,48 @@ import { formatInterval } from '@/lib/sm2';
 
 // ─── Animation Variants ─────────────────────────────────────────────────────
 //
-// Tactile ("手感") tuning for interface switching:
-//  - Entry uses a soft spring (stiffness 240, damping 28, mass 0.9) so the
-//    view "settles" into place rather than snapping — gives the user a
-//    perceptible sense of motion ("过渡感") instead of a 300ms linear slide.
-//  - A tiny scale 0.985 → 1 adds depth (the view feels like it comes
-//    "toward" the user, not just slides sideways).
-//  - Exit is a 280ms ease-in with a small leftward x + scale-down so the
-//    previous view "leaves the desk" — long enough to register but short
-//    enough not to block the new view.
-//  - Combined with `mode="wait"` on AnimatePresence, the total perceptible
-//    transition is ~0.6s, which reads as deliberate.
-
+// Personality: "journey" — interface switching carries directional intent.
+// The user either *enters* a feature (forward, from welcome) or *returns* from
+// one (backward, to welcome). The motion respects that direction so the
+// spatial metaphor holds: forward = pushed from the right (depth entry),
+// backward = pushed from the left (depth return).
+//
+// Differentiation vs. other surfaces:
+//  · Quick menu (command): 380/30/0.6 — snappy utility, no depth cue.
+//  · More features (discovery): 280/26/0.9 — soft, overshoot ~2%, ~520ms.
+//  · Settings (ceremony): 200/24/1.0 — heavy, ~700ms, deliberate.
+//  · Feature page (journey): 220/26/0.9 — purposeful, ~620ms, with a clear
+//    directional x push + a tiny scale (0.97 → 1) that reads as depth.
+//
+// `custom` is the direction: +1 = forward (entering a feature), -1 = backward
+// (returning to welcome). The exit mirrors the entry direction so the old
+// view leaves the opposite way.
 const pageVariants = {
-  hidden: { opacity: 0, x: 24, scale: 0.985 },
+  hidden: (dir: number) => ({
+    opacity: 0,
+    x: 28 * dir,
+    scale: 0.97,
+  }),
   visible: {
     opacity: 1,
     x: 0,
     scale: 1,
     transition: {
       type: 'spring',
-      stiffness: 240,
-      damping: 28,
+      stiffness: 220,
+      damping: 26,
       mass: 0.9,
     },
   },
-  exit: {
+  exit: (dir: number) => ({
     opacity: 0,
-    x: -16,
-    scale: 0.99,
+    x: -22 * dir,
+    scale: 0.98,
     transition: {
-      duration: 0.28,
+      duration: 0.3,
       ease: [0.4, 0, 1, 1],
     },
-  },
+  }),
 };
 
 const itemVariants = {
@@ -88,16 +96,32 @@ const itemVariants = {
 };
 
 // ─── Feature View Router ─────────────────────────────────────────────────────
+// Tracks the previous activeFeatureView in a ref so we can compute the
+// transition direction: forward (null → feature, or feature → different
+// feature) = +1; backward (feature → null) = -1. The direction is passed as
+// `custom` to pageVariants so the entry/exit x-push matches user intent.
 
 export function FeatureView() {
   const { activeFeatureView } = useLearningStore();
   const scrollRef = React.useRef<HTMLDivElement>(null);
+  const prevViewRef = React.useRef<string | null>(null);
+  const [dir, setDir] = React.useState<1 | -1>(1);
+
+  React.useEffect(() => {
+    const prev = prevViewRef.current;
+    // Forward: entering a feature from welcome, or switching features.
+    // Backward: returning to welcome from a feature.
+    const nextDir = prev !== null && activeFeatureView === null ? -1 : 1;
+    setDir(nextDir);
+    prevViewRef.current = activeFeatureView;
+  }, [activeFeatureView]);
 
   return (
-    <AnimatePresence mode="wait">
+    <AnimatePresence mode="wait" custom={dir}>
       {activeFeatureView && (
         <motion.div
           key={activeFeatureView}
+          custom={dir}
           variants={pageVariants}
           initial="hidden"
           animate="visible"
@@ -319,10 +343,14 @@ function TaskPlannerView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElem
               animate={{ opacity: 1 }}
               transition={{ delay: 0.2 }}
             >
+              {/* Progress fill uses transform: scaleX (composited) instead of
+                  width: % (which triggers layout). transformOrigin: left so
+                  the bar grows from the left edge. scaleX takes a 0-1 value. */}
               <motion.div
                 className="h-full rounded-full bg-neutral-900 dark:bg-white"
-                initial={{ width: 0 }}
-                animate={{ width: `${pct}%` }}
+                style={{ transformOrigin: 'left' }}
+                initial={{ scaleX: 0 }}
+                animate={{ scaleX: Math.max(0, Math.min(1, pct / 100)) }}
                 transition={{ type: 'spring', stiffness: 300, damping: 25 }}
               />
             </motion.div>
@@ -804,8 +832,9 @@ function AchievementsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEle
                           <div className="h-1.5 w-20 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
                             <motion.div
                               className="h-full rounded-full bg-neutral-700 dark:bg-neutral-300"
-                              initial={{ width: 0 }}
-                              animate={{ width: `${pct}%` }}
+                              style={{ transformOrigin: 'left' }}
+                              initial={{ scaleX: 0 }}
+                              animate={{ scaleX: Math.max(0, Math.min(1, pct / 100)) }}
                               transition={{ delay: 0.3, duration: 0.6, ease: 'easeOut' }}
                             />
                           </div>
@@ -892,8 +921,9 @@ function ReviewBar({
       <div className="h-1.5 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
         <motion.div
           className={`h-full rounded-full ${toneClass}`}
-          initial={{ width: 0 }}
-          animate={{ width: `${pct}%` }}
+          style={{ transformOrigin: 'left' }}
+          initial={{ scaleX: 0 }}
+          animate={{ scaleX: Math.max(0, Math.min(1, pct / 100)) }}
           transition={{ duration: 0.7, ease: [0.25, 0.1, 0.25, 1] }}
         />
       </div>

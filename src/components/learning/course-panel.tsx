@@ -20,17 +20,37 @@ import { InlineSpinner, LoadingSkeleton, LoadingOverlay } from '@/components/lea
 const spring = { type: 'spring' as const, stiffness: 320, damping: 28, mass: 0.8 };
 
 // ─── Animation Variants ─────────────────────────────────────────────────────
+//
+// Personality: "reveal" — the course panel is a sidebar that opens from the
+// right side of the chat surface. It should feel like a drawer sliding in
+// from the right (x:24 → 0) rather than a generic scale+fade. On close it
+// slides back right (x:24 + opacity 0) so the exit reads as "putting the
+// drawer away" — the exit-transition polish the user flagged.
+//
+// Differentiation vs. other panels:
+//  · Quick menu (command): top-right dropdown, snappy 380/30/0.6.
+//  · More features (discovery): bottom-left popover, soft 280/26/0.9.
+//  · Settings (ceremony): centered modal, heavy 200/24/1.0.
+//  · Course (reveal): right-side drawer, lateral 300/28/0.85, x-push not y.
 
-/** Panel entrance: scale + fade from behind (floating card feel) */
+/** Panel entrance: lateral slide-in from the right + soft scale. */
 const panelVariants = {
-  hidden: { opacity: 0, scale: 0.95, y: 12 },
+  hidden: { opacity: 0, scale: 0.97, x: 24 },
   visible: {
     opacity: 1,
     scale: 1,
-    y: 0,
-    transition: { ...spring },
+    x: 0,
+    transition: { type: 'spring', stiffness: 300, damping: 28, mass: 0.85 },
   },
-  exit: { opacity: 0, scale: 0.97, y: 6, transition: { duration: 0.24, ease: [0.4, 0, 1, 1] } },
+  // Exit slides back toward the right edge (where the drawer came from).
+  // transformOrigin: 'right' set inline on the panel so scale-down also
+  // recedes rightward — the two cues agree directionally.
+  exit: {
+    opacity: 0,
+    scale: 0.96,
+    x: 24,
+    transition: { duration: 0.26, ease: [0.4, 0, 1, 1] },
+  },
 };
 
 const moduleContainerVariants = {
@@ -205,7 +225,7 @@ export function CoursePanel() {
           animate="visible"
           exit="exit"
           className="relative flex h-full w-[380px] shrink-0 flex-col m-2 rounded-2xl bg-white shadow-lg shadow-neutral-200/50 dark:bg-neutral-900/95 dark:shadow-black/20"
-          style={{ maxHeight: 'calc(100% - 16px)' }}
+          style={{ maxHeight: 'calc(100% - 16px)', transformOrigin: 'right', willChange: 'transform, opacity' }}
         >
           {!isCourseGenerated ? (
             /* ── Not yet generated: prompt to generate ── */

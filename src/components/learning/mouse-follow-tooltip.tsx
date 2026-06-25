@@ -224,16 +224,24 @@ export function MouseFollowTooltip({
               <motion.div
                 ref={tipRef}
                 role="tooltip"
-                initial={{ opacity: 0 }}
+                // Start AT the target position (pos already computed in
+                // handleEnter before mount) but invisible. This way the appear
+                // is a pure in-place opacity fade — identical to the exit —
+                // instead of springing from (0,0) top-left across the screen
+                // (which reads as "flying in from outside"). Subsequent mouse
+                // movement still animates x/y via the spring below.
+                initial={{ opacity: 0, x: pos.x, y: pos.y }}
                 animate={{ opacity: 1, x: pos.x, y: pos.y }}
                 exit={{ opacity: 0 }}
                 transition={{
                   // Pure fade in/out — appear and disappear feel identical:
                   // a quiet opacity crossfade, no scale "pop".
                   opacity: { duration: 0.15, ease: [0.25, 0.1, 0.25, 1] },
-                  // Follow mode: liquid spring settles in ~90ms. Fixed mode:
-                  // position snaps instantly (duration 0) so only opacity
-                  // animates — zero wobble, pure crossfade.
+                  // Follow mode: liquid spring settles in ~90ms, no perceptible
+                  // lag but feels organic rather than rigidly glued to cursor.
+                  // On appear, x/y already equal pos (initial == animate value)
+                  // so the spring has zero delta and does nothing — no fly-in.
+                  // Fixed mode: position snaps instantly (duration 0).
                   ...(follow
                     ? {
                         x: { type: 'spring', stiffness: 600, damping: 36, mass: 0.6 },

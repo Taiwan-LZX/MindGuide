@@ -83,7 +83,6 @@ function FeatureRow({
   return (
     <MouseFollowTooltip
       maxWidth={240}
-      follow={false}
       content={
         <span className="block text-neutral-600 dark:text-neutral-300">
           {feature.description}

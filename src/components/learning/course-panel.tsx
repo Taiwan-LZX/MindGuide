@@ -117,7 +117,7 @@ function StatusIcon({ status }: { status: CourseLesson['status'] }) {
   switch (status) {
     case 'completed':
       return (
-        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-white dark:bg-white dark:text-neutral-900">
+        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] text-[var(--brand-foreground)]">
           <Check className="h-3 w-3" strokeWidth={3} />
         </div>
       );
@@ -221,8 +221,8 @@ export function CoursePanel() {
                   </h2>
                 </div>
                 <motion.button
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
+                  whileHover={{ scale: 1.06 }}
+                  whileTap={{ scale: 0.94 }}
                   onClick={() => setCoursePanelOpen(false)}
                   className="flex h-7 w-7 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   aria-label="关闭课程面板"
@@ -272,7 +272,7 @@ export function CoursePanel() {
                         whileTap={{ scale: 0.98 }}
                         onClick={generateCourse}
                         disabled={isGeneratingCourse}
-                        className="inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-5 py-2.5 text-[13px] font-medium text-white shadow-md shadow-neutral-900/20 transition-all hover:shadow-lg hover:shadow-neutral-900/25 disabled:opacity-60 dark:bg-white dark:text-neutral-900 dark:shadow-black/20 dark:hover:shadow-black/30"
+                        className="inline-flex items-center gap-2 rounded-xl bg-[var(--brand)] px-5 py-2.5 text-[13px] font-medium text-[var(--brand-foreground)] shadow-md shadow-black/10 transition-all hover:shadow-lg hover:shadow-black/15 disabled:opacity-60"
                       >
                         {isGeneratingCourse ? (
                           <>
@@ -303,7 +303,7 @@ export function CoursePanel() {
                             animate="visible"
                             className={`h-2 w-2 rounded-full transition-colors duration-300 ${
                               i < userMsgCount
-                                ? 'bg-neutral-900 dark:bg-white'
+                                ? 'bg-[var(--brand)]'
                                 : 'bg-neutral-200 dark:bg-neutral-700'
                             }`}
                           />
@@ -341,8 +341,8 @@ export function CoursePanel() {
                   </span>
                 </div>
                 <motion.button
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
+                  whileHover={{ scale: 1.06 }}
+                  whileTap={{ scale: 0.94 }}
                   onClick={() => setCoursePanelOpen(false)}
                   className="flex h-7 w-7 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   aria-label="关闭课程面板"
@@ -429,7 +429,7 @@ export function CoursePanel() {
                                           disabled={isLocked}
                                           className={`group flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left transition-all duration-150 ${
                                             isActive
-                                              ? 'bg-neutral-100/80 shadow-sm shadow-neutral-200/20 dark:bg-neutral-700/50 dark:shadow-black/10 border-l-2 border-neutral-900 dark:border-neutral-200'
+                                              ? 'bg-neutral-100/80 shadow-sm shadow-neutral-200/20 dark:bg-neutral-700/50 dark:shadow-black/10 border-l-2 border-[var(--brand)]'
                                               : isLocked
                                               ? 'cursor-not-allowed opacity-40'
                                               : 'hover:bg-neutral-50/80 dark:hover:bg-neutral-700/30'

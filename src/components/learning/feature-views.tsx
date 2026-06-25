@@ -101,25 +101,30 @@ function FeatureHeader({ title, icon: Icon, color }: { title: string; icon: Reac
   const sectionNo = activeFeatureView ? FEATURE_SECTION_NUMBER[activeFeatureView] ?? '' : '';
 
   return (
-    <div className="flex h-14 shrink-0 items-center gap-3 border-b border-neutral-200 px-6 dark:border-neutral-800">
-      <motion.button
-        whileHover={{ scale: 1.06 }}
-        whileTap={{ scale: 0.94 }}
-        onClick={() => setActiveFeatureView(null)}
-        className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
-        aria-label="返回"
-      >
-        <ArrowLeft className="h-4 w-4" />
-      </motion.button>
-      <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${color}`}>
-        <Icon className="h-3.5 w-3.5" />
+    <div className="flex h-14 shrink-0 items-center border-b border-neutral-200 dark:border-neutral-800">
+      {/* Inner row constrained to the same max-width as the content below, so
+          the back button + title left edge aligns perfectly with the content's
+          left edge (no stair-step when the viewport is wider than 600px). */}
+      <div className="mx-auto flex w-full max-w-[600px] items-center gap-3 px-6">
+        <motion.button
+          whileHover={{ scale: 1.06 }}
+          whileTap={{ scale: 0.94 }}
+          onClick={() => setActiveFeatureView(null)}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+          aria-label="返回"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </motion.button>
+        <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${color}`}>
+          <Icon className="h-3.5 w-3.5" />
+        </div>
+        {sectionNo && (
+          <span className="font-serif text-[11px] tabular-nums text-neutral-400 dark:text-neutral-500">
+            §{sectionNo}
+          </span>
+        )}
+        <h1 className="font-serif text-[16px] font-medium text-neutral-900 dark:text-neutral-100">{title}</h1>
       </div>
-      {sectionNo && (
-        <span className="font-serif text-[11px] tabular-nums text-neutral-400 dark:text-neutral-500">
-          §{sectionNo}
-        </span>
-      )}
-      <h1 className="font-serif text-[16px] font-medium text-neutral-900 dark:text-neutral-100">{title}</h1>
     </div>
   );
 }

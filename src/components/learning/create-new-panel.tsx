@@ -97,35 +97,21 @@ function FeatureRow({
         onClick={onClick}
         className="group relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left"
       >
-      {/* Soft highlight layer — fades + scales in on hover, spring for smooth follow */}
-      <motion.span
+      {/* Soft highlight layer — fades in on hover via group-hover (the motion
+          whileHover on a pointer-events-none span never fires, so CSS is the
+          correct mechanism here). */}
+      <span
         aria-hidden
-        className="pointer-events-none absolute inset-0 rounded-lg bg-neutral-100 dark:bg-neutral-800/70"
-        initial={false}
-        animate={{ opacity: 0 }}
-        whileHover={{ opacity: 1 }}
-        transition={{ duration: 0.18, ease: [0.25, 0.1, 0.25, 1] }}
-        // Subtle scale gives a "settling" feel instead of a hard rectangle appearing
-        variants={{ hover: { scale: 1 }, rest: { scale: 0.985 } }}
+        className="pointer-events-none absolute inset-0 rounded-lg bg-neutral-100 opacity-0 transition-opacity duration-200 group-hover:opacity-100 dark:bg-neutral-800/70"
       />
       {/* Left accent line — appears on hover for a refined "selected" cue */}
-      <motion.span
+      <span
         aria-hidden
-        className="pointer-events-none absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-neutral-400 dark:bg-neutral-500"
-        initial={false}
-        animate={{ opacity: 0, scaleY: 0.4 }}
-        whileHover={{ opacity: 1, scaleY: 1 }}
-        transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+        className="pointer-events-none absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 origin-center scale-y-50 rounded-full bg-neutral-400 opacity-0 transition-all duration-200 group-hover:scale-y-100 group-hover:opacity-100 dark:bg-neutral-500"
       />
 
-      {/* Icon — gentle slide-right + color shift on hover */}
-      <motion.div
-        className="relative z-10"
-        whileHover={{ x: 1 }}
-        transition={{ type: 'spring', stiffness: 400, damping: 26 }}
-      >
-        <feature.icon className="h-4 w-4 shrink-0 text-neutral-400 transition-colors duration-200 group-hover:text-neutral-700 dark:group-hover:text-neutral-200" />
-      </motion.div>
+      {/* Icon — gentle color shift on hover */}
+      <feature.icon className="relative z-10 h-4 w-4 shrink-0 text-neutral-400 transition-colors duration-200 group-hover:text-neutral-700 dark:group-hover:text-neutral-200" />
 
       {/* Label — color lifts toward ink on hover */}
       <span className="relative z-10 flex-1 text-[13px] font-medium text-neutral-600 transition-colors duration-200 group-hover:text-neutral-900 dark:text-neutral-300 dark:group-hover:text-neutral-50">
@@ -134,14 +120,8 @@ function FeatureRow({
 
       <KbdHint keys={['⌘', feature.shortcut]} />
 
-      {/* Chevron — nudges right with spring */}
-      <motion.span
-        className="relative z-10"
-        whileHover={{ x: 2 }}
-        transition={{ type: 'spring', stiffness: 400, damping: 22 }}
-      >
-        <ChevronRight className="h-3.5 w-3.5 text-neutral-300 transition-colors duration-200 group-hover:text-neutral-500 dark:text-neutral-600 dark:group-hover:text-neutral-400" />
-      </motion.span>
+      {/* Chevron — nudges right on hover via group-hover */}
+      <ChevronRight className="relative z-10 h-3.5 w-3.5 text-neutral-300 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-neutral-500 dark:text-neutral-600 dark:group-hover:text-neutral-400" />
     </motion.button>
     </MouseFollowTooltip>
   );
@@ -204,7 +184,7 @@ export function MoreFeaturesPanel() {
           initial="hidden"
           animate="visible"
           exit="exit"
-          className="fixed bottom-3 left-3 z-[60] w-60 overflow-hidden rounded-xl border border-black/5 bg-white/95 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-neutral-900/95"
+          className="fixed bottom-3 left-3 z-[60] w-60 overflow-hidden rounded-xl border border-neutral-200/80 bg-white/95 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.18),0_2px_8px_-4px_rgba(0,0,0,0.1)] backdrop-blur-md dark:border-neutral-700/60 dark:bg-neutral-900/95 dark:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.5),0_2px_8px_-4px_rgba(0,0,0,0.4)]"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-3 py-2.5">
@@ -213,7 +193,7 @@ export function MoreFeaturesPanel() {
             </h2>
             <button
               onClick={() => setCreateNewPanelOpen(false)}
-              className="flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+              className="flex h-6 w-6 items-center justify-center rounded-md text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
               aria-label="关闭"
             >
               <X className="h-3.5 w-3.5" strokeWidth={2} />

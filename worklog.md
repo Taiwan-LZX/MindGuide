@@ -359,3 +359,107 @@ GET /api/sessions/[id]/messages 200 in 55ms  (re-fetch after AI response)
 - `src/components/learning/create-new-panel.tsx` — FeatureRow 包裹提示框，传入面板边界
 - `src/components/learning/sidebar.tsx` — 触发按钮 + 折叠侧边栏图标包裹提示框，移除原生 title
 - `src/components/learning/main-content.tsx` — 补全滚动到底部按钮接线 + ArrowDown 导入
+
+---
+
+## 第五轮迭代 — Cron webDevReview：Bug 修复 + ⌘K 命令面板 + 消息悬停细化 (自动评审驱动)
+
+### 触发与判断
+本轮为定时 webDevReview 自动触发。按规则：
+1. 读取 worklog.md 了解前 4 轮进展
+2. 用 agent-browser 对所有视图做端到端 QA
+3. 修 bug 优先，其次新增功能与样式细节
+
+### QA 发现的问题
+
+**QA 1（Bug）：打开功能视图后点击侧边栏会话无法返回聊天**
+- 复现：进入「更多功能 → 学习笔记」后，点击侧边栏任意会话行 → 页面仍停留在笔记视图，不返回聊天
+- 根因：`selectSession` 在 store 中未重置 `activeFeatureView`，而 `page.tsx` 的渲染条件是 `activeFeatureView ? <FeatureView /> : <MainContent />`，导致功能视图"卡住"
+- 影响：用户一旦进入任何功能视图（笔记/统计/成就/图谱/卡片/任务），就只能再次点开「更多功能」才能切回聊天，严重破坏导航
+
+**QA 2（样式缺陷）：AI 偶发输出 emoji（💡），系统提示词不足以约束**
+- 复现：发送「什么是梯度下降」→ AI 回复包含 💡
+- 根因：系统提示词虽然要求"不要使用 emoji"，但模型偶发违反；且历史消息中的 emoji 仍会显示
+- 影响：破坏论文风学术单色美学
+
+### 已完成的修改
+
+**1. 修复 selectSession 卡视图 Bug (`store/learning-store.ts`)**
+- 在 `selectSession` 的 `set({...})` 中增加 `activeFeatureView: null`
+- 效果：点击侧边栏会话行后，必定返回聊天界面（无论之前在哪个功能视图）
+- 验证：agent-browser 进入笔记视图 → 点击会话 → h1 变为「机器学习基础」、聊天 textarea 出现 ✅
+
+**2. 新建 emoji 清洗器 (`src/lib/emoji-sanitize.ts`)**
+- `stripEmoji(input)` 函数，三层处理：
+  - `\p{Extended_Pictographic}` + Regional Indicator（国旗）→ 移除所有图形 emoji（😀🎉🔥💡🧠⚡🎓🏆📚）
+  - 显式装饰符号区间 → 移除 Dingbats（✨✓✔✗★☆）、Misc Symbols（☀☁☂☃）、Arrows（←↑→↓⇒）、Black Arrows（⬅⬆⬇）、Variation Selector、ZWJ、Keycap combining
+  - `tidy()` → 折叠多余空格、修正标点前空格、删除空列表项、修剪行尾
+- 保留有意义的排版符号：`.,;:!?[](){}-–—·•...` 等
+- 单元测试（独立 node 脚本）：`"之前，💡想先"` → `"之前，想先"` ✅
+
+**3. 双重清洗策略：服务端 + 客户端 (`api/chat/route.ts` + `store/learning-store.ts`)**
+- 服务端流式：累积 `fullContent` 后，`stripEmoji(fullContent)` 作为 `sanitizedAccum` 重发，附带 `full: true` 标志（客户端识别为"全量替换"而非"增量追加"）
+- 服务端持久化：`finally` 块中再 `stripEmoji` 一次后写入 DB（保证历史记录干净）
+- 服务端 fallback（非流式分支）：`stripEmoji(completion.content)` 后返回
+- 客户端流式：解析时若 `parsed.full` 则替换 `fullContent`，否则追加；之后 `set({ streamingContent: stripEmoji(fullContent) })`
+- 客户端历史：`fetchMessages` 对 `role === 'assistant'` 的消息逐条 `stripEmoji`，用户消息不动
+- 系统提示词加强：「不要使用 emoji 或装饰性符号（如 ✨🎉🔥💡✓★●→ 等）...所有强调一律用**加粗**或自然语言完成，不允许任何图形符号」
+- 验证：直接 curl `/api/chat` 看到 SSE 数据均无 emoji；agent-browser 发送「用一句话解释什么是神经网络」→ 最新 AI 回复 DOM 文本无任何 emoji ✅
+
+**4. 新功能：⌘K 命令面板 (`src/components/learning/command-palette.tsx`)**
+- 全局快捷键 ⌘K / Ctrl+K 打开，Esc 关闭（与既有 ⌘1-6 互不冲突）
+- 输入框 + 分组结果列表 + 底部快捷键提示栏（↑↓ 导航 · ↩ 选中）
+- 三大命令组：
+  - **会话**：动态从 `sessions` 派生，按标题/topic 模糊匹配，点击跳转（前 6 条）
+  - **导航**：返回对话 / 查看主题列表
+  - **功能**：6 个功能视图（任务/卡片/成就/统计/图谱/笔记）镜像「更多功能」面板
+  - **操作**：打开功能面板 / 显示设置 / 切换深浅主题 / 折叠展开侧边栏
+- 键盘导航：↑↓ 移动高亮、Enter 执行、mousemove 同步高亮、scrollIntoView 自动滚动
+- 搜索高亮：`<mark>` 标记匹配子串
+- 学术风样式：单色边框 + 中性背景 + 左侧细线高亮 + 衬线 footer 标识
+- SSR 安全：`useSyncExternalStore` / 无 setState-in-effect（lint 通过）
+- 发现性：侧边栏 UnifiedSearch 输入框右侧增加 `⌘K` kbd 提示（输入为空时显示）
+- 验证：⌘K 打开（15 项）→ 输入「成就」过滤到 1 项 → Enter 跳转成就视图 + 面板自动关闭 ✅；VLM 确认"单色学术风、分组列表、底部快捷键提示" ✅
+
+**5. 样式细化：消息悬停元信息 (`main-content.tsx` MsgBubble)**
+- 之前：仅 AI 消息有 `CopyAllButton`，无时间戳，悬停反馈弱
+- 现在：
+  - 每条消息（user + assistant）悬停时在气泡下方淡入元信息行：`HH:MM` 时间戳（tabular-nums）+ 「复制」按钮
+  - 复制按钮点击后切换为「✓ 已复制」1.4s 后恢复
+  - 气泡内增加左侧/右侧 1px 细 accent 线，悬停时从透明过渡到 `bg-neutral-400/40`（论文风"批注边线"提示）
+  - 用 `group/msg` 命名组隔离，避免与外层 `group` 冲突
+  - 移除 `CopyAllButton` 依赖，统一用本地 Copy 图标按钮
+- 验证：agent-browser hover 消息 → VLM 确认"气泡下方显示时间 + 复制按钮" ✅；点击复制 → DOM 出现「已复制」状态 ✅
+
+### 验证结果
+- `bun run lint` ✅ 零错误零警告
+- agent-browser + VLM 端到端：
+  - 6 个功能视图全部 CLEAN（无 emoji、无彩色、无破损布局）✅
+  - selectSession Bug 修复 ✅
+  - 命令面板打开/过滤/键盘导航/跳转 ✅
+  - 消息悬停元信息 + 复制功能 ✅
+  - 最新 AI 回复无 emoji ✅
+  - ⌘K 提示在侧边栏可见 ✅
+- dev.log 无运行时错误
+
+### 当前项目状态
+- Dev server 稳定运行 (PID 7381, port 3000)
+- 导航完整：侧边栏会话 + 「更多功能」面板 + ⌘K 命令面板 + 滚动到底部按钮 + 鼠标跟随提示框
+- 论文风一致性：emoji 清洗双重保障（服务端 + 客户端 + 历史），单色学术风贯穿
+- 真流式 SSE + 思考气泡 + 成就 toast + 键盘快捷键 + 命令面板 全部工作
+
+### 未解决问题 / 下一阶段建议
+1. **【中】课程持久化**：课程仅存内存，需补 Prisma 模型 `CourseModule` + `Lesson`
+2. **【中】UnifiedSearch 接入真实数据**：当前为 mockResults，可改为搜索真实会话/消息
+3. **【低】认证系统**：NextAuth.js v4
+4. **【低】daemonize.py watchdog**：端口健康检查 + 自动重启
+5. **【低】命令面板扩展**：可加「最近会话」分组、「清除所有会话」等危险操作（带确认）
+
+### 关键文件变更清单
+- `src/lib/emoji-sanitize.ts` — 新建：emoji/装饰符号清洗器
+- `src/app/api/chat/route.ts` — 服务端双重清洗 + `full:true` 协议 + 提示词加强
+- `src/store/learning-store.ts` — 修复 selectSession 卡视图 + 客户端流式/历史清洗
+- `src/components/learning/command-palette.tsx` — 新建：⌘K 命令面板
+- `src/components/learning/unified-search.tsx` — 增加 ⌘K kbd 提示
+- `src/components/learning/main-content.tsx` — MsgBubble 悬停元信息 + 复制按钮 + 左侧 accent 线
+- `src/app/page.tsx` — 挂载 <CommandPalette />

@@ -8,6 +8,7 @@ import { FeatureView } from '@/components/learning/feature-views';
 import { SettingsPanel } from '@/components/learning/display-panel';
 import { MoreFeaturesPanel } from '@/components/learning/create-new-panel';
 import { CoursePanel } from '@/components/learning/course-panel';
+import { CommandPalette } from '@/components/learning/command-palette';
 
 export default function Page() {
   const {
@@ -59,6 +60,9 @@ export default function Page() {
 
         {/* Settings Panel (modal) */}
         <SettingsPanel />
+
+        {/* Command Palette (⌘K) */}
+        <CommandPalette />
       </div>
     </div>
   );

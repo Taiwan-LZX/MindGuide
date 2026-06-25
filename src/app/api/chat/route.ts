@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import ZAI from 'z-ai-web-dev-sdk';
 import { db } from '@/lib/db';
+import { stripEmoji } from '@/lib/emoji-sanitize';
 
 // The core AI teaching system prompt
 const TEACHING_SYSTEM_PROMPT = `你是一位资深的教育者和学习导师，你的核心使命是通过对话式教学帮助学习者真正理解知识。
@@ -53,7 +54,7 @@ const TEACHING_SYSTEM_PROMPT = `你是一位资深的教育者和学习导师，
 
 ## 绝对不要做的事
 
-- 不要使用 emoji 或装饰性符号（如 ✨🎉🔥💡 等），保持克制的书面语风格
+- 不要使用 emoji 或装饰性符号（如 ✨🎉🔥💡✓★●→ 等），保持克制的书面语风格。所有强调一律用**加粗**或自然语言完成，不允许任何图形符号。
 - 不要给出长篇大论的总结
 - 不要像百科全书一样罗列知识点
 - 不要在没有理解学习者状态的情况下就开始"教学"
@@ -190,7 +191,7 @@ export async function POST(req: NextRequest) {
         messages: messageHistory,
         thinking: { type: 'disabled' },
       });
-      const aiContent: string = completion?.choices?.[0]?.message?.content || '';
+      const aiContent: string = stripEmoji(completion?.choices?.[0]?.message?.content || '');
       if (!aiContent) {
         return new Response(JSON.stringify({ error: 'Empty AI response' }), {
           status: 500,
@@ -233,20 +234,25 @@ export async function POST(req: NextRequest) {
             const pieces = parseUpstreamSse(chunkStr, bufferRef);
             for (const piece of pieces) {
               fullContent += piece;
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ content: piece })}\n\n`)
-              );
             }
+            // Re-emit the *sanitized* accumulated content as a single delta.
+            // We strip emoji server-side too so even raw SSE consumers see a
+            // monochrome stream; the client also strips as a belt-and-braces.
+            const sanitizedAccum = stripEmoji(fullContent);
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ content: sanitizedAccum, full: true })}\n\n`)
+            );
           }
           // Flush any trailing buffered event
           if (bufferRef.buf.trim()) {
             const tail = parseUpstreamSse('\n\n', bufferRef);
             for (const piece of tail) {
               fullContent += piece;
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ content: piece })}\n\n`)
-              );
             }
+            const sanitizedAccum = stripEmoji(fullContent);
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ content: sanitizedAccum, full: true })}\n\n`)
+            );
           }
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
         } catch (err) {
@@ -259,14 +265,17 @@ export async function POST(req: NextRequest) {
           );
         } finally {
           controller.close();
-          // Persist the accumulated AI message (only if we got something)
-          if (fullContent.trim().length > 0) {
+          // Persist the accumulated AI message (only if we got something).
+          // Sanitize once more before persisting so the stored historical
+          // content is guaranteed emoji-free.
+          const persistedContent = stripEmoji(fullContent);
+          if (persistedContent.trim().length > 0) {
             try {
               await db.learningMessage.create({
                 data: {
                   sessionId,
                   role: 'assistant',
-                  content: fullContent,
+                  content: persistedContent,
                   type: 'dialogue',
                 },
               });

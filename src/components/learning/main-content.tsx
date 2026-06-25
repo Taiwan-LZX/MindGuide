@@ -2,10 +2,10 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MoreVertical, BookOpen, GraduationCap, Send, Square, ArrowDown } from 'lucide-react';
+import { MoreVertical, BookOpen, GraduationCap, Send, Square, ArrowDown, Copy, Check } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 import { KnowledgeInline } from '@/components/learning/knowledge-inline';
-import { MarkdownRenderer, CopyAllButton } from '@/components/learning/markdown-renderer';
+import { MarkdownRenderer } from '@/components/learning/markdown-renderer';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -434,11 +434,24 @@ function SimpleChatInput({
 
 // ─── Message Bubble ──────────────────────────────────────────────────────────
 
+function timeFmt(d: string) {
+  const date = new Date(d);
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
 function MsgBubble({ msg }: { msg: { role: string; content: string; createdAt: string } }) {
   const isUser = msg.role === 'user';
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard?.writeText(msg.content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    }).catch(() => {});
+  }, [msg.content]);
 
   return (
-    <div className={`my-3 flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
+    <div className={`group/msg group flex items-end gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
       <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-medium ${
         isUser
           ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
@@ -446,21 +459,54 @@ function MsgBubble({ msg }: { msg: { role: string; content: string; createdAt: s
       }`}>
         {isUser ? '我' : 'AI'}
       </div>
-      <div className={`group relative min-w-0 max-w-[85%] rounded-xl px-3.5 py-2.5 text-[14px] leading-relaxed ${
-        isUser
-          ? 'rounded-tr-sm bg-neutral-900 text-neutral-100 dark:bg-white dark:text-neutral-900'
-          : 'rounded-tl-sm bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200'
-      }`}>
-        {isUser ? (
-          <p className="whitespace-pre-wrap">{msg.content}</p>
-        ) : (
-          <>
+
+      <div className={`flex min-w-0 max-w-[85%] flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+        <div className={`relative rounded-xl px-3.5 py-2.5 text-[14px] leading-relaxed transition-shadow duration-200 ${
+          isUser
+            ? 'rounded-tr-sm bg-neutral-900 text-neutral-100 dark:bg-white dark:text-neutral-900'
+            : 'rounded-tl-sm bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200'
+        }`}>
+          {/* Subtle left accent on hover — thesis-style margin annotation cue */}
+          <span
+            aria-hidden
+            className={`pointer-events-none absolute top-2 bottom-2 w-px bg-neutral-400/0 transition-colors duration-200 group-hover/msg:bg-neutral-400/40 ${
+              isUser ? 'right-0' : 'left-0'
+            }`}
+          />
+          {isUser ? (
+            <p className="whitespace-pre-wrap">{msg.content}</p>
+          ) : (
             <MarkdownRenderer content={msg.content} />
-            <div className="absolute -top-2 right-2 hidden group-hover:flex">
-              <CopyAllButton content={msg.content} />
-            </div>
-          </>
-        )}
+          )}
+        </div>
+
+        {/* Hover meta row: timestamp + copy */}
+        <div
+          className={`mt-1 flex items-center gap-2 px-1 opacity-0 transition-opacity duration-200 group-hover:opacity-100 ${
+            isUser ? 'flex-row-reverse' : 'flex-row'
+          }`}
+        >
+          <span className="font-sans text-[10px] tabular-nums text-neutral-400 dark:text-neutral-500">
+            {timeFmt(msg.createdAt)}
+          </span>
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1 font-sans text-[10px] text-neutral-400 transition-colors hover:text-neutral-700 dark:text-neutral-500 dark:hover:text-neutral-200"
+            aria-label="复制消息"
+          >
+            {copied ? (
+              <>
+                <Check className="h-3 w-3" />
+                已复制
+              </>
+            ) : (
+              <>
+                <Copy className="h-3 w-3" />
+                复制
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

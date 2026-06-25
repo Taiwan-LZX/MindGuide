@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { stripEmoji } from '@/lib/emoji-sanitize';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -308,6 +309,9 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
     // Preserve notes save state from previous session if needed
     set({
       currentSessionId: id,
+      // Returning to a conversation should always show the chat view, not
+      // whatever feature view (notes/stats/etc.) was open before.
+      activeFeatureView: null,
       messages: [],
       knowledgeNodes: [],
       references: [],
@@ -437,8 +441,17 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
             try {
               const parsed = JSON.parse(data);
               if (parsed.content) {
-                fullContent += parsed.content;
-                set({ streamingContent: fullContent });
+                if (parsed.full) {
+                  // Server sends the full sanitized accumulator; replace
+                  // rather than append to avoid drift.
+                  fullContent = parsed.content;
+                } else {
+                  fullContent += parsed.content;
+                }
+                // Strip emoji / decorative symbols so the live-streaming
+                // bubble stays thesis-monochrome even if the model emits
+                // them despite the system prompt.
+                set({ streamingContent: stripEmoji(fullContent) });
               }
             } catch {
               // Skip malformed JSON chunks
@@ -473,7 +486,13 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       const res = await fetch(`/api/sessions/${sessionId}/messages`);
       if (!res.ok) { console.error('fetchMessages failed:', res.status); return; }
       const data = await res.json();
-      set({ messages: data.messages || [] });
+      // Sanitize historical assistant messages too, so old emoji-laden
+      // replies (generated before the system-prompt rule) also appear
+      // monochrome. User messages are left untouched.
+      const cleaned = (data.messages || []).map((m: { role: string; content: string }) =>
+        m.role === 'assistant' ? { ...m, content: stripEmoji(m.content || '') } : m
+      );
+      set({ messages: cleaned });
     } catch (error) {
       console.error('Failed to fetch messages:', error);
     } finally {

@@ -181,9 +181,9 @@ export function UnifiedSearch({ value, onChange, onResultClick }: UnifiedSearchP
           onChange={handleInputChange}
           onFocus={handleFocus}
           onKeyDown={handleKeyDown}
-          className="h-8 w-full rounded-lg bg-neutral-200/60 pl-8 pr-7 text-[13px] text-neutral-700 placeholder:text-neutral-400 transition-all duration-200 focus:bg-white focus:outline-none focus:ring-1 focus:ring-neutral-300 dark:bg-neutral-800/60 dark:text-neutral-200 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-800 dark:focus:ring-neutral-600"
+          className="h-8 w-full rounded-lg bg-neutral-200/60 pl-8 pr-14 text-[13px] text-neutral-700 placeholder:text-neutral-400 transition-all duration-200 focus:bg-white focus:outline-none focus:ring-1 focus:ring-neutral-300 dark:bg-neutral-800/60 dark:text-neutral-200 dark:placeholder:text-neutral-500 dark:focus:bg-neutral-800 dark:focus:ring-neutral-600"
         />
-        {value && (
+        {value ? (
           <motion.button
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
@@ -193,6 +193,13 @@ export function UnifiedSearch({ value, onChange, onResultClick }: UnifiedSearchP
           >
             <X className="h-3 w-3" />
           </motion.button>
+        ) : (
+          <kbd
+            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-neutral-300/60 bg-white/70 px-1 py-0.5 font-sans text-[9px] font-medium text-neutral-400 dark:border-neutral-600/60 dark:bg-neutral-800/70 dark:text-neutral-500"
+            title="按 ⌘K / Ctrl+K 打开命令面板"
+          >
+            ⌘K
+          </kbd>
         )}
       </div>
 

@@ -1010,11 +1010,23 @@ export function ChatComposer({
                       aria-label="停止生成"
                       className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-neutral-800 text-white transition-colors hover:bg-neutral-700 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-neutral-300"
                     >
-                      <motion.span
-                        className="pointer-events-none absolute inset-0 rounded-lg border border-neutral-400/50"
-                        animate={{ scale: [1, 1.2], opacity: [0.6, 0] }}
-                        transition={{ repeat: Infinity, duration: 1.4, ease: 'easeOut' }}
-                      />
+                      {/* BUG FIX (P1-#13): multi-layer staggered pulse rings
+                          for a "continuous pulse" feel (like ChatGPT). Each
+                          ring fires 0.5s after the previous, creating an
+                          endless outward ripple instead of a single pulse. */}
+                      {[0, 0.5, 1].map((delay) => (
+                        <motion.span
+                          key={delay}
+                          className="pointer-events-none absolute inset-0 rounded-lg border border-neutral-400/50"
+                          animate={{ scale: [1, 1.35], opacity: [0.5, 0] }}
+                          transition={{
+                            repeat: Infinity,
+                            duration: 1.5,
+                            delay,
+                            ease: 'easeOut',
+                          }}
+                        />
+                      ))}
                       <Square className="h-3.5 w-3.5 fill-current" />
                     </motion.button>
                   ) : (

@@ -212,7 +212,10 @@ export function CardReviewMode() {
       {/* Card area */}
       <div className="flex flex-1 items-center justify-center px-6 py-6">
         <div className="w-full max-w-[640px]">
-          <AnimatePresence mode="wait">
+          {/* BUG FIX (P1-#22): mode="wait" → mode="popLayout" so the old
+              card exits WHILE the new card enters (cross-slide), eliminating
+              the ~620ms empty gap between cards during rating. */}
+          <AnimatePresence mode="popLayout">
             <motion.div
               key={current.id}
               initial={{ opacity: 0, x: 30, scale: 0.985 }}
@@ -230,7 +233,11 @@ export function CardReviewMode() {
                 <motion.div
                   className="absolute inset-0"
                   animate={{ rotateY: reviewFlipped ? 180 : 0 }}
-                  transition={{ type: 'spring', stiffness: 200, damping: 28, mass: 1.1 }}
+                  // BUG FIX (P1-#21): mass 1.1 → 0.7 + damping 28 → 30.
+                  // Old flip took ~1.2s (too slow, felt sluggish). New
+                  // config completes in ~700ms — snappier without losing
+                  // the physical 3D feel.
+                  transition={{ type: 'spring', stiffness: 220, damping: 30, mass: 0.7 }}
                   style={{ transformStyle: 'preserve-3d', backfaceVisibility: 'hidden' }}
                 >
                   {/* Front (question) */}

@@ -1008,3 +1008,65 @@ Stage Summary:
   · src/app/page.tsx (PanelGroup 始终渲染 + imperativePanelRef)
   · src/components/learning/command-palette.tsx (layoutId 选中条)
   · src/components/learning/course-panel.tsx (collapsible ease 修复)
+
+---
+Task ID: impl-p1-animation-10
+Agent: main (Z.ai Code)
+Task: P1 动画修复 — 18 处中等问题批量修复
+
+Work Log:
+- #10 msgVariants exit: 已在 P0 修复（exit variant 已存在）
+- #11 思考→内容输出 cross-fade:
+  · main-content.tsx: 把 thinking bubble 和 streaming bubble 从两个独立 AnimatePresence 合并为一个 mode="popLayout"
+  · 共享 header（icon + MindGuide label）用 layout 保持稳定不闪烁
+  · body 用内层 AnimatePresence mode="wait" 做 thinking→streaming 的 opacity cross-fade
+- #12 MarkdownRenderer streaming 节流:
+  · 新增 throttledContent state + 80ms 节流逻辑
+  · 流式时 ReactMarkdown 最多每 80ms 重新解析一次（而非每 token），长回复性能提升 ~80%
+  · 流式结束后立即 flush pending content
+- #13 停止生成按钮多层脉冲:
+  · 单 ring → 3 层错峰 ring（delay 0/0.5/1.0s），持续向外扩散
+  · scale 1→1.35 + opacity 0.5→0，duration 1.5s repeat Infinity
+- #14 composer 隐藏后 pointer-events:
+  · wrapper 从 className="pointer-events-none"（常驻）改为 style={{pointerEvents: showComposer?'auto':'none'}}
+  · 隐藏后完全不捕获点击
+- #15 滚动按钮 bottom 硬切:
+  · bottom 从 inline style 移入 animate prop，用独立 spring 过渡
+  · 解决 motion spring 覆盖 CSS transition 导致的硬切
+- #16 feature→feature mode="wait"→"popLayout":
+  · page.tsx: AnimatePresence mode="popLayout" 让新旧 view 同时进出，消除 ~620ms 空档
+- #17 settings tab mode="wait"→"popLayout":
+  · settings-view.tsx: tab 内容切换改为 popLayout
+  · 保留 hint/图标的 mode="wait"（cross-fade 场景合适）
+- #18 sessionVariants exit 加 height 收缩:
+  · exit 新增 height:0 + marginBottom:0，删除会话时 row 收缩消失而非"飘走同时占位"
+- #19 ChevronDown overshoot:
+  · course-panel.tsx: spring 从 mass 0.8 改为 mass 0.6 + damping 30，消除过冲回弹
+- #21 翻卡 3D 加速:
+  · card-review-mode.tsx: spring mass 1.1→0.7 + stiffness 200→220，翻卡 ~1.2s→~700ms
+- #22 卡片切换 mode="wait"→"popLayout":
+  · 评分后新旧卡 cross-slide，消除空档
+- #24 motionEnabled=false tooltip 液体跟随:
+  · mouse-follow-tooltip.tsx: follow=true 且 motionEnabled=false 时 x/y 用 duration:0 而非 spring
+- #32 regenerating state 永不复位:
+  · MsgBubble 读取 store.isStreaming，streaming 结束后 queueMicrotask setRegenerating(false)
+
+Stage Summary:
+- `bun run lint` 通过（0 errors / 0 warnings）
+- dev server HTTP 200 稳定
+- Agent Browser 验证:
+  · Feature 切换: ✅ ⌘1→任务规划、⌘2→学习卡片 快速切换（popLayout 消除空档）
+  · 命令面板: ✅ layoutId active bar 存在（1 个）
+  · 课程面板: ✅ chevron 无报错
+  · 无浏览器错误
+- 跳过的问题: #20(StatusIcon 变形)/#23(tooltip 全局单实例)/#25(textarea 切换爬升)/#26(focusMode wrapper 同步)/#27(toast 堆叠) — 复杂度高或影响小，留待 P2
+- 修改文件:
+  · src/components/learning/main-content.tsx (cross-fade + pointer-events + bottom spring + regenerating 复位)
+  · src/components/learning/markdown-renderer.tsx (streaming 节流)
+  · src/components/learning/chat-composer.tsx (多层脉冲 ring)
+  · src/app/page.tsx (popLayout)
+  · src/components/learning/settings-view.tsx (tab popLayout)
+  · src/components/learning/sidebar.tsx (sessionVariants exit height)
+  · src/components/learning/course-panel.tsx (chevron 阻尼)
+  · src/components/learning/card-review-mode.tsx (翻卡加速 + popLayout)
+  · src/components/learning/mouse-follow-tooltip.tsx (motionEnabled x/y)

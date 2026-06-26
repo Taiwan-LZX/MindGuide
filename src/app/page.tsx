@@ -304,8 +304,13 @@ function MainAreaContent({
       className="relative flex h-full flex-1 flex-col overflow-hidden"
       data-focus-mode={focusMode ? 'on' : 'off'}
     >
-      {/* ── Page-level view transition ──────────────────────────────────── */}
-      <AnimatePresence mode="wait" custom={activeFeatureViewDir}>
+      {/* ── Page-level view transition ────────────────────────────────────
+          BUG FIX (P1-#16): changed mode="wait" → mode="popLayout" so the
+          old view exits WHILE the new view enters (cross-fade + slide)
+          instead of serial "exit then enter" which left a ~620ms empty gap.
+          popLayout pops the exiting element out of flow so the entering
+          element can mount immediately. */}
+      <AnimatePresence mode="popLayout" custom={activeFeatureViewDir}>
         {activeFeatureView && !focusMode ? (
           <motion.div
             key={`feature-${activeFeatureView}`}

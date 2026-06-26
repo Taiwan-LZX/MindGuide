@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MOTION, EASE } from '@/lib/motion-tokens';
+import { EASE } from '@/lib/motion-tokens';
 import {
   Search,
   MessagesSquare,
@@ -68,12 +68,23 @@ const sessionVariants = {
     },
   }),
   // EXIT = ENTER reversed for opacity/scale; x:-20 adds "slide out left"
-  // semantic for deleted sessions. Same spring physics as enter.
+  // semantic for deleted sessions. BUG FIX (P1-#18): added height:0 +
+  // marginBottom:0 so the deleted row collapses out of flow instead of
+  // "floating away while still occupying space" — which caused other rows
+  // to jump when it finally disappeared.
   exit: {
     opacity: 0,
     x: -20,
     scale: 0.95,
-    transition: MOTION.enter,
+    height: 0,
+    marginBottom: 0,
+    transition: {
+      opacity: { duration: 0.18, ease: [0.16, 1, 0.3, 1] as const },
+      x: { duration: 0.22, ease: [0.4, 0, 1, 1] as const },
+      scale: { duration: 0.18 },
+      height: { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const },
+      marginBottom: { duration: 0.22 },
+    },
   },
 };
 

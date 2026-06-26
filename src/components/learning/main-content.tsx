@@ -565,62 +565,73 @@ export function MainContent() {
             })}
           </AnimatePresence>
 
-          {/* Thinking bubble — shown while the model is in its reasoning phase
-              (streamingPhase === 'thinking') OR during the pre-first-token gap
-              (streamingPhase === null && no content yet). The phase signal is
-              AUTHORITATIVE — it stays 'thinking' for the whole reasoning trace,
-              so the animation persists correctly instead of flashing off the
-              instant the first reasoning token arrives. */}
-          <AnimatePresence>
-            {isStreaming && (streamingPhase === 'thinking' || (!streamingContent && !streamingPhase)) && lastMsgRole !== 'assistant' && (
+          {/* ── Thinking + Streaming bubble — unified AnimatePresence ──────────
+              BUG FIX (P1-#11/#29): previously thinking-bubble and streaming-
+              bubble were two SEPARATE AnimatePresence blocks. Switching from
+              thinking → streaming caused "thinking exits, then streaming
+              enters" — a hard gap with no cross-fade. Now they share ONE
+              AnimatePresence with mode="popLayout": the thinking bubble
+              fades out WHILE the streaming bubble fades in, giving a smooth
+              cross-fade. The shared header (icon + "MindGuide" label) stays
+              mounted via a stable key so it doesn't flicker. */}
+          <AnimatePresence mode="popLayout">
+            {isStreaming && lastMsgRole !== 'assistant' && (
               <motion.div
+                key="streaming-bubble"
+                layout
                 variants={streamingBubbleVariants}
                 initial="hidden"
                 animate="visible"
                 exit="exit"
                 className="my-1 flex flex-col gap-2"
               >
+                {/* Shared header — stable across thinking → streaming transition */}
                 <div className="flex items-center gap-1.5">
                   <span className="flex h-5 w-5 items-center justify-center rounded-md bg-neutral-100 text-neutral-600 ring-1 ring-neutral-200/60 dark:bg-neutral-800 dark:text-neutral-300 dark:ring-neutral-700/60">
                     <GraduationCap className="h-3 w-3" strokeWidth={2} />
                   </span>
                   <span className="text-[11.5px] font-medium text-neutral-500 dark:text-neutral-400">MindGuide</span>
                   {streamingPhase === 'thinking' && (
-                    <span className="ml-1 rounded-full border border-neutral-200 px-1.5 py-px text-[9.5px] text-neutral-400 dark:border-neutral-700 dark:text-neutral-500">
+                    <motion.span
+                      layout
+                      className="ml-1 rounded-full border border-neutral-200 px-1.5 py-px text-[9.5px] text-neutral-400 dark:border-neutral-700 dark:text-neutral-500"
+                    >
                       推理中
-                    </span>
+                    </motion.span>
                   )}
                 </div>
-                <ThreadThinkingAnim mode={thinkingMode} />
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Streaming response — no bubble, flowing markdown with a block caret
-              at the live edge. Reads like the agent is typing into the thread. */}
-          <AnimatePresence>
-            {isStreaming && lastMsgRole !== 'assistant' && streamingContent && (
-              <motion.div
-                variants={streamingBubbleVariants}
-                initial="hidden"
-                animate="visible"
-                exit="exit"
-                className="my-1 flex flex-col gap-2"
-              >
-                <div className="flex items-center gap-1.5">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-md bg-neutral-100 text-neutral-600 ring-1 ring-neutral-200/60 dark:bg-neutral-800 dark:text-neutral-300 dark:ring-neutral-700/60">
-                    <GraduationCap className="h-3 w-3" strokeWidth={2} />
-                  </span>
-                  <span className="text-[11.5px] font-medium text-neutral-500 dark:text-neutral-400">MindGuide</span>
-                </div>
-                <div className="min-w-0 text-[13.5px] leading-[1.7] text-neutral-800 dark:text-neutral-200">
-                  <MarkdownRenderer content={streamingContent} streaming />
-                  <motion.span
-                    className="ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[0.15em] rounded-[1px] bg-neutral-500 align-text-bottom dark:bg-neutral-300"
-                    animate={{ opacity: [1, 0, 1] }}
-                    transition={{ repeat: Infinity, duration: 1, ease: 'easeInOut' }}
-                  />
-                </div>
+                {/* Body swaps between thinking animation and streaming content.
+                    Using AnimatePresence mode="wait" HERE (inner) so the body
+                    cross-fades while the header stays put. */}
+                <AnimatePresence mode="wait" initial={false}>
+                  {streamingPhase === 'thinking' || (!streamingContent && !streamingPhase) ? (
+                    <motion.div
+                      key="thinking-body"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <ThreadThinkingAnim mode={thinkingMode} />
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="streaming-body"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="min-w-0 text-[13.5px] leading-[1.7] text-neutral-800 dark:text-neutral-200"
+                    >
+                      <MarkdownRenderer content={streamingContent} streaming />
+                      <motion.span
+                        className="ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[0.15em] rounded-[1px] bg-neutral-500 align-text-bottom dark:bg-neutral-300"
+                        animate={{ opacity: [1, 0, 1] }}
+                        transition={{ repeat: Infinity, duration: 1, ease: 'easeInOut' }}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </motion.div>
             )}
           </AnimatePresence>
@@ -651,10 +662,18 @@ export function MainContent() {
       <AnimatePresence>
         {showScrollBottom && (
           <motion.button
-            initial={{ opacity: 0, y: 8, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1, x: '-50%' }}
+            initial={{ opacity: 0, y: 8, scale: 0.9, bottom: 124 }}
+            animate={{ opacity: 1, y: 0, scale: 1, x: '-50%', bottom: showComposer ? 124 : 24 }}
             exit={{ opacity: 0, y: 8, scale: 0.9 }}
-            transition={{ type: 'spring', stiffness: 380, damping: 28, mass: 0.7 }}
+            transition={{
+              type: 'spring',
+              stiffness: 380,
+              damping: 28,
+              mass: 0.7,
+              // BUG FIX (P1-#15): `bottom` gets its own spring so it doesn't
+              // snap between 124 and 24 when showComposer toggles.
+              bottom: { type: 'spring', stiffness: 320, damping: 34 },
+            }}
             onClick={scrollToBottom}
             whileHover={{
               scale: 1.08,
@@ -664,8 +683,7 @@ export function MainContent() {
               scale: 0.92,
               transition: { type: 'spring', stiffness: 600, damping: 25 },
             }}
-            style={{ bottom: showComposer ? 124 : 24 }}
-            className="absolute left-1/2 z-30 flex h-8 w-8 items-center justify-center rounded-full border border-neutral-200 bg-white/95 text-neutral-500 shadow-sm backdrop-blur-sm transition-[bottom] duration-300 ease-out hover:text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/95 dark:text-neutral-300 dark:hover:text-neutral-100"
+            className="absolute left-1/2 z-30 flex h-8 w-8 items-center justify-center rounded-full border border-neutral-200 bg-white/95 text-neutral-500 shadow-sm backdrop-blur-sm hover:text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/95 dark:text-neutral-300 dark:hover:text-neutral-100"
             aria-label="滚动到最新消息"
           >
             <ArrowDown className="h-4 w-4" />
@@ -683,7 +701,12 @@ export function MainContent() {
           opacity: showComposer ? 1 : 0,
         }}
         transition={{ type: 'spring', stiffness: 320, damping: 34, mass: 0.8 }}
-        className="pointer-events-none absolute inset-x-0 bottom-0 z-40"
+        // BUG FIX (P1-#14): when the composer is hidden (showComposer=false),
+        // set pointer-events-none on the wrapper so the child's
+        // pointer-events-auto doesn't keep capturing clicks at the bottom of
+        // the screen. The child re-enables interaction only when visible.
+        style={{ pointerEvents: showComposer ? 'auto' : 'none' }}
+        className="absolute inset-x-0 bottom-0 z-40"
       >
         <div className="pointer-events-auto bg-gradient-to-t from-white via-white/95 to-transparent pb-5 pt-10 dark:from-neutral-950 dark:via-neutral-950/95 dark:to-transparent">
           <div className="mx-auto max-w-[720px] px-6">
@@ -767,6 +790,10 @@ function MsgBubble({
 }) {
   const isUser = msg.role === 'user';
   const [copied, setCopied] = useState(false);
+  // BUG FIX (P1-#32): previously `regenerating` was set to true but never
+  // reset, so the spinner spun forever. Now we read isStreaming from the
+  // store — the spinner shows while streaming is active, stops when it ends.
+  const isStreaming = useLearningStore(s => s.isStreaming);
   const [regenerating, setRegenerating] = useState(false);
 
   const handleCopy = useCallback(() => {
@@ -781,6 +808,13 @@ function MsgBubble({
     setRegenerating(true);
     onRegenerate();
   }, [onRegenerate, regenerating]);
+
+  // Reset regenerating once streaming ends (isStreaming goes false).
+  useEffect(() => {
+    if (!isStreaming && regenerating) {
+      queueMicrotask(() => setRegenerating(false));
+    }
+  }, [isStreaming, regenerating]);
 
   // ── User message: right-aligned bordered surface chip ──
   if (isUser) {

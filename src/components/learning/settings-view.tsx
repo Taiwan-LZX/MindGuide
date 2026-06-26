@@ -466,7 +466,7 @@ export function SettingsView() {
                     from the right; left tab → enters from the left). The exit
                     mirrors it so the old content leaves the opposite way. */}
                 <div className="custom-scrollbar flex-1 overflow-y-auto px-6 py-5">
-                  <AnimatePresence mode="wait" custom={tabDir}>
+                  <AnimatePresence mode="popLayout" custom={tabDir}>
                     <motion.div
                       key={activeTab}
                       custom={tabDir}

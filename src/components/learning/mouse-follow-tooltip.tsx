@@ -252,10 +252,19 @@ export function MouseFollowTooltip({
                   // so the spring has zero delta and does nothing — no fly-in.
                   // Fixed mode: position snaps instantly (duration 0).
                   ...(follow
-                    ? {
-                        x: { type: 'spring', stiffness: 600, damping: 36, mass: 0.6 },
-                        y: { type: 'spring', stiffness: 600, damping: 36, mass: 0.6 },
-                      }
+                    ? motionEnabled
+                      ? {
+                          x: { type: 'spring', stiffness: 600, damping: 36, mass: 0.6 },
+                          y: { type: 'spring', stiffness: 600, damping: 36, mass: 0.6 },
+                        }
+                      : {
+                          // BUG FIX (P1-#24): when motionEnabled=false, the
+                          // x/y spring still ran (liquid follow), contradicting
+                          // the "关闭后界面动画即时完成" promise. Now snap to
+                          // position with duration 0.
+                          x: { duration: 0 },
+                          y: { duration: 0 },
+                        }
                     : {
                         x: { duration: 0 },
                         y: { duration: 0 },

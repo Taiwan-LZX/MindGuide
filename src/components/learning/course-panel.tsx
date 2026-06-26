@@ -478,7 +478,11 @@ export function CoursePanel() {
                             >
                               <motion.div
                                 animate={{ rotate: isCollapsed ? 0 : 90 }}
-                                transition={spring}
+                                // BUG FIX (P1-#19): spring mass 0.8 caused the
+                                // chevron to overshoot to ~95° then bounce back.
+                                // Override with a critically-damped spring (no
+                                // overshoot) for a clean 0→90° rotation.
+                                transition={{ type: 'spring', stiffness: 380, damping: 30, mass: 0.6 }}
                                 className="flex h-4 w-4 shrink-0 items-center justify-center"
                               >
                                 <ChevronDown className="h-3.5 w-3.5 text-neutral-400 group-hover:text-neutral-600 dark:group-hover:text-neutral-300" />

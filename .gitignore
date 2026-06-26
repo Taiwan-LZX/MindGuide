@@ -86,6 +86,9 @@ watchdog.py
 # Verification screenshots from agent-browser E2E runs
 verify-*.png
 
+# Local UI debug / VLM analysis snapshots
+cap-*.png
+
 # Backup files
 *.bak
 *.bak.*

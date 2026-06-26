@@ -31,7 +31,6 @@ import {
   ArrowUp,
   Square,
   Plus,
-  ChevronDown,
   FileText,
   BookMarked,
   Image as ImageIcon,
@@ -51,6 +50,9 @@ import {
   Gauge,
   Layers,
   CircleDot,
+  Eraser,
+  Maximize2,
+  Code2,
 } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 import { MouseFollowTooltip } from '@/components/learning/mouse-follow-tooltip';
@@ -250,18 +252,13 @@ export function ChatComposer({
   // flags property access off any object that also carries a ref, so we pull
   // `open`/`setOpen`/`ref`/`menuRef` out as independent names.
   const { open: attachOpen, setOpen: setAttachOpen, ref: attachRef, menuRef: attachMenuRef, direction: attachDir } = usePopover();
-  const { open: modeOpen, setOpen: setModeOpen, ref: modeRef, menuRef: modeMenuRef, direction: modeDir } = usePopover();
+  const { open: modeOpen, setOpen: setModeOpen, ref: modeRef, menuRef: modeMenuRef } = usePopover();
   const { open: thinkOpen, setOpen: setThinkOpen, ref: thinkRef, menuRef: thinkMenuRef, direction: thinkDir } = usePopover();
   const { open: modelOpen, setOpen: setModelOpen, ref: modelRef, menuRef: modelMenuRef, direction: modelDir } = usePopover();
 
-  // ── P8: Confirmation toast on mode/model/thinking switch ──
-  //
-  // Cognitive-psychology rationale: when a user changes a setting with no
-  // immediate visible effect (e.g. switching from "标准" to "深度" thinking),
-  // they have no feedback that the change "took". This breeds doubt ("did I
-  // click it? did it register?") and leads to re-clicking or abandoning the
-  // action. A brief inline toast that names the new value closes that loop
-  // within ~1.5s — well inside the user's working-memory window.
+  // ── Confirmation toast on mode/model/thinking switch ──
+  // Settings changes have no immediate visible effect, so a brief inline
+  // toast naming the new value closes the feedback loop within ~1.5s.
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevTeaching = useRef(teachingMode);
@@ -338,25 +335,214 @@ export function ChatComposer({
     }
   }, [value, expanded]);
 
+  // ── Attention-focus state machine ──
+  // hint visibility by scene:
+  //   idle / focused-empty → show
+  //   typing / selecting / cursor-moving → hide
+  //   focused-idle (>2s no key) → dim (45% opacity)
+  // 180ms debounce prevents flicker. 300ms poll while focused catches idle +
+  // selection transitions that don't fire key events.
+  type AttentionScene = 'idle' | 'focused-empty' | 'typing' | 'focused-idle' | 'selecting' | 'cursor-moving';
+  const [scene, setScene] = useState<AttentionScene>('idle');
+  const lastKeyAt = useRef<number>(0);
+  const lastCursorMoveAt = useRef<number>(0);
+  const hasSelection = useRef<boolean>(false);
+  const sceneDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleScene = useCallback((next: AttentionScene) => {
+    if (sceneDebounce.current) clearTimeout(sceneDebounce.current);
+    sceneDebounce.current = setTimeout(() => {
+      queueMicrotask(() => setScene(prev => (prev === next ? prev : next)));
+    }, 180);
+  }, []);
+
+  useEffect(() => {
+    if (!isFocused) {
+      scheduleScene('idle');
+      return;
+    }
+    const iv = setInterval(() => {
+      const now = Date.now();
+      const sinceKey = now - lastKeyAt.current;
+      const sinceCursor = now - lastCursorMoveAt.current;
+      const el = textareaRef.current;
+      const sel = el ? el.selectionStart !== el.selectionEnd : false;
+      hasSelection.current = sel;
+
+      if (sel) {
+        scheduleScene('selecting');
+      } else if (sinceCursor < 800) {
+        scheduleScene('cursor-moving');
+      } else if (value.length === 0) {
+        scheduleScene('focused-empty');
+      } else if (sinceKey < 1200) {
+        scheduleScene('typing');
+      } else if (sinceKey > 2000) {
+        scheduleScene('focused-idle');
+      } else {
+        scheduleScene('typing');
+      }
+    }, 300);
+    return () => clearInterval(iv);
+  }, [isFocused, value.length, scheduleScene]);
+
+  useEffect(() => {
+    return () => {
+      if (sceneDebounce.current) clearTimeout(sceneDebounce.current);
+    };
+  }, []);
+
+  const hintVisibility: 'show' | 'dim' | 'hide' =
+    scene === 'idle' || scene === 'focused-empty'
+      ? 'show'
+      : scene === 'focused-idle'
+        ? 'dim'
+        : 'hide';
+
+  // ── Scene-aware suggestion chips ──
+  // Contextual action chips surface in the left-bottom corner based on input
+  // patterns. Priority: pause > expand > deep-think > code.
+  // Replaces the keyboard hint in the same position; auto-dismisses after 6s.
+  type SceneChip = 'pause' | 'expand' | 'deep-think' | 'code' | null;
+  const [sceneChip, setSceneChip] = useState<SceneChip>(null);
+  const chipDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let next: SceneChip = null;
+    if (isStreaming && value.trim().length > 0) {
+      next = 'pause';
+    } else if (value.length > 280 && !expanded) {
+      next = 'expand';
+    } else if (/[?？]\s*$/.test(value.trim()) && value.length > 4) {
+      next = 'deep-think';
+    } else if (/```|\n    \S/.test(value)) {
+      next = 'code';
+    }
+
+    if (next !== sceneChip) {
+      queueMicrotask(() => setSceneChip(next));
+      if (next !== null) {
+        if (chipDismissTimer.current) clearTimeout(chipDismissTimer.current);
+        chipDismissTimer.current = setTimeout(() => {
+          queueMicrotask(() => setSceneChip(null));
+        }, 6000);
+      }
+    }
+  }, [value, isStreaming, expanded, sceneChip]);
+
+  useEffect(() => {
+    return () => {
+      if (chipDismissTimer.current) clearTimeout(chipDismissTimer.current);
+    };
+  }, []);
+
+  const handleSceneChipClick = useCallback((chip: Exclude<SceneChip, null>) => {
+    if (chip === 'pause' && isStreaming) {
+      onStop();
+    } else if (chip === 'expand') {
+      queueMicrotask(() => setExpanded(true));
+    } else if (chip === 'deep-think') {
+      setThinkingMode('deep');
+      const t = THINK_OPTIONS.find(o => o.key === 'deep');
+      if (t) {
+        queueMicrotask(() => setToast(`思考：${t.label}`));
+      }
+    } else if (chip === 'code') {
+      queueMicrotask(() => setToast('代码模式（即将推出）'));
+    }
+    queueMicrotask(() => setSceneChip(null));
+    if (chipDismissTimer.current) clearTimeout(chipDismissTimer.current);
+  }, [isStreaming, onStop, setThinkingMode]);
+
+  // ── Long-press Backspace → morph left-bottom hint into "清空全部内容" ──
+  // Hold Backspace >600ms while text exists → swap the hint position into a
+  // clear-all button. Same corner, contextual clear action.
+  // Lifecycle: keydown starts timer; keyup cancels pending (keeps visible if
+  // fired); click clears text; 4s auto-dismiss; empty text un-morphs.
+  const backspaceDownAt = useRef<number | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const morphDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [morphToClear, setMorphToClear] = useState(false);
+
+  // Auto-dismiss the morph after 4s (user didn't click — they changed their mind).
+  useEffect(() => {
+    if (!morphToClear) return;
+    morphDismissTimer.current = setTimeout(() => {
+      queueMicrotask(() => setMorphToClear(false));
+    }, 4000);
+    return () => {
+      if (morphDismissTimer.current) clearTimeout(morphDismissTimer.current);
+    };
+  }, [morphToClear]);
+
+  // Un-morph once text is empty (the clear action completed, or was never needed).
+  useEffect(() => {
+    if (morphToClear && value.length === 0) {
+      queueMicrotask(() => setMorphToClear(false));
+    }
+  }, [value, morphToClear]);
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+      if (morphDismissTimer.current) clearTimeout(morphDismissTimer.current);
+    };
+  }, []);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      lastKeyAt.current = Date.now();
+      // Cursor-moving keys → cursor-moving scene (hint hides).
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) {
+        lastCursorMoveAt.current = Date.now();
+        scheduleScene('cursor-moving');
+      } else if (e.key !== 'Shift' && e.key !== 'Control' && e.key !== 'Alt' && e.key !== 'Meta') {
+        // Real input keys (excl. modifiers) → typing scene.
+        scheduleScene('typing');
+      }
+
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         if (value.trim() && !isStreaming) onSend();
+        return;
+      }
+      // Long-press Backspace → start 600ms morph timer.
+      if (e.key === 'Backspace' && value.length > 0 && backspaceDownAt.current === null) {
+        backspaceDownAt.current = Date.now();
+        if (longPressTimer.current) clearTimeout(longPressTimer.current);
+        longPressTimer.current = setTimeout(() => {
+          queueMicrotask(() => setMorphToClear(true));
+        }, 600);
       }
     },
-    [value, isStreaming, onSend]
+    [value, isStreaming, onSend, scheduleScene]
   );
+
+  const handleKeyUp = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Backspace') {
+      backspaceDownAt.current = null;
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+      // Note: we do NOT immediately un-morph on keyup — the user just
+      // triggered it, give them time to click. The 4s auto-dismiss handles
+      // the case where they change their mind.
+    }
+  }, []);
+
+  const handleClearAll = useCallback(() => {
+    onChange('');
+    queueMicrotask(() => setMorphToClear(false));
+    if (morphDismissTimer.current) clearTimeout(morphDismissTimer.current);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [onChange]);
 
   const canSend = value.trim().length > 0 && !isStreaming;
   const charCount = value.length;
-  const CONTEXT_BUDGET = 200_000;
-  // Visual context-ring fraction — derive from char count + a base overhead so
-  // the ring shows progress even for short messages.
+  // Visual context-used estimate — char count + a base overhead so the usage
+  // meter shows progress even for short messages.
   const contextUsed = charCount + 8000;
-  const contextFraction = Math.min(1, contextUsed / CONTEXT_BUDGET);
-  // Model-usage fraction (this session, all turns).
-  const modelFraction = Math.min(1, modelUsageTokens / MODEL_BUDGET);
 
   const activeMode = MODE_OPTIONS.find(m => m.key === teachingMode) || MODE_OPTIONS[0];
   const activeThink = THINK_OPTIONS.find(m => m.key === thinkingMode) || THINK_OPTIONS[1];
@@ -437,6 +623,17 @@ export function ChatComposer({
           value={value}
           onChange={e => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          onKeyUp={handleKeyUp}
+          onSelect={e => {
+            // Track text selection for attention-focus: when the user selects
+            // a range, transition to 'selecting' scene so the hint hides and
+            // doesn't overlap the selection highlight. Fires on mousedrag
+            // select, double-click word select, and Shift+arrow select.
+            const el = e.currentTarget;
+            const sel = el.selectionStart !== el.selectionEnd;
+            hasSelection.current = sel;
+            if (sel) scheduleScene('selecting');
+          }}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           placeholder={placeholder}
@@ -464,11 +661,12 @@ export function ChatComposer({
           )}
         </AnimatePresence>
 
-        {/* ── Bottom toolbar — single row, monochrome ──
-            Left : + (attach) + 引导模式 selector
-            Right: ModelCard (merged usage + model switch) + 思考 selector + send */}
+        {/* ── Bottom toolbar — balanced: flat config left, raised island right ──
+            Left : + (attach) + 引导模式 + 模型文本 (flat config cluster, ~3/4)
+            Right: 思考 + send (raised oval action island, ~1/4,
+                  lifted above the flat baseline via -translate-y + shadow) */}
         <div className="flex items-center gap-1 sm:gap-1.5">
-          {/* Left cluster */}
+          {/* Left cluster — flat config: attach + mode + model text. */}
           <div className="flex min-w-0 items-center gap-1">
             {/* + 添加文件 — opens the attachment menu */}
             <div ref={attachRef} className="relative">
@@ -489,166 +687,214 @@ export function ChatComposer({
               </MouseFollowTooltip>
             </div>
 
-            {/* 引导模式 selector */}
+            {/* 引导模式 selector — icon-only, hover tooltip, menu opens BESIDE (right) */}
             <div ref={modeRef} className="relative">
-              <button
-                type="button"
-                onClick={() => setModeOpen(o => !o)}
-                aria-label="切换教学模式"
-                aria-expanded={modeOpen}
-                className="flex h-7 shrink-0 items-center gap-1 rounded-lg border border-transparent pl-1.5 pr-1 text-[13px] text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-              >
-                <activeMode.icon className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">{activeMode.label}</span>
-                <ChevronDown className="h-3.5 w-3.5 text-neutral-400" />
-              </button>
+              <MouseFollowTooltip content={`教学模式 · ${activeMode.label}`}>
+                <button
+                  type="button"
+                  onClick={() => setModeOpen(o => !o)}
+                  aria-label={`切换教学模式 · ${activeMode.label}`}
+                  aria-expanded={modeOpen}
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors sm:h-7 sm:w-7 ${
+                    modeOpen
+                      ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
+                      : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
+                  }`}
+                >
+                  <activeMode.icon className="h-4 w-4" strokeWidth={2} />
+                </button>
+              </MouseFollowTooltip>
+            </div>
+
+            {/* 模型文本 — flat, no frame, just text. */}
+            <div ref={modelRef} className="relative">
+              <MouseFollowTooltip content={`切换模型 · ${activeModel.label} · 上下文 ${(contextUsed / 1000).toFixed(1)}k / ${(activeModel.contextWindow / 1000).toFixed(0)}k`}>
+                <button
+                  type="button"
+                  onClick={() => setModelOpen(o => !o)}
+                  aria-label={`切换模型 · ${activeModel.label}`}
+                  aria-expanded={modelOpen}
+                  className={`flex h-7 shrink-0 items-center rounded-md px-1.5 text-[12px] font-medium transition-colors ${
+                    modelOpen
+                      ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
+                      : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
+                  }`}
+                >
+                  {activeModel.label}
+                </button>
+              </MouseFollowTooltip>
             </div>
           </div>
 
           {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Right cluster — ModelCard + 思考 + send */}
-          <div className="flex items-center gap-1 sm:gap-1.5">
-            {/* ── ModelCard — merged: model name + usage meters + switcher ──
-                A single chip-shaped button that opens a card popover containing
-                model selection + context-usage meter + model-usage meter.
-                Surface shows: model name + a tiny inline usage bar so the user
-                sees load at a glance. */}
-            <div ref={modelRef} className="relative">
-              <MouseFollowTooltip content={`${activeModel.label} · 上下文 ${(contextUsed / 1000).toFixed(1)}k / ${(activeModel.contextWindow / 1000).toFixed(0)}k`}>
-                <button
-                  type="button"
-                  onClick={() => setModelOpen(o => !o)}
-                  aria-label="模型与用量"
-                  aria-expanded={modelOpen}
-                  className={`flex h-7 shrink-0 items-center gap-1.5 rounded-lg border pl-1.5 pr-1 text-[12px] transition-colors ${
-                    modelOpen
-                      ? 'border-neutral-300 bg-neutral-100 text-neutral-900 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100'
-                      : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50 hover:text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
-                  }`}
-                >
-                  <Cpu className="h-3.5 w-3.5" strokeWidth={2} />
-                  <span className="hidden font-medium sm:inline">{activeModel.label}</span>
-                  {/* Inline usage bar — 24×4 px, neutral fills, no color hint */}
-                  <span className="hidden h-1 w-6 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700 sm:inline">
-                    <motion.span
-                      className="block h-full rounded-full bg-neutral-700 dark:bg-neutral-200"
-                      initial={false}
-                      animate={{ width: `${Math.max(4, Math.min(100, Math.max(contextFraction, modelFraction) * 100))}%` }}
-                      transition={{ type: 'spring', stiffness: 200, damping: 26 }}
-                    />
-                  </span>
-                  <ChevronDown className="h-3 w-3 text-neutral-400" />
-                </button>
-              </MouseFollowTooltip>
-            </div>
+          {/* Right cluster — raised action island: think + send.
+              Oval (rounded-xl) silhouette, lifted 2px above the flat toolbar
+              baseline. Border + shadow respond to focus / streaming state. */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="relative shrink-0">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.94 }}
+                animate={{ opacity: 1, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 28 } }}
+                className={`relative flex items-center gap-1 rounded-xl border bg-white px-1.5 py-1 transition-all -translate-y-[2px] dark:bg-neutral-900 ${
+                  isStreaming
+                    ? 'border-neutral-400 shadow-lg dark:border-neutral-500'
+                    : isFocused
+                      ? 'border-neutral-300 shadow-lg dark:border-neutral-600'
+                      : 'border-neutral-200 shadow-md dark:border-neutral-700'
+                }`}
+              >
+                {/* 思考 selector — icon-only inside the island */}
+                <div ref={thinkRef} className="relative">
+                  <MouseFollowTooltip content={`推理强度 · ${activeThink.label}`}>
+                    <button
+                      type="button"
+                      onClick={() => setThinkOpen(o => !o)}
+                      aria-label={`切换思考模式 · ${activeThink.label}`}
+                      aria-expanded={thinkOpen}
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors ${
+                        thinkOpen
+                          ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
+                          : thinkingMode === 'off'
+                            ? 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
+                            : 'text-neutral-800 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800'
+                      }`}
+                    >
+                      <activeThink.icon className="h-4 w-4" strokeWidth={2} />
+                    </button>
+                  </MouseFollowTooltip>
+                </div>
 
-            {/* 思考 selector — sits directly left of the send button */}
-            <div ref={thinkRef} className="relative">
-              <MouseFollowTooltip content={`推理强度 · ${activeThink.label}`}>
-                <button
-                  type="button"
-                  onClick={() => setThinkOpen(o => !o)}
-                  aria-label="切换思考模式"
-                  aria-expanded={thinkOpen}
-                  className={`flex h-7 shrink-0 items-center gap-1 rounded-lg border pl-1.5 pr-1 text-[12px] transition-colors ${
-                    thinkingMode === 'off'
-                      ? 'border-transparent text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-300'
-                      : modelOpen
-                        ? 'border-neutral-300 bg-neutral-100 text-neutral-900 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100'
-                        : 'border-neutral-200 bg-white text-neutral-800 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800'
-                  }`}
-                >
-                  {/* Active (non-off) gets a filled grey chip */}
-                  <span
-                    className={`flex h-4 w-4 items-center justify-center rounded ${
-                      thinkingMode === 'off'
-                        ? 'text-neutral-400 dark:text-neutral-500'
-                        : 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
-                    }`}
-                  >
-                    <activeThink.icon className="h-3 w-3" strokeWidth={2.2} />
-                  </span>
-                  <span className="hidden sm:inline">{activeThink.short}</span>
-                  <ChevronDown className="h-3 w-3 text-neutral-400" />
-                </button>
-              </MouseFollowTooltip>
+                {/* Send / Stop — the single solid-filled focal point */}
+                <AnimatePresence mode="wait">
+                  {isStreaming ? (
+                    <motion.button
+                      key="stop"
+                      type="button"
+                      initial={{ scale: 0.82, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1, transition: { type: 'spring', stiffness: 500, damping: 26, mass: 0.6 } }}
+                      exit={{ scale: 0.82, opacity: 0, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
+                      whileTap={{ scale: 0.9 }}
+                      onClick={onStop}
+                      aria-label="停止生成"
+                      className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-neutral-800 text-white transition-colors hover:bg-neutral-700 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-neutral-300"
+                    >
+                      <motion.span
+                        className="pointer-events-none absolute inset-0 rounded-lg border border-neutral-400/50"
+                        animate={{ scale: [1, 1.2], opacity: [0.6, 0] }}
+                        transition={{ repeat: Infinity, duration: 1.4, ease: 'easeOut' }}
+                      />
+                      <Square className="h-3.5 w-3.5 fill-current" />
+                    </motion.button>
+                  ) : (
+                    <motion.button
+                      key="send"
+                      type="button"
+                      initial={{ scale: 0.82, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1, transition: { type: 'spring', stiffness: 500, damping: 26, mass: 0.6 } }}
+                      exit={{ scale: 0.82, opacity: 0, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
+                      whileHover={canSend ? { scale: 1.08, transition: { type: 'spring', stiffness: 400, damping: 18 } } : undefined}
+                      whileTap={canSend ? { scale: 0.9, transition: { type: 'spring', stiffness: 600, damping: 25 } } : undefined}
+                      onClick={canSend ? () => onSend() : undefined}
+                      disabled={!canSend}
+                      aria-label="发送消息"
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors duration-200 ${
+                        canSend
+                          ? 'bg-neutral-800 text-white hover:bg-neutral-700 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-neutral-300'
+                          : 'bg-neutral-100 text-neutral-300 dark:bg-neutral-800 dark:text-neutral-600'
+                      }`}
+                    >
+                      <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+                    </motion.button>
+                  )}
+                </AnimatePresence>
+              </motion.div>
             </div>
-
-            {/* Send / Stop */}
-            <AnimatePresence mode="wait">
-              {isStreaming ? (
-                <motion.button
-                  key="stop"
-                  type="button"
-                  initial={{ scale: 0.82, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1, transition: { type: 'spring', stiffness: 500, damping: 26, mass: 0.6 } }}
-                  exit={{ scale: 0.82, opacity: 0, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={onStop}
-                  aria-label="停止生成"
-                  className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-neutral-800 text-white transition-colors hover:bg-neutral-700 sm:h-7 sm:w-7 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-neutral-300"
-                >
-                  <motion.span
-                    className="pointer-events-none absolute inset-0 rounded-lg border border-neutral-400/50"
-                    animate={{ scale: [1, 1.2], opacity: [0.6, 0] }}
-                    transition={{ repeat: Infinity, duration: 1.4, ease: 'easeOut' }}
-                  />
-                  <Square className="h-3.5 w-3.5 fill-current" />
-                </motion.button>
-              ) : (
-                <motion.button
-                  key="send"
-                  type="button"
-                  initial={{ scale: 0.82, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1, transition: { type: 'spring', stiffness: 500, damping: 26, mass: 0.6 } }}
-                  exit={{ scale: 0.82, opacity: 0, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
-                  whileHover={canSend ? { scale: 1.08, transition: { type: 'spring', stiffness: 400, damping: 18 } } : undefined}
-                  whileTap={canSend ? { scale: 0.9, transition: { type: 'spring', stiffness: 600, damping: 25 } } : undefined}
-                  onClick={canSend ? () => onSend() : undefined}
-                  disabled={!canSend}
-                  aria-label="发送消息"
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors duration-200 sm:h-7 sm:w-7 ${
-                    canSend
-                      ? 'bg-neutral-800 text-white hover:bg-neutral-700 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-neutral-300'
-                      : 'bg-neutral-100 text-neutral-300 dark:bg-neutral-800 dark:text-neutral-600'
-                  }`}
-                >
-                  <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
-                </motion.button>
-              )}
-            </AnimatePresence>
           </div>
         </div>
 
-        {/* ── Inline hint row — tiny monochrome hints inside the card ──
-            Left : keyboard hints (Enter 发送 / ⇧Enter 换行) — text + line icon, no emoji
-            Right: 清空 affordance (only when draft has text and not streaming) */}
-        <div className="relative flex min-h-[14px] items-center px-1 text-[10px] text-neutral-400 dark:text-neutral-500">
-          <span className="flex items-center gap-1">
-            <KbdKey variant="enter" />
-            <span>发送</span>
-            <span className="text-neutral-300 dark:text-neutral-600">·</span>
-            <KbdKey variant="shift" />
-            <KbdKey variant="enter" />
-            <span>换行</span>
-          </span>
-
-          <AnimatePresence>
-            {charCount > 0 && !isStreaming && (
+        {/* ── Hint row — left-bottom corner ──
+            Priority: morphToClear > sceneChip > hintVisibility. */}
+        <div className="flex min-h-[14px] items-start">
+          <AnimatePresence mode="wait">
+            {morphToClear && value.length > 0 && !isStreaming ? (
               <motion.button
-                initial={{ opacity: 0, x: 4 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 4 }}
-                onClick={() => {
-                  onChange('');
-                  requestAnimationFrame(() => textareaRef.current?.focus());
-                }}
-                className="absolute right-0 text-[10px] text-neutral-400 transition-colors hover:text-neutral-700 dark:text-neutral-500 dark:hover:text-neutral-300"
+                key="clear-all-hint"
+                type="button"
+                initial={{ opacity: 0, scale: 0.88, y: 4 }}
+                animate={{ opacity: 1, scale: 1, y: 0, transition: { type: 'spring', stiffness: 420, damping: 24 } }}
+                exit={{ opacity: 0, scale: 0.88, y: 4, transition: { duration: 0.16, ease: [0.4, 0, 1, 1] } }}
+                whileTap={{ scale: 0.94 }}
+                whileHover={{ scale: 1.03 }}
+                onClick={handleClearAll}
+                className="flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-2.5 py-1 text-[10.5px] font-semibold text-neutral-900 shadow-sm transition-colors hover:border-neutral-800 hover:bg-neutral-800 hover:text-white dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:border-neutral-200 dark:hover:bg-neutral-200 dark:hover:text-neutral-900"
+                aria-label="清空全部内容"
               >
-                清空
+                <Eraser className="h-3.5 w-3.5" strokeWidth={2.2} />
+                清空全部内容
               </motion.button>
+            ) : sceneChip !== null ? (
+              // Scene-aware contextual chip.
+              <motion.button
+                key={`scene-chip-${sceneChip}`}
+                type="button"
+                initial={{ opacity: 0, scale: 0.88, y: 4 }}
+                animate={{ opacity: 1, scale: 1, y: 0, transition: { type: 'spring', stiffness: 420, damping: 24 } }}
+                exit={{ opacity: 0, scale: 0.88, y: 4, transition: { duration: 0.16, ease: [0.4, 0, 1, 1] } }}
+                whileTap={{ scale: 0.94 }}
+                whileHover={{ scale: 1.03 }}
+                onClick={() => handleSceneChipClick(sceneChip)}
+                className="flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-2.5 py-1 text-[10.5px] font-medium text-neutral-700 shadow-sm transition-colors hover:border-neutral-800 hover:bg-neutral-800 hover:text-white dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-200 dark:hover:border-neutral-200 dark:hover:bg-neutral-200 dark:hover:text-neutral-900"
+                aria-label={
+                  sceneChip === 'pause' ? '暂停生成'
+                    : sceneChip === 'expand' ? '展开编辑器'
+                      : sceneChip === 'deep-think' ? '切换到深度思考'
+                        : '代码模式'
+                }
+              >
+                {sceneChip === 'pause' && <Square className="h-3 w-3 fill-current" />}
+                {sceneChip === 'expand' && <Maximize2 className="h-3 w-3" strokeWidth={2.2} />}
+                {sceneChip === 'deep-think' && <BrainCircuit className="h-3 w-3" strokeWidth={2.2} />}
+                {sceneChip === 'code' && <Code2 className="h-3 w-3" strokeWidth={2.2} />}
+                <span>
+                  {sceneChip === 'pause' ? '暂停生成'
+                    : sceneChip === 'expand' ? '展开编辑器'
+                      : sceneChip === 'deep-think' ? '深度思考'
+                        : '代码模式'}
+                </span>
+              </motion.button>
+            ) : hintVisibility === 'hide' ? (
+              // Hidden placeholder for AnimatePresence collapse.
+              <motion.div
+                key="hint-hidden"
+                initial={{ height: 'auto', opacity: 0.5 }}
+                animate={{ height: 0, opacity: 0, transition: { height: { duration: 0.2, ease: [0.4, 0, 1, 1] }, opacity: { duration: 0.12 } } }}
+                exit={{ height: 'auto', opacity: 0.5, transition: { duration: 0.1 } }}
+                className="overflow-hidden"
+                aria-hidden
+              />
+            ) : (
+              <motion.div
+                key={`hint-${hintVisibility}`}
+                initial={{ height: 0, opacity: 0 }}
+                animate={{
+                  height: 'auto',
+                  opacity: hintVisibility === 'dim' ? 0.45 : 1,
+                  transition: { height: { duration: 0.22, ease: [0.16, 1, 0.3, 1] }, opacity: { duration: 0.2 } },
+                }}
+                exit={{ height: 0, opacity: 0, transition: { height: { duration: 0.18, ease: [0.4, 0, 1, 1] }, opacity: { duration: 0.1 } } }}
+                className="overflow-hidden"
+              >
+                <div className="flex min-w-0 items-center gap-0.5 px-0.5 text-[9.5px] text-neutral-400 transition-opacity dark:text-neutral-500">
+                  <KbdKey variant="enter" />
+                  <span>发送</span>
+                  <span className="text-neutral-300 dark:text-neutral-600">·</span>
+                  <KbdKey variant="shift" />
+                  <KbdKey variant="enter" />
+                  <span>换行</span>
+                </div>
+              </motion.div>
             )}
           </AnimatePresence>
         </div>
@@ -663,7 +909,6 @@ export function ChatComposer({
       <ModeMenu
         ref={modeMenuRef}
         open={modeOpen}
-        direction={modeDir}
         current={teachingMode}
         onSelect={m => {
           setTeachingMode(m);
@@ -988,21 +1233,24 @@ const ModeMenu = React.forwardRef<
   HTMLDivElement,
   {
     open: boolean;
-    direction?: 'up' | 'down';
     current: TeachingMode;
     onSelect: (m: TeachingMode) => void;
   }
->(({ open, direction = 'up', current, onSelect }, menuRef) => {
-  const pos = menuPos(direction, 'left');
+>(({ open, current, onSelect }, menuRef) => {
+  // Mode menu opens BESIDE the trigger (to the right), not above. This gives
+  // a grounded, 3D-layered feel — the menu reads as an extension of the
+  // button rather than a floating panel, and avoids the menu drifting too
+  // high when the composer is tall (long text / expanded mode). The trigger
+  // is on the LEFT side of the toolbar, so there's room to the right.
   return (
     <AnimatePresence>
       {open && (
         <motion.div
           ref={menuRef}
-          initial={{ opacity: 0, y: pos.yAnim, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
-          exit={{ opacity: 0, y: pos.yAnim, scale: 0.97, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
-          className={`${pos.className} w-72 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900`}
+          initial={{ opacity: 0, scale: 0.94, x: -8 }}
+          animate={{ opacity: 1, scale: 1, x: 0, transition: { type: 'spring', stiffness: 420, damping: 28 } }}
+          exit={{ opacity: 0, scale: 0.94, x: -8, transition: { type: 'spring', stiffness: 420, damping: 28 } }}
+          className="absolute left-full top-0 z-50 ml-2 max-h-[60vh] w-72 overflow-y-auto overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
         >
           <p className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
             教学模式

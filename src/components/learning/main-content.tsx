@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MoreVertical, BookOpen, GraduationCap, ArrowDown, Copy, Check, RefreshCw, Compass, Dumbbell, RotateCw, AlertCircle, X } from 'lucide-react';
+import { MoreVertical, BookOpen, GraduationCap, ArrowDown, Copy, Check, RefreshCw, Compass, Dumbbell, RotateCw } from 'lucide-react';
 import { MOTION } from '@/lib/motion-tokens';
 import { useLearningStore } from '@/store/learning-store';
 import { KnowledgeInline } from '@/components/learning/knowledge-inline';
@@ -10,6 +10,7 @@ import { MarkdownRenderer } from '@/components/learning/markdown-renderer';
 import { MouseFollowTooltip } from '@/components/learning/mouse-follow-tooltip';
 import { ChatComposer } from '@/components/learning/chat-composer';
 import { useDraftInput, useInputHistory } from '@/hooks/use-draft-input';
+import { toast } from '@/hooks/use-toast';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -56,6 +57,14 @@ const msgVariants = {
     y: 0,
     transition: { type: 'spring' as const, stiffness: 320, damping: 30, mass: 0.7 },
   },
+  // Exit variant — enables fade-out when messages are removed (e.g. session
+  // switch). Without this, AnimatePresence can't animate the exit and the
+  // old messages vanish instantly.
+  exit: {
+    opacity: 0,
+    y: -8,
+    transition: { duration: 0.18, ease: [0.4, 0, 1, 1] as const },
+  },
 };
 
 const dateSepVariants = {
@@ -64,6 +73,10 @@ const dateSepVariants = {
     opacity: 1,
     scale: 1,
     transition: { type: 'spring' as const, stiffness: 380, damping: 28, mass: 0.6 },
+  },
+  exit: {
+    opacity: 0,
+    transition: { duration: 0.14 },
   },
 };
 
@@ -144,32 +157,97 @@ export function MainContent() {
 
   const session = sessions.find(s => s.id === currentSessionId);
 
-  // Scroll to bottom
+  // ── Auto-scroll to bottom on new content ──────────────────────────────────
+  //
+  // BUG FIX (P0-#1): previously every streaming token triggered
+  // `scrollIntoView({behavior:'smooth'})`, and multiple smooth-scroll
+  // requests queued up → visible jitter. Also, the scroll fired even when
+  // the user had scrolled UP to read history, yanking them back down.
+  //
+  // FIX: (a) Only auto-scroll if the user is already near the bottom
+  // (within 120px). If they've scrolled up to read, respect that.
+  // (b) Use `behavior:'auto'` (instant) during streaming — smooth scroll
+  // on every token is the jitter source. Reserve 'smooth' for the initial
+  // message-load (non-streaming) case.
+  // (c) Gate with rAF + a "pending" ref so multiple updates in the same
+  // frame coalesce into one scroll.
+  const scrollPendingRef = useRef(false);
+  const userScrolledUpRef = useRef(false);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingContent]);
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    // Detect whether the user is near the bottom BEFORE scheduling a scroll.
+    // If they've scrolled up, don't yank them down — just set the flag so
+    // the scroll-bottom button appears.
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const nearBottom = distFromBottom < 120;
+
+    if (!nearBottom && isStreaming) {
+      // User is reading history during streaming — don't auto-scroll.
+      userScrolledUpRef.current = true;
+      return;
+    }
+    // Reset the flag once we're back near the bottom.
+    userScrolledUpRef.current = false;
+
+    if (scrollPendingRef.current) return;
+    scrollPendingRef.current = true;
+    requestAnimationFrame(() => {
+      scrollPendingRef.current = false;
+      const el2 = scrollContainerRef.current;
+      if (!el2) return;
+      // Instant scroll during streaming (no jitter), smooth on initial load.
+      el2.scrollTo({
+        top: el2.scrollHeight,
+        behavior: isStreaming ? 'auto' : 'smooth',
+      });
+    });
+  }, [messages, streamingContent, isStreaming]);
 
   // Scroll-driven composer visibility — the composer floats above the thread
   // and auto-hides (slides down + fades) while the user scrolls DOWN to read
   // older messages, then pops back up the instant they scroll UP. Near the
   // bottom it stays pinned open so the user can always reply without fighting
   // the UI. Streaming + unsent draft text also pin it open.
+  //
+  // BUG FIX (P0-#2): previously every scroll event called setState directly,
+  // causing 5+ re-renders per 100px of scrolling. Now we rAF-throttle AND
+  // skip setState when the derived value hasn't changed (tracked via refs).
+  const scrollRafRef = useRef<number | null>(null);
+  const lastComposerVisibleRef = useRef(true);
+  const lastShowScrollBottomRef = useRef(false);
   const handleScroll = useCallback(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const delta = el.scrollTop - lastScrollTopRef.current;
+    if (scrollRafRef.current !== null) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      const el = scrollContainerRef.current;
+      if (!el) return;
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const delta = el.scrollTop - lastScrollTopRef.current;
 
-    if (distFromBottom < 72) {
-      setComposerVisible(true);
-    } else if (delta > 6) {
-      setComposerVisible(false);
-    } else if (delta < -6) {
-      setComposerVisible(true);
-    }
+      // Compute new visibility WITHOUT setState first — only flush if changed.
+      let nextComposerVisible = lastComposerVisibleRef.current;
+      if (distFromBottom < 72) {
+        nextComposerVisible = true;
+      } else if (delta > 6) {
+        nextComposerVisible = false;
+      } else if (delta < -6) {
+        nextComposerVisible = true;
+      }
+      if (nextComposerVisible !== lastComposerVisibleRef.current) {
+        lastComposerVisibleRef.current = nextComposerVisible;
+        setComposerVisible(nextComposerVisible);
+      }
 
-    lastScrollTopRef.current = el.scrollTop;
-    setShowScrollBottom(distFromBottom > 200);
+      const nextShowScrollBottom = distFromBottom > 200;
+      if (nextShowScrollBottom !== lastShowScrollBottomRef.current) {
+        lastShowScrollBottomRef.current = nextShowScrollBottom;
+        setShowScrollBottom(nextShowScrollBottom);
+      }
+
+      lastScrollTopRef.current = el.scrollTop;
+    });
   }, []);
 
   // The composer is also force-pinned open while the model is streaming or
@@ -196,21 +274,22 @@ export function MainContent() {
 
   // ── P7: Stream-error toast ──
   //
-  // When lastStreamError transitions from null → string, show a toast for
-  // 3.5s then clear it (so the same error doesn't re-show on re-render).
-  // Uses a ref to track the "last shown" error so a repeat of the same
-  // message after dismissal still re-triggers.
-  const [errorToast, setErrorToast] = useState<string | null>(null);
+  // When lastStreamError transitions from null → string, fire a unified
+  // toast notification (same system as achievement unlocks / file-upload
+  // errors). BUG FIX (P0-#9): previously this used a separate motion.div
+  // at top-center while other toasts used radix Toast at bottom-right —
+  // two inconsistent toast systems. Now both use the same toast() API.
   const lastShownError = useRef<string | null>(null);
   useEffect(() => {
     if (lastStreamError && lastStreamError !== lastShownError.current) {
       lastShownError.current = lastStreamError;
-      // Deferred to a microtask so we don't call setState synchronously inside
-      // this effect (react-hooks/set-state-in-effect rule).
-      queueMicrotask(() => setErrorToast(lastStreamError));
+      toast({
+        title: '请求失败',
+        description: lastStreamError,
+        variant: 'destructive',
+      });
+      // Clear the store flag after a tick so re-sending doesn't re-trigger.
       const t = setTimeout(() => {
-        queueMicrotask(() => setErrorToast(null));
-        // Clear the store flag too so re-sending doesn't re-trigger.
         useLearningStore.setState({ lastStreamError: null });
       }, 3500);
       return () => clearTimeout(t);
@@ -305,31 +384,6 @@ export function MainContent() {
   // ── Chat view ──
   return (
     <div className="relative flex h-full flex-1 flex-col">
-      {/* ── P7: Stream-error toast — fixed at top-center of the chat area ── */}
-      <AnimatePresence>
-        {errorToast && (
-          <motion.div
-            initial={{ opacity: 0, y: -8, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 28 } }}
-            exit={{ opacity: 0, y: -8, scale: 0.97, transition: { duration: 0.16 } }}
-            className="absolute left-1/2 top-2 z-[60] flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-[12px] text-neutral-700 shadow-lg dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-200"
-            role="alert"
-            aria-live="assertive"
-          >
-            <AlertCircle className="h-3.5 w-3.5 text-neutral-500 dark:text-neutral-400" />
-            {errorToast}
-            <button
-              type="button"
-              onClick={() => setErrorToast(null)}
-              className="ml-1 text-neutral-400 transition-colors hover:text-neutral-700 dark:hover:text-neutral-200"
-              aria-label="关闭"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Chat header — the inner row is constrained to the same max-width as
           the message thread + input bar, so the title's left edge aligns
           perfectly with the first message bubble below it (no stair-step). */}
@@ -491,6 +545,7 @@ export function MainContent() {
                       variants={dateSepVariants}
                       initial="hidden"
                       animate="visible"
+                      exit="exit"
                       className="my-6 flex items-center gap-3"
                     >
                       <div className="flex-1 border-t border-neutral-100 dark:border-neutral-800" />
@@ -498,7 +553,7 @@ export function MainContent() {
                       <div className="flex-1 border-t border-neutral-100 dark:border-neutral-800" />
                     </motion.div>
                   )}
-                  <motion.div variants={msgVariants} initial="hidden" animate="visible">
+                  <motion.div variants={msgVariants} initial="hidden" animate="visible" exit="exit">
                     <MsgBubble
                       msg={msg}
                       isLastAssistant={isLastAssistant}

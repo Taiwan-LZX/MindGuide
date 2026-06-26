@@ -84,11 +84,16 @@ const collapsibleVariants = {
     opacity: 1,
     transition: { ...spring },
   },
+  // BUG FIX (P0-#7): the old ease [0.4,0,1,1] is a strong ease-IN — the
+  // height stays near its start value for the first 40% of the duration,
+  // so the collapse appears to "pause" for ~88ms before starting. Replace
+  // with ease-out so the collapse begins immediately and decelerates.
+  // Opacity uses ease-out too so the content fades fast at the start.
   collapsed: {
     height: 0,
     opacity: 0,
     transition: {
-      height: { duration: 0.22, ease: [0.4, 0, 1, 1] as const },
+      height: { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const },
       opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] as const },
     },
   },

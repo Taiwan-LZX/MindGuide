@@ -411,8 +411,15 @@ export function CommandPalette() {
                             : 'hover:bg-neutral-50 dark:hover:bg-neutral-800/50'
                         }`}
                       >
+                        {/* Active indicator bar — uses layoutId so it SLIDES
+                            between buttons instead of teleporting. Matches
+                            the settings-view tab pill technique. */}
                         {isActive && (
-                          <span className="pointer-events-none absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-neutral-400 dark:bg-neutral-500" />
+                          <motion.span
+                            layoutId="cmd-active-bar"
+                            className="pointer-events-none absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-neutral-400 dark:bg-neutral-500"
+                            transition={{ type: 'spring', stiffness: 500, damping: 32, mass: 0.6 }}
+                          />
                         )}
                         <c.icon className="h-4 w-4 shrink-0 text-neutral-400 transition-colors group-hover:text-neutral-600 dark:group-hover:text-neutral-300" />
                         <span className="flex-1 min-w-0">

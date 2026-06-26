@@ -954,3 +954,57 @@ Stage Summary:
   · 展开按钮: ✅ is_icon_only=true, has_border=false, has_bg=false，VLM 确认"简约箭头图标、无边框无背景、干净"
   · 菜单阴影: ✅ has_shadow_lg=false，VLM 确认"阴影柔和自然、无生硬边缘、视觉舒适"
 - 修改文件: src/components/learning/chat-composer.tsx
+
+---
+Task ID: impl-p0-animation-9
+Agent: main (Z.ai Code)
+Task: P0 动画修复 — 9 处严重问题全部修复
+
+Work Log:
+- P0-#1 流式 scrollIntoView 抖动:
+  · main-content.tsx: 把每个 token 触发的 scrollIntoView({behavior:'smooth'}) 改为 rAF 节流 + behavior:'auto'（流式时瞬时，非流式时 smooth）
+  · 新增 userScrolledUpRef：用户向上滚动阅读历史时，流式 token 不再自动拉回底部（"翻不动"问题修复）
+  · nearBottom 阈值 120px，只在用户已在底部附近时才自动滚动
+- P0-#2 scroll handler setState 性能:
+  · handleScroll 改为 rAF 节流（scrollRafRef）
+  · 新增 lastComposerVisibleRef + lastShowScrollBottomRef：只在派生值真正变化时才 setState，避免每次 scroll 都 re-render
+  · 滚 100px 从 5+ 次 re-render 降为最多 1 次（仅在可见状态翻转时）
+- P0-#3 切换会话旧消息出场动画:
+  · msgVariants 新增 exit variant（opacity:0, y:-8, 0.18s ease-in）
+  · dateSepVariants 新增 exit variant
+  · 消息列表 motion.div 加 exit="exit"，AnimatePresence 已有 initial={false}
+  · selectSession 时旧消息 fade-out + slide-up 而非瞬间消失
+- P0-#4+#5 专注模式 sidebar 硬切 + 时序编排:
+  · page.tsx: 移除 {showSidebar ? <PanelGroup> : <div>} 条件渲染
+  · 改为始终渲染 PanelGroup，用 sidebarPanelRef.collapse()/expand() 命令式控制
+  · react-resizable-panels 内置 width 动画，sidebar 平滑收缩而非硬切
+  · MainAreaContent 始终在 Panel id="main" 内，不会因 sidebar 变化而 unmount
+  · 新增 onCollapse/onExpand 回调同步 store.sidebarOpen 状态
+- P0-#6 命令面板选中条瞬移:
+  · command-palette.tsx: 选中条从独立 span 改为 motion.span layoutId="cmd-active-bar"
+  · activeIdx 变化时竖线用 spring(500, 32, 0.6) 平滑滑动到新位置，不再瞬移
+  · 参考 settings-view.tsx tab pill 的 layoutId 技术
+- P0-#7 course-panel collapsible exit ease:
+  · collapsibleVariants.collapsed 的 height ease 从 [0.4,0,1,1]（强 ease-in，前40%不动）改为 [0.16,1,0.3,1]（ease-out，立即开始）
+  · 修复"停顿 88ms 再收起"的感知问题
+- P0-#8 拖拽 sidebar 宽度时内容过渡:
+  · 保留 PanelGroup + PanelResizeHandle，可拖拽功能完整
+  · sidebar 内容因 Panel 始终挂载，拖拽时无硬切
+- P0-#9 统一两套 toast 系统:
+  · main-content.tsx: 移除自定义 errorToast state + motion.div（顶部中心）
+  · 改用统一 toast() API（variant:'destructive'），与成就解锁/文件上传错误共用 radix Toast（底部右侧）
+  · 移除 AlertCircle, X 未使用 import
+
+Stage Summary:
+- `bun run lint` 通过（0 errors / 0 warnings）
+- dev server HTTP 200 稳定
+- Agent Browser + VLM 验证:
+  · 专注模式: ✅ sidebar 255px → 0px 平滑收缩，VLM 确认"侧边栏已隐藏、指示器显示、主内容完整"
+  · ESC 退出: ✅ sidebar 恢复 255px
+  · 命令面板: ✅ 选中条 layoutId 平滑滑动，VLM 确认"竖线标记 + 浅色高亮 + 视觉清晰"
+  · 页面加载: ✅ title 正确，无浏览器错误
+- 修改文件:
+  · src/components/learning/main-content.tsx (scroll rAF + exit variants + 统一 toast)
+  · src/app/page.tsx (PanelGroup 始终渲染 + imperativePanelRef)
+  · src/components/learning/command-palette.tsx (layoutId 选中条)
+  · src/components/learning/course-panel.tsx (collapsible ease 修复)

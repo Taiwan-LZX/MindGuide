@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { MotionConfig, motion, AnimatePresence } from 'framer-motion';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
 import { useLearningStore } from '@/store/learning-store';
 import { usePreferences } from '@/store/preferences-store';
 import { Sidebar } from '@/components/learning/sidebar';
@@ -163,6 +163,25 @@ export default function Page() {
   // forces sidebarOpen=false, but we also guard here for safety).
   const showSidebar = !focusMode && displayMode !== 'full' && sidebarOpen;
 
+  // Imperative ref to the sidebar Panel — lets us collapse/expand it
+  // smoothly via react-resizable-panels' built-in animation instead of
+  // unmounting/remounting the PanelGroup. This preserves the drag-resize
+  // state AND gives a clean transition for focus mode / ⌘B toggle.
+  const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
+
+  // Collapse/expand the sidebar Panel imperatively when showSidebar changes.
+  // react-resizable-panels handles the width animation internally, so the
+  // sidebar slides shut instead of hard-cutting.
+  useEffect(() => {
+    const panel = sidebarPanelRef.current;
+    if (!panel) return;
+    if (showSidebar) {
+      panel.expand();
+    } else {
+      panel.collapse();
+    }
+  }, [showSidebar]);
+
   // viewDir comes from the store — see `activeFeatureViewDir` in
   // learning-store.ts. The store computes it atomically inside
   // setActiveFeatureView, so this component just reads it without any
@@ -185,47 +204,58 @@ export default function Page() {
 
             In focus mode the entire PanelGroup collapses to just the main
             content (sidebar hidden, no handle). */}
-        {showSidebar ? (
-          <PanelGroup direction="horizontal" autoSaveId="mindguide-layout">
-            <Panel
-              id="sidebar"
-              order={1}
-              defaultSize={20}
-              minSize={14}
-              maxSize={32}
-              collapsible
-              collapsedSize={0}
-              onCollapse={() => setSidebarOpen(false)}
-              className="h-full"
-            >
-              <Sidebar collapsed={false} />
-            </Panel>
-            <PanelResizeHandle
-              className="group relative w-[3px] shrink-0 bg-transparent transition-colors hover:bg-[var(--brand)]/30 data-[resize-handle-state=drag]:bg-[var(--brand)]/50"
-              aria-label="拖拽调整侧边栏宽度"
-            >
-              <div className="absolute left-1/2 top-1/2 h-8 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-neutral-200 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-neutral-700" />
-            </PanelResizeHandle>
-            <Panel id="main" order={2} defaultSize={80} minSize={50} className="h-full">
-              <MainAreaContent
-                activeFeatureView={activeFeatureView}
-                activeFeatureViewDir={activeFeatureViewDir}
-                focusMode={focusMode}
-              />
-            </Panel>
-          </PanelGroup>
-        ) : (
-          <div className="flex h-full w-full">
-            {!focusMode && displayMode !== 'full' && <Sidebar collapsed={true} />}
-            <div className="relative flex h-full flex-1 flex-col overflow-hidden">
-              <MainAreaContent
-                activeFeatureView={activeFeatureView}
-                activeFeatureViewDir={activeFeatureViewDir}
-                focusMode={focusMode}
-              />
-            </div>
-          </div>
-        )}
+        {/* ── Layout: resizable sidebar + main content ─────────────────────
+            The PanelGroup is ALWAYS rendered (never unmounted) so the
+            drag-resize state persists. Focus mode / ⌘B toggle collapses the
+            sidebar Panel imperatively via sidebarPanelRef — react-resizable-
+            panels animates the width transition internally, so the sidebar
+            slides shut smoothly instead of hard-cutting.
+
+            BUG FIX (P0-#4/#5/#8): previously {showSidebar ? <PanelGroup> :
+            <div>} hard-switched on focus mode, unmounting everything. Now
+            the PanelGroup stays mounted and the sidebar Panel collapses/
+            expands with built-in animation. Drag-resize is preserved. */}
+        <PanelGroup direction="horizontal" autoSaveId="mindguide-layout">
+          <Panel
+            ref={sidebarPanelRef}
+            id="sidebar"
+            order={1}
+            defaultSize={20}
+            minSize={14}
+            maxSize={32}
+            collapsible
+            collapsedSize={0}
+            onCollapse={() => {
+              // Sync store state when the panel collapses (e.g. user dragged
+              // it to 0 or pressed the collapse arrow). Guard against
+              // focusMode to avoid feedback loops.
+              if (!focusMode && useLearningStore.getState().sidebarOpen) {
+                setSidebarOpen(false);
+              }
+            }}
+            onExpand={() => {
+              if (!focusMode && !useLearningStore.getState().sidebarOpen) {
+                setSidebarOpen(true);
+              }
+            }}
+            className="h-full"
+          >
+            <Sidebar collapsed={false} />
+          </Panel>
+          <PanelResizeHandle
+            className="group relative w-[3px] shrink-0 bg-transparent transition-colors hover:bg-[var(--brand)]/30 data-[resize-handle-state=drag]:bg-[var(--brand)]/50"
+            aria-label="拖拽调整侧边栏宽度"
+          >
+            <div className="absolute left-1/2 top-1/2 h-8 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-neutral-200 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-neutral-700" />
+          </PanelResizeHandle>
+          <Panel id="main" order={2} defaultSize={80} minSize={50} className="h-full">
+            <MainAreaContent
+              activeFeatureView={activeFeatureView}
+              activeFeatureViewDir={activeFeatureViewDir}
+              focusMode={focusMode}
+            />
+          </Panel>
+        </PanelGroup>
 
         {/* ── Focus mode indicator ───────────────────────────────────────
             A small pill at the top-center of the viewport that confirms the

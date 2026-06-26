@@ -1216,20 +1216,18 @@ function AttachMenu({
       {ATTACH_OPTIONS.map(opt => {
         const Icon = opt.icon;
         return (
-          <button
-            key={opt.key}
-            type="button"
-            onClick={() => onSelect(opt)}
-            className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
-          >
-            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
-              <Icon className="h-3.5 w-3.5" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
-              <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
-            </span>
-          </button>
+          <MouseFollowTooltip key={opt.key} content={opt.desc} follow={false} vAlign="above" maxWidth={220}>
+            <button
+              type="button"
+              onClick={() => onSelect(opt)}
+              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                <Icon className="h-3.5 w-3.5" />
+              </span>
+              <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
+            </button>
+          </MouseFollowTooltip>
         );
       })}
     </AnchoredPopover>
@@ -1488,31 +1486,29 @@ function ModeMenu({
         const Icon = opt.icon;
         const active = opt.key === current;
         return (
-          <button
-            key={opt.key}
-            type="button"
-            onClick={() => onSelect(opt.key)}
-            className={`flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
-              active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
-            }`}
-          >
-            <span
-              className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
-                active
-                  ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
-                  : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+          <MouseFollowTooltip key={opt.key} content={opt.desc} follow={false} vAlign="above" maxWidth={240}>
+            <button
+              type="button"
+              onClick={() => onSelect(opt.key)}
+              className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors ${
+                active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
               }`}
             >
-              <Icon className="h-3.5 w-3.5" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="flex items-center gap-1.5">
+              <span
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${
+                  active
+                    ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
+                    : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+              </span>
+              <span className="flex min-w-0 flex-1 items-center gap-1.5">
                 <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
                 {active && <Check className="h-3.5 w-3.5 text-neutral-500 dark:text-neutral-400" />}
               </span>
-              <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
-            </span>
-          </button>
+            </button>
+          </MouseFollowTooltip>
         );
       })}
     </AnchoredPopover>
@@ -1561,36 +1557,31 @@ function ThinkingMenu({
         const Icon = opt.icon;
         const active = opt.key === current;
         return (
-          <button
-            key={opt.key}
-            type="button"
-            onClick={() => onSelect(opt.key)}
-            className={`flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
-              active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
-            }`}
-          >
-            <span
-              className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
-                active
-                  ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
-                  : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+          <MouseFollowTooltip key={opt.key} content={opt.desc} follow={false} vAlign="above" maxWidth={260}>
+            <button
+              type="button"
+              onClick={() => onSelect(opt.key)}
+              className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left transition-colors ${
+                active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
               }`}
             >
-              <Icon className="h-3.5 w-3.5" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="flex items-center gap-1.5">
+              <span
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${
+                  active
+                    ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
+                    : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+              </span>
+              <span className="flex min-w-0 flex-1 items-center gap-1.5">
                 <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
                 {active && <Check className="h-3.5 w-3.5 text-neutral-700 dark:text-neutral-300" />}
               </span>
-              <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
-            </span>
-          </button>
+            </button>
+          </MouseFollowTooltip>
         );
       })}
-      <p className="px-2.5 py-1.5 text-[10px] leading-snug text-neutral-400 dark:text-neutral-500">
-        普通模型均具备深度推理能力。开启后模型在内部推理完成后再作答，回答更严谨；推理动画会在卡片上方展示当前推理形态。
-      </p>
     </AnchoredPopover>
   );
 }
@@ -1649,33 +1640,29 @@ function ModelCardMenu({
         {MODEL_OPTIONS.map(opt => {
           const active = opt.key === current;
           return (
-            <button
-              key={opt.key}
-              type="button"
-              onClick={() => onSelect(opt.key)}
-              className={`flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors ${
-                active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
-              }`}
-            >
-              <span
-                className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
-                  active
-                    ? 'border-neutral-800 bg-neutral-800 dark:border-neutral-200 dark:bg-neutral-200'
-                    : 'border-neutral-300 dark:border-neutral-600'
+            <MouseFollowTooltip key={opt.key} content={`${opt.desc} · ${(opt.contextWindow / 1000).toFixed(0)}k 上下文`} follow={false} vAlign="above" maxWidth={260}>
+              <button
+                type="button"
+                onClick={() => onSelect(opt.key)}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors ${
+                  active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
                 }`}
               >
-                {active && <CircleDot className="h-2 w-2 text-white dark:text-neutral-900" strokeWidth={3} />}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5">
-                  <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
-                  <span className="rounded-full border border-neutral-200 px-1.5 py-px text-[9.5px] text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
-                    {(opt.contextWindow / 1000).toFixed(0)}k 上下文
-                  </span>
+                <span
+                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                    active
+                      ? 'border-neutral-800 bg-neutral-800 dark:border-neutral-200 dark:bg-neutral-200'
+                      : 'border-neutral-300 dark:border-neutral-600'
+                  }`}
+                >
+                  {active && <CircleDot className="h-2 w-2 text-white dark:text-neutral-900" strokeWidth={3} />}
                 </span>
-                <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
-              </span>
-            </button>
+                <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
+                <span className="ml-auto rounded-full border border-neutral-200 px-1.5 py-px text-[9.5px] text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+                  {(opt.contextWindow / 1000).toFixed(0)}k
+                </span>
+              </button>
+            </MouseFollowTooltip>
           );
         })}
       </div>
@@ -1704,10 +1691,6 @@ function ModelCardMenu({
         budget={modelBudget}
         unit="tokens / 会话"
       />
-
-      <p className="mt-1.5 px-1 text-[10px] leading-snug text-neutral-400 dark:text-neutral-500">
-        用量为估算值，仅作可视化参考。模型切换将影响下一次发送的请求。
-      </p>
     </AnchoredPopover>
   );
 }

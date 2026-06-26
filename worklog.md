@@ -530,3 +530,40 @@ Stage Summary:
   · focused empty: "出现发送·换行提示、卡片适度扩展、紧凑不拥挤"
   · typing: "发送·换行提示已消失、卡片收缩明显、干净利落"
 - 修改文件: src/components/learning/chat-composer.tsx
+
+---
+Task ID: compress-menu-cards-7
+Agent: main (Z.ai Code)
+Task: 浮层卡片信息压缩 — 移除描述小字，改为 hover tooltip
+
+Work Log:
+- 用 VLM 分析四个浮层菜单当前信息密度：每个选项都有"标题+描述"两行，ModelCardMenu 还有底部冗长说明，ThinkingMenu 也有底部说明段落
+- AttachMenu 压缩:
+  · 移除每个选项的 desc 小字行（"PDF / Word / Markdown 等学习材料"等）
+  · 选项从 items-start + 两行布局改为 items-center + 单行（icon h-6 + label）
+  · 用 MouseFollowTooltip(content=opt.desc, follow=false, vAlign="above") 包裹每个选项
+  · py-2 → py-1.5，icon h-7 → h-6
+- ModeMenu 压缩:
+  · 同样移除 desc，单行布局，MouseFollowTooltip 包裹
+  · active 状态的 Check 标记保留在标题右侧
+- ThinkingMenu 压缩:
+  · 移除 desc 小字 + 底部整段冗长说明文字（"普通模型均具备深度推理能力..."）
+  · 单行布局 + MouseFollowTooltip
+- ModelCardMenu 压缩:
+  · 移除每个模型的 desc 小字行（"最新旗舰·推理与长文本均衡"等）
+  · contextWindow 从标题旁的 chip 改为 ml-auto 右对齐的精简 chip（"200k" 而非 "200k 上下文"）
+  · 移除底部冗长说明文字（"用量为估算值，仅作可视化参考..."）
+  · MouseFollowTooltip content 合并 desc + contextWindow（"最新旗舰·推理与长文本均衡 · 200k 上下文"）
+  · py-2 → py-1.5
+
+Stage Summary:
+- `bun run lint` 通过（0 errors / 0 warnings）
+- dev server HTTP 200 稳定
+- Agent Browser + VLM 验证:
+  · AttachMenu: ✅ 只显示一行（图标+标题），hover 弹出"PDF / Word / Markdown 等学习材料"tooltip
+  · ModeMenu: ✅ 只显示一行（图标+标题+勾选），紧凑无冗余
+  · ThinkingMenu: ✅ 只显示一行，底部冗长说明已移除
+  · ModelCardMenu: ✅ 只显示一行（radio+名称+k数），底部说明已移除
+  · Hover tooltip: ✅ MouseFollowTooltip follow=false 固定在选项旁边弹出描述
+- VLM 确认: "菜单选项只显示一行、hover 时弹出 tooltip 显示描述、tooltip 固定在选项旁边"
+- 修改文件: src/components/learning/chat-composer.tsx（四个菜单组件）

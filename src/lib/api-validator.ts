@@ -74,6 +74,9 @@ export const chatSchema = z.object({
     )
     .optional()
     .default([]),
+  teachingMode: z.enum(['guide', 'explain', 'practice', 'review']).optional().default('guide'),
+  thinkingMode: z.enum(['off', 'standard', 'deep', 'structured']).optional().default('standard'),
+  selectedModel: z.enum(['GLM-4.6', 'GLM-4.5', 'GLM-4-Air']).optional().default('GLM-4.6'),
 });
 
 export const createSessionSchema = z.object({

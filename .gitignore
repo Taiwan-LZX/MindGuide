@@ -83,6 +83,9 @@ watchdog.py
 # Local QA screenshots & dev snapshots (regenerated on demand, not source)
 /download/
 
+# Verification screenshots from agent-browser E2E runs
+verify-*.png
+
 # Backup files
 *.bak
 *.bak.*

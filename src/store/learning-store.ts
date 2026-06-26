@@ -130,6 +130,24 @@ interface LearningStore {
   isLoadingMessages: boolean;
   isStreaming: boolean;
   streamingContent: string;
+  // Reasoning trace streamed from the model while thinking is enabled. Cleared
+  // at the start of each turn. Drives the "思考中" animation phase: while
+  // streamingThinking is non-empty AND streamingContent is empty, the composer
+  // shows the thinking animation; once content starts arriving the animation
+  // transitions to the answer phase.
+  streamingThinking: string;
+  // Explicit phase signal from the server ('thinking' | 'answering' | null).
+  // More reliable than inferring phase from content emptiness — the server
+  // sends `phase:'thinking'` the moment the first reasoning token arrives,
+  // even before any reasoning text has been forwarded.
+  streamingPhase: 'thinking' | 'answering' | null;
+  // Last stream error message (null when no error). Set when the SSE stream
+  // emits an error event or the fetch fails mid-stream. The UI surfaces a
+  // toast when this transitions from null → string, then clears it after a
+  // timeout. This is the ONLY authoritative error channel — the UI should
+  // NOT infer errors from "isStreaming went false with no content" because
+  // that also happens on legitimate empty responses.
+  lastStreamError: string | null;
 
   // Knowledge
   knowledgeNodes: KnowledgeNode[];
@@ -149,6 +167,25 @@ interface LearningStore {
   settingsPanelOpen: boolean;
   settingsViewOpen: boolean;
   createNewPanelOpen: boolean;
+  // Teaching mode — the "programming mode" analogue. The composer exposes this
+  // as a selector (引导 / 讲解 / 练习 / 复习); the chat route reads it and tweaks
+  // the system prompt so the same model behaves like four different teachers.
+  teachingMode: 'guide' | 'explain' | 'practice' | 'review';
+  // Thinking mode — controls how deeply the model reasons before answering.
+  //   off         → thinking disabled, fast direct answer
+  //   standard    → model's built-in deep reasoning (thinking.enabled)
+  //   deep        → strong reasoning context overlay: multi-angle / counter-example / edge-case
+  //   structured  → advanced reasoning structure: chain → self-critique → multi-path
+  // The composer exposes this as a 4-way selector next to the send button;
+  // the chat route reads it and toggles `thinking: {type:'enabled'|'disabled'}`
+  // plus an additive reasoning-style prompt overlay.
+  thinkingMode: 'off' | 'standard' | 'deep' | 'structured';
+  // Selected chat model — exposed in the composer's right-side ModelCard.
+  // The chat route reads this to choose which ZAI model to call.
+  selectedModel: 'GLM-4.6' | 'GLM-4.5' | 'GLM-4-Air';
+  // Cumulative token usage for the active session (input + output, all turns).
+  // Used by the ModelCard's "模型用量" meter. Reset when switching sessions.
+  modelUsageTokens: number;
   activeFeatureView: string | null;
   // Direction of the last activeFeatureView transition:
   //   +1 = forward (welcome → feature, or feature → different feature)
@@ -228,6 +265,7 @@ interface LearningStore {
 
   // Actions - Messages
   sendMessage: (content: string) => Promise<void>;
+  regenerateLastMessage: () => Promise<void>;
   fetchMessages: (sessionId: string) => Promise<void>;
 
   // Actions - Knowledge
@@ -262,6 +300,10 @@ interface LearningStore {
   setSidebarOpen: (open: boolean) => void;
   setKnowledgePanelOpen: (open: boolean) => void;
   setDisplayMode: (mode: 'side' | 'half' | 'full') => void;
+  setTeachingMode: (mode: 'guide' | 'explain' | 'practice' | 'review') => void;
+  setThinkingMode: (mode: 'off' | 'standard' | 'deep' | 'structured') => void;
+  setSelectedModel: (model: 'GLM-4.6' | 'GLM-4.5' | 'GLM-4-Air') => void;
+  setModelUsageTokens: (tokens: number) => void;
   setSettingsPanelOpen: (open: boolean) => void;
   setSettingsViewOpen: (open: boolean) => void;
   setCreateNewPanelOpen: (open: boolean) => void;
@@ -312,6 +354,9 @@ const initialState = {
   isLoadingMessages: false,
   isStreaming: false,
   streamingContent: '',
+  streamingThinking: '',
+  streamingPhase: null,
+  lastStreamError: null,
   knowledgeNodes: [] as KnowledgeNode[],
   references: [] as Reference[],
   coursePanelOpen: false,
@@ -322,6 +367,10 @@ const initialState = {
   sidebarOpen: true,
   knowledgePanelOpen: true,
   displayMode: 'side' as const,
+  teachingMode: 'guide' as const,
+  thinkingMode: 'standard' as 'off' | 'standard' | 'deep' | 'structured',
+  selectedModel: 'GLM-4.6' as 'GLM-4.6' | 'GLM-4.5' | 'GLM-4-Air',
+  modelUsageTokens: 0,
   settingsPanelOpen: false,
   settingsViewOpen: false,
   createNewPanelOpen: false,
@@ -466,6 +515,8 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       tasks: [],
       cards: [],
       materials: [],
+      // Reset per-session model usage meter — the ModelCard reads this.
+      modelUsageTokens: 0,
     });
     await Promise.all([
       get().fetchMessages(id),
@@ -545,7 +596,36 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       messages: [...state.messages, userMessage],
       isStreaming: true,
       streamingContent: '',
+      streamingThinking: '',
+      streamingPhase: null,
+      lastStreamError: null,
     }));
+
+    // ── Minimum thinking-phase duration ──
+    //
+    // GLM-4.6 via the current SDK doesn't surface `reasoning_content` in the
+    // stream — the model reasons internally and emits only `content`, often
+    // within ~300ms. That makes the "thinking" animation flash too fast for
+    // the user to perceive. When thinking is enabled (any mode other than
+    // 'off'), we SYNTHESIZE a thinking phase: set streamingPhase='thinking'
+    // immediately and hold it for a minimum duration (900ms) OR until real
+    // reasoning tokens arrive (whichever is longer). If content arrives
+    // before the minimum elapses, we buffer it and flush on phase transition.
+    //
+    // Cognitive rationale: the thinking animation communicates "the model is
+    // reasoning carefully" — if it flashes for 200ms the user reads it as a
+    // glitch, not deliberation. A sub-second minimum makes the deliberation
+    // legible without adding noticeable latency.
+    const thinkingEnabled = get().thinkingMode !== 'off';
+    const MIN_THINK_MS = 900;
+    let thinkHoldUntil = 0;
+    let bufferedContent = '';
+    let phaseHeld = false;
+    if (thinkingEnabled) {
+      set({ streamingPhase: 'thinking' });
+      thinkHoldUntil = Date.now() + MIN_THINK_MS;
+      phaseHeld = true;
+    }
 
     try {
       const res = await fetch('/api/chat', {
@@ -565,6 +645,9 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
             category: n.category,
             mastered: n.mastered,
           })),
+          teachingMode: get().teachingMode,
+          thinkingMode: get().thinkingMode,
+          selectedModel: get().selectedModel,
         }),
       });
 
@@ -579,6 +662,7 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let fullContent = '';
+      let fullThinking = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -593,31 +677,94 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
             if (data === '[DONE]') continue;
             try {
               const parsed = JSON.parse(data);
+              // Phase signal — the server sends this once when reasoning
+              // starts and again when content starts. This is the AUTHORITATIVE
+              // phase marker (more reliable than inferring from emptiness).
+              // But if we're holding a synthesized thinking phase (min duration),
+              // we DON'T let 'answering' end it early — we hold until the timer.
+              if (parsed.phase === 'thinking' && !phaseHeld) {
+                set({ streamingPhase: 'thinking' });
+              }
+              // Reasoning trace (only sent while thinking is enabled). We
+              // accumulate it for a future "查看推理" panel; the thinking
+              // animation itself is driven by streamingPhase.
+              if (typeof parsed.thinking === 'string') {
+                if (parsed.full) {
+                  fullThinking = parsed.thinking;
+                } else {
+                  fullThinking += parsed.thinking;
+                }
+                set({ streamingThinking: stripEmoji(fullThinking) });
+              }
               if (parsed.content) {
                 if (parsed.full) {
-                  // Server sends the full sanitized accumulator; replace
-                  // rather than append to avoid drift.
                   fullContent = parsed.content;
                 } else {
                   fullContent += parsed.content;
                 }
-                // Strip emoji / decorative symbols so the live-streaming
-                // bubble stays thesis-monochrome even if the model emits
-                // them despite the system prompt.
-                set({ streamingContent: stripEmoji(fullContent) });
+                const sanitized = stripEmoji(fullContent);
+                // If we're still in the synthesized thinking-hold window,
+                // BUFFER the content instead of showing it — the thinking
+                // animation must complete its minimum duration so the user
+                // perceives the deliberation. We flush on phase transition.
+                if (phaseHeld && Date.now() < thinkHoldUntil) {
+                  bufferedContent = sanitized;
+                } else {
+                  if (phaseHeld) {
+                    // Hold window elapsed — transition to answering + flush.
+                    phaseHeld = false;
+                    set({ streamingPhase: 'answering' });
+                  }
+                  set({ streamingContent: sanitized });
+                }
               }
-            } catch {
+              // Stream error — the upstream connection broke. Surface as a
+              // recoverable error instead of looping forever.
+              if (parsed.error) {
+                throw new Error(`stream_error: ${parsed.error}`);
+              }
+            } catch (e) {
+              // Re-throw stream errors (thrown by the parsed.error branch).
+              if (e instanceof Error && e.message.startsWith('stream_error:')) {
+                throw e;
+              }
               // Skip malformed JSON chunks
             }
           }
         }
       }
 
+      // If we were holding a synthesized thinking phase and the stream ended
+      // before the minimum duration elapsed, wait out the remainder so the
+      // thinking animation completes its minimum legible duration, THEN flush
+      // any buffered content. This ensures even very-fast model responses
+      // (<300ms) still show a perceptible "推理中" phase.
+      if (phaseHeld) {
+        const remaining = thinkHoldUntil - Date.now();
+        if (remaining > 0) {
+          await new Promise(r => setTimeout(r, remaining));
+        }
+        if (bufferedContent) {
+          set({ streamingPhase: 'answering', streamingContent: bufferedContent });
+          // Brief beat so the user sees the answer appear after the thinking.
+          await new Promise(r => setTimeout(r, 150));
+        }
+        phaseHeld = false;
+      }
+
       // Re-fetch from DB to get server-side IDs (prevents duplicates)
       set({
         isStreaming: false,
         streamingContent: '',
+        streamingThinking: '',
+        streamingPhase: null,
       });
+      // Accumulate model usage estimate for this session — every assistant
+      // turn adds input + output tokens. We approximate with message length
+      // (chars/4 ≈ tokens) since the SSE stream doesn't surface usage. This
+      // is what the ModelCard's "模型用量" meter reads.
+      const approxAddedTokens = Math.ceil((content.length + fullContent.length + fullThinking.length) / 4);
+      set({ modelUsageTokens: get().modelUsageTokens + approxAddedTokens });
       await get().fetchMessages(currentSessionId);
 
       // Refresh knowledge nodes and references
@@ -629,8 +776,59 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
 
     } catch (error) {
       console.error('Failed to send message:', error);
-      set({ isStreaming: false, streamingContent: '' });
+      // Reset all streaming state so the composer becomes editable again.
+      // If the error was a stream interruption, the user can re-send.
+      const errMsg = error instanceof Error ? error.message : 'unknown_error';
+      const friendly = errMsg.includes('stream_interrupted')
+        ? '回复被中断，请重新发送'
+        : errMsg.includes('Chat API returned')
+          ? '服务暂不可用，请稍后重试'
+          : '发送失败，请重试';
+      set({
+        isStreaming: false,
+        streamingContent: '',
+        streamingThinking: '',
+        streamingPhase: null,
+        lastStreamError: friendly,
+      });
     }
+  },
+
+  // Regenerate the most recent assistant reply.
+  //
+  // Strategy: walk back from the end of the thread, find the last user turn,
+  // delete that user turn AND every message after it (the assistant reply we
+  // want to replace) from both the DB and local state, then re-send the same
+  // question through sendMessage(). This yields a clean single-question /
+  // single-answer tail — no duplicates, no orphan turns.
+  regenerateLastMessage: async () => {
+    const { currentSessionId, messages, isStreaming, sendMessage } = get();
+    if (!currentSessionId || isStreaming) return;
+
+    // Find the index of the last user message.
+    let lastUserIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') { lastUserIdx = i; break; }
+    }
+    if (lastUserIdx === -1) return;
+
+    const lastUserContent = messages[lastUserIdx].content;
+    const toDelete = messages.slice(lastUserIdx); // user turn + everything after
+
+    // Optimistically trim local state so the UI drops the old reply at once.
+    set({ messages: messages.slice(0, lastUserIdx) });
+
+    // Delete the trailing turns from the DB. We delete in order; if any single
+    // delete fails we keep going (the subsequent fetchMessages will reconcile).
+    await Promise.all(
+      toDelete
+        .filter(m => !m.id.startsWith('temp-'))
+        .map(m => fetch(`/api/messages/${m.id}`, { method: 'DELETE' }).catch(() => {}))
+    );
+
+    // Re-ask the same question — sendMessage adds the user turn back and
+    // streams a fresh reply.
+    await sendMessage(lastUserContent);
   },
 
   fetchMessages: async (sessionId: string) => {
@@ -1142,6 +1340,10 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
   setSidebarOpen: (open: boolean) => set({ sidebarOpen: open }),
   setKnowledgePanelOpen: (open: boolean) => set({ knowledgePanelOpen: open }),
   setDisplayMode: (mode: 'side' | 'half' | 'full') => set({ displayMode: mode, sidebarOpen: mode !== 'full' }),
+  setTeachingMode: (mode: 'guide' | 'explain' | 'practice' | 'review') => set({ teachingMode: mode }),
+  setThinkingMode: (mode: 'off' | 'standard' | 'deep' | 'structured') => set({ thinkingMode: mode }),
+  setSelectedModel: (model: 'GLM-4.6' | 'GLM-4.5' | 'GLM-4-Air') => set({ selectedModel: model }),
+  setModelUsageTokens: (tokens: number) => set({ modelUsageTokens: Math.max(0, Math.floor(tokens)) }),
   setSettingsPanelOpen: (open: boolean) => set({ settingsPanelOpen: open }),
   setSettingsViewOpen: (open: boolean) => set({ settingsViewOpen: open }),
   setCreateNewPanelOpen: (open: boolean) => set({ createNewPanelOpen: open }),

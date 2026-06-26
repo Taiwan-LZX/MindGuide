@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, memo } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Check, Copy, Terminal } from 'lucide-react';
+import { Check, Copy } from 'lucide-react';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -37,11 +37,11 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="flex h-7 min-w-7 items-center justify-center rounded-md px-1.5 text-neutral-400 transition-colors hover:bg-neutral-200/60 hover:text-neutral-600 dark:hover:bg-white/10 dark:hover:text-neutral-300"
+      className="flex h-7 min-w-7 items-center justify-center gap-1 rounded-md px-1.5 text-neutral-400 transition-colors hover:bg-neutral-200/60 hover:text-neutral-600 dark:hover:bg-white/10 dark:hover:text-neutral-300"
       aria-label="Copy code"
     >
       {copied ? (
-        <Check className="h-3.5 w-3.5 text-green-500" />
+        <Check className="h-3.5 w-3.5 text-emerald-500" />
       ) : (
         <Copy className="h-3.5 w-3.5" />
       )}
@@ -61,11 +61,16 @@ function CodeBlockWrapper({
   code?: string;
 }) {
   return (
-    <div className="my-3 overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800">
-      <div className="flex items-center justify-between border-b border-neutral-200/80 px-4 py-1.5 dark:border-white/[0.08]">
+    <div className="group/code my-3 overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/60">
+      <div className="flex items-center justify-between border-b border-neutral-200/70 px-3.5 py-1.5 dark:border-white/[0.06]">
         <div className="flex items-center gap-1.5">
-          <Terminal className="h-3 w-3 text-neutral-500" />
-          <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+          {/* Mac-style traffic dots — a quiet, familiar "this is code" cue */}
+          <span className="flex gap-1" aria-hidden>
+            <span className="h-2 w-2 rounded-full bg-neutral-300 dark:bg-neutral-600" />
+            <span className="h-2 w-2 rounded-full bg-neutral-300 dark:bg-neutral-600" />
+            <span className="h-2 w-2 rounded-full bg-neutral-300 dark:bg-neutral-600" />
+          </span>
+          <span className="ml-1 font-mono text-[11px] font-medium lowercase tracking-tight text-neutral-500 dark:text-neutral-400">
             {language || 'code'}
           </span>
         </div>
@@ -310,7 +315,7 @@ export function CopyAllButton({ content }: { content: string }) {
       title="Copy"
     >
       {copied ? (
-        <Check className="h-3 w-3 text-green-500" />
+        <Check className="h-3 w-3 text-emerald-500" />
       ) : (
         <Copy className="h-3 w-3" />
       )}

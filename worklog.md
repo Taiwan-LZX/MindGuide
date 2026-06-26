@@ -1116,3 +1116,351 @@ Stage Summary:
   · src/components/learning/settings-view.tsx (backdrop 统一 + 关闭按钮 damping)
   · src/components/learning/mouse-follow-tooltip.tsx (字号 12px)
   · src/components/learning/create-new-panel.tsx (willChange 移除)
+
+---
+Task ID: research-llm-algo-9b
+Agent: general-purpose (LLM algo search)
+Task: 搜索 LLM 推理算法/框架开源仓库
+
+Work Log:
+- 用 z-ai-web-dev-sdk 的 web_search 函数跑了 21 轮搜索，覆盖 5 个主题：推理过程可视化、多步推理编排（ReAct/ToT/GoT）、RAG 增强推理可视化、推理性能监控、JS/TS Agent 框架。额外补查了 GLM/Z.AI reasoning_content 流式协议和 MindGuide 当前 chat/route.ts 的实现。
+- 搜索关键词清单：
+  · "LLM reasoning framework open source 2024 chain of thought visualization"
+  · "tree of thoughts ReAct graph of thoughts implementation github open source"
+  · "RAG reasoning visualization open source citation trace framework"
+  · "LLM inference monitoring dashboard token latency open source"
+  · "Vercel AI SDK reasoning agent streaming tool calls 2024"
+  · "LangChain.js reasoning agent streaming TypeScript tutorial"
+  · "LlamaIndex.TS TypeScript agent reasoning workflow"
+  · "reasoning trace visualization react component chain of thought tree"
+  · "langfuse helicone langsmith LLM observability open source self-hosted"
+  · "GLM-4 reasoning_content streaming thinking chain of thought zhipu"
+  · "DSPy reasoning pipeline TypeScript javascript reasoning steps"
+  · "Mastra AI SDK TypeScript agent workflow reasoning"
+  · "Inkeep AI reasoning chat react-flow reactflow reasoning graph visualization"
+  · "open source self-hosted RAG pipeline ragflow lightrag graph reasoning visualization"
+  · "ai-sdk elements chain of thought component react github reasoning"
+  · "LangGraph.js TypeScript agent state graph reasoning workflow"
+  · "opik arize phoenix open source LLM tracing reasoning trace self-host"
+  · "Langfuse TypeScript SDK Next.js reasoning trace integration"
+  · "assistant-ui react chat reasoning tool call component github"
+  · "z-ai-web-dev-sdk reasoning_content thinking streaming GLM-4.6"
+  · "Morphic NoteGPT open source AI chat reasoning react next.js citation"
+- 审阅了 MindGuide 现有实现：src/app/api/chat/route.ts 已经在 parseUpstreamSse() 里正确解析了 GLM 的 delta.reasoning_content 字段，把 thinking 和 content 分两路 SSE 事件下发（{phase:'thinking'}/{thinking,...} 和 {phase:'answering'}/{content,...}），并把推理轨迹持久化到 LearningMessage.thinking 字段。所以"实时反映推理过程"的下半段（数据通道）已经具备，缺的是"分步结构化展示 + 真正的多步 agent 编排"。
+
+找到的仓库/框架列表（按对 MindGuide 的相关性和成熟度排序）：
+
+== A. 推理过程可视化框架 ==
+
+A1. AI Elements — ChainOfThought 组件
+  · URL: https://elements.ai-sdk.dev/components/chain-of-thought | https://github.com/vercel/ai-elements
+  · 核心能力: Vercel 官方基于 shadcn/ui 的 AI 组件库；ChainOfThought 复合组件按"步骤"渲染推理过程，每步有 pending/active/complete 状态，支持内嵌 search results；tryelements.dev 还有"AI Chain of Thought"复合组件版
+  · 适用场景: 把模型的 reasoning_content 拆成可读步骤、配 collapsible 折叠面板
+  · MindGuide 应用: ★★★★★ 直接 fit。MindGuide 已用 shadcn/ui + radix，`npx shadcn add https://elements.ai-sdk.dev/r/chain-of-thought` 即可装。把现有 `phase:'thinking'` 事件改成驱动 ChainOfThought 的 step 数组即可
+
+A2. assistant-ui
+  · URL: https://github.com/assistant-ui/assistant-ui | https://www.assistant-ui.com
+  · 核心能力: TS/React 库，YC 项目，已被 LangChain / Stack AI / Browser Use 采用；自带 "Chain of Thought UI" 模板（可折叠思考 accordion + tool call 渲染）；姊妹仓库 tool-ui 把工具调用结果变成 approvals/forms/tables
+  · 适用场景: 整套 AI 对话 UI 替换，自带 runtime 适配 Vercel AI SDK / LangChain
+  · MindGuide 应用: ★★★★☆ 比单组件重，但能一次性把消息流、思考面板、工具调用面板都规范化
+
+A3. React Flow / xyflow
+  · URL: https://reactflow.dev | https://github.com/xyflow/xyflow
+  · 核心能力: MIT 节点图库，nodes=推理步骤、edges=依赖关系；可拖拽、可缩放
+  · 适用场景: Tree-of-Thoughts / Graph-of-Thoughts 这种分叉结构的可视化
+  · MindGuide 应用: ★★★☆☆ 在"deep/structured"模式下展示推理树时启用，普通对话不需要
+
+A4. Interactive Reasoning (UIST'25 paper)
+  · URL: https://homes.cs.washington.edu/~ypang2/papers/uist25-interactive-reasoning.pdf
+  · 核心能力: 学术工作 — 把 CoT 转成可交互树、用户可直接编辑推理步骤并反馈
+  · 适用场景: 设计参考、教学模式启发
+  · MindGuide 应用: ★★☆☆☆ 不直接用代码，作为"教学模式"用户可编辑推理的设计灵感
+
+== B. 多步推理编排（ReAct / ToT / GoT）==
+
+B1. Vercel AI SDK (streamText + maxSteps + tools)
+  · URL: https://vercel.com/ai-sdk | https://ai-sdk.dev/docs/ai-sdk-core/tools-and-tool-calling
+  · 核心能力: TS 原生；streamText({tools, maxSteps}) 自动跑 ReAct 循环；每步可流式输出 reasoning part + tool call + tool result；@ai-sdk/zai provider 直接支持 GLM-4.6
+  · 适用场景: 把 MindGuide 的 thinkingMode 从"prompt overlay"升级成"真实多步 ReAct"
+  · MindGuide 应用: ★★★★★ 优先选项。ZAI 已有官方 provider (@ai-sdk/zai)，可平滑迁移；用 useStream / useChat hook 替换现有手写 SSE 解析
+  · 注意坑: Z.AI 期望 extra_body.thinking 而非 OpenRouter 风格的 extra_body.reasoning（见 NousResearch/hermes-agent#16533），需要在 provider 配置里显式启用
+
+B2. LangGraph.js
+  · URL: https://github.com/langchain-ai/langgraphjs | https://docs.langchain.com/oss/javascript/langgraph/overview
+  · 核心能力: TS 原生状态图框架，nodes/edges/conditional routing，durable execution，streamMode:'updates' 每步发事件
+  · 适用场景: 复杂多步工作流（规划→检索→推理→回答→检验），需要状态机/分支/重试
+  · MindGuide 应用: ★★★★☆ 当 MindGuide 要把"教学模式"做成真 agent（5 步：理解→检索→推理→回答→反思）时用
+
+B3. LangChain.js (create_agent)
+  · URL: https://docs.langchain.com/oss/javascript/langchain | https://academy.langchain.com/courses/quickstart-langchain-essentials-typescript
+  · 核心能力: create_agent 一行构造带 tools/MCP/streaming/structured-output 的 agent；useStream hook 给 Next.js
+  · 适用场景: 中等复杂度 agent，不需要显式状态图
+  · MindGuide 应用: ★★★☆☆ 比 LangGraph 轻量，但与 z-ai-web-dev-sdk 重叠较多
+
+B4. Mastra
+  · URL: https://github.com/mastra-ai/mastra | https://mastra.ai
+  · 核心能力: 现代化 TS 框架，agents + memory + tools + workflows + evals + 内置 observability，原生 MCP
+  · 适用场景: 想要一站式 TS 框架、不想自己拼装
+  · MindGuide 应用: ★★★★☆ 比 LangChain.js 更现代，TS-first，自带 trace；缺点是生态比 LangChain 小
+
+B5. LlamaIndex.TS (Workflows)
+  · URL: https://developers.llamaindex.ai/typescript/framework | https://github.com/run-llama/ts-agents
+  · 核心能力: TS 原生 LlamaIndex，event-driven Workflows 编排多 agent
+  · 适用场景: RAG-heavy agent（MindGuide 就是）
+  · MindGuide 应用: ★★★☆☆ 如果要重构 retrieval.ts 为 LlamaIndex 索引层可考虑
+
+B6. DSPy.ts
+  · URL: https://github.com/ruvnet/dspy.ts | https://www.npmjs.com/package/dspy.ts
+  · 核心能力: 声明式 signature + optimizer 自动优化 prompt
+  · 适用场景: prompt 自动调优
+  · MindGuide 应用: ★★☆☆☆ 偏研究/优化场景，不解决可视化问题
+
+B7. Graph of Thoughts (spcl, Python)
+  · URL: https://github.com/spcl/graph-of-thoughts
+  · 核心能力: ETH Zürich 官方 GoT 实现
+  · 适用场景: 学术复现
+  · MindGuide 应用: ★☆☆☆☆ Python-only，需起独立服务
+
+B8. Tree of Thoughts (princeton-nlp, Python)
+  · URL: https://github.com/princeton-nlp/tree-of-thought-llm
+  · 核心能力: Princeton 官方 ToT 实现
+  · 适用场景: 学术复现
+  · MindGuide 应用: ★☆☆☆☆ 同上
+
+B9. kyegomez/tree-of-thoughts (Python)
+  · URL: https://github.com/kyegomez/tree-of-thoughts
+  · 核心能力: "Plug and Play" ToT，号称提升 70% 推理
+  · 适用场景: 快速实验
+  · MindGuide 应用: ★☆☆☆☆ Python-only
+
+== C. RAG 增强推理可视化 ==
+
+C1. LightRAG (hkuds)
+  · URL: https://github.com/hkuds/lightrag | https://lightrag.github.io
+  · 核心能力: 轻量知识图谱 RAG，双层架构（low-level keyword + high-level semantic），图结构支持 multi-hop reasoning；可自托管 REST 服务
+  · 适用场景: 让检索结果带"图关系"，推理时能展示证据链
+  · MindGuide 应用: ★★★★☆ 作为 sidecar 服务部署，MindGuide 的 retrieval.ts 改为调用 LightRAG API；前端可用 React Flow 展示实体图
+
+C2. RAGFlow (infiniflow)
+  · URL: https://github.com/infiniflow/ragflow | https://ragflow.io
+  · 核心能力: 开源 RAG 引擎 + 可视化低代码 workflow 界面 + Agent/MCP 能力 + 引用溯源
+  · 适用场景: 完整替换 RAG 层并直接获得可视化 pipeline
+  · MindGuide 应用: ★★★☆☆ 重，但功能完整；可考虑只借用其前端 workflow 编辑器思路
+
+C3. DavidZWZ/Awesome-RAG-Reasoning (EMNLP'25)
+  · URL: https://github.com/DavidZWZ/Awesome-RAG-Reasoning
+  · 核心能力: RAG × Reasoning 综述资源列表
+  · 适用场景: 选型参考、找最新论文
+  · MindGuide 应用: ★★☆☆☆ 资源索引
+
+C4. RAGTrace (arXiv 2508.06056)
+  · URL: https://arxiv.org/html/2508.06056v1
+  · 核心能力: 学术 — 理解并细化检索-生成交互
+  · 适用场景: 设计参考
+  · MindGuide 应用: ★★☆☆☆ 设计模式参考
+
+C5. Citation-Aware RAG 模式 (tensorlake 博客)
+  · URL: https://www.tensorlake.ai/blog/rag-citations
+  · 核心能力: fine-grained citation 模式（chunk 级、句子级引用标注）
+  · 适用场景: 给 MindGuide 现有 retrievePassages + buildKnowledgeBaseContext 加引用元数据
+  · MindGuide 应用: ★★★★☆ 不需要换框架，按博客模式给 DocumentChunk 加 citation_id，让模型输出 [^cid1] 形式脚注，前端 markdown-renderer 渲染成可点击引用
+
+== D. 推理性能监控 ==
+
+D1. Langfuse
+  · URL: https://github.com/langfuse/langfuse | https://langfuse.com
+  · 核心能力: MIT 开源、自托管（Docker/K8s）一等公民；TS SDK v4 基于 OpenTelemetry，GA；原生集成 Vercel AI SDK（https://ai-sdk.dev/providers/observability/langfuse）；追踪 token usage、TTFT、inter-token latency、cost per user/model、replay session
+  · 适用场景: 全栈 LLM 可观测性 + eval + prompt management
+  · MindGuide 应用: ★★★★★ 首选。同 TS 生态、可自托管、与 AI SDK 一行集成；token/s、首 token 延迟、推理 token 数全有
+
+D2. Helicone
+  · URL: https://www.helicone.ai
+  · 核心能力: Apache-2.0、自托管；token/latency/error/throughput 监控
+  · 适用场景: Langfuse 替代
+  · MindGuide 应用: ★★★☆☆ 功能相近，选 Langfuse 还是 Helicone 看部署偏好
+
+D3. Arize Phoenix
+  · URL: https://github.com/Arize-ai/phoenix | https://arize.com/phoenix
+  · 核心能力: 开源、OTel 原生；tracing + LLM-as-judge evals + RAG pipeline quality 可视化 + drift 检测
+  · 适用场景: 想要 eval/质量监控，特别是 RAG 检索质量
+  · MindGuide 应用: ★★★☆☆ 可与 Langfuse 并存（一个看性能一个看质量），或单独使用
+
+D4. SigNoz / OneUptime
+  · URL: https://signoz.io | https://oneuptime.com
+  · 核心能力: 通用 OTel 后端，可承载 LLM trace
+  · 适用场景: 已有 OTel 基础设施的团队
+  · MindGuide 应用: ★★☆☆☆ 过通用，不如 Langfuse 专注
+
+== E. GLM / Z.AI reasoning_content 协议 ==
+
+E1. Z.AI Thinking Mode 文档
+  · URL: https://docs.z.ai/guides/capabilities/thinking-mode | https://docs.z.ai/guides/capabilities/thinking
+  · 核心能力: GLM 的 thinking: {type:'enabled'|'disabled'} 配置；reasoning_content 字段流式输出 CoT
+  · 适用场景: 配置模型推理模式
+  · MindGuide 应用: 已在 thinkingConfig() 里正确使用
+
+E2. @ai-sdk/zai provider
+  · URL: https://ai-sdk.dev/playground/zai:glm-4.6v
+  · 核心能力: Vercel AI SDK 官方 ZAI provider，支持 GLM-4.6/4.6V
+  · 适用场景: 把 MindGuide 从裸 z-ai-web-dev-sdk 迁到 AI SDK
+  · MindGuide 应用: ★★★★☆ 关键迁移路径，迁完后可直接用 reasoning part、tool calls、maxSteps
+
+== F. 其它参考 ==
+
+F1. ReAct 原论文代码 (ysymyth)
+  · URL: https://github.com/ysymyth/ReAct | https://arxiv.org/abs/2210.03629
+  · 核心能力: ICLR'23 原始 ReAct 实现
+  · 适用场景: 算法参考
+
+F2. AI SDK V5 Reasoning 教程
+  · URL: https://www.youtube.com/watch?v=Td23MdnSnIU
+  · 核心能力: AI SDK v5 reasoning part 实操
+  · 适用场景: 学习材料
+
+Stage Summary:
+推荐采纳的方案 + 理由 + 落地建议：
+
+【强烈推荐 — 立刻可做，1-2 周】
+
+1. **AI Elements ChainOfThought 组件**（A1）— 解决"推理动画实时反映真实推理过程"的前端展示
+   - 理由: 同 shadcn/ui 栈、Vercel 官方维护、与 MindGuide 现有 radix/cva/framer-motion 完全兼容；现成 step 状态机（pending/active/complete）天然契合"真实推理过程"
+   - 落地: `npx shadcn add https://elements.ai-sdk.dev/r/chain-of-thought`；把 src/app/api/chat/route.ts 现有的 `{phase:'thinking', thinking:string, full:true}` SSE 改成按句号/换行切分成 step[] 数组下发；前端 chat-composer.tsx 用 ChainOfThought 替换占位 spinner
+
+2. **Citation-Aware RAG 模式**（C5）— 解决"展示引用了哪些段落、推理链如何连接"
+   - 理由: 不需要换框架，纯模式升级；MindGuide 已有 DocumentChunk + Reference 表，给 chunk 加稳定 citation_id，让模型输出 [^cid] 脚注，前端 markdown-renderer 已是 react-markdown，加一个 rehype plugin 即可
+   - 落地: prisma schema 给 DocumentChunk 加 citationId 字段；buildKnowledgeBaseContext 改为带 [cid] 前缀；system prompt 要求引用；前端解析 [^cid] 渲染成可点击 chip 跳转到对应 material
+
+【推荐 — 中期重构，2-4 周】
+
+3. **Vercel AI SDK + @ai-sdk/zai provider**（B1 + E2）— 解决"thinkingMode 真正变成多步 agent"
+   - 理由: 当前 thinkingMode 只是 prompt overlay，没有真实算法差异。迁到 AI SDK 后，streamText({tools, maxSteps}) 自动跑 ReAct 循环，每步发 reasoning part + tool call 事件；ZAI 有官方 provider 支持 GLM-4.6
+   - 落地: 分两步 — 先在 src/app/api/chat/route.ts 用 @ai-sdk/zai 替换裸 zai.chat.completions.create（保持 SSE 协议不变）；再引入 tools（retrieve_passages / lookup_knowledge_node / generate_quiz）+ maxSteps:5 让"deep/structured"模式真正分步执行
+   - 注意: 配置 ZAI provider 时显式传 thinking 参数（避免 hermes-agent#16533 的 reasoning vs thinking 字段冲突）
+
+4. **Langfuse 自托管**（D1）— 解决"token/s、首 token 延迟、推理 token 数监控"
+   - 理由: MIT 开源、TS SDK v4 OTel 原生、与 AI SDK 一行集成（ai-sdk.dev/providers/observability/langfuse）、可跟 MindGuide 一起 docker-compose 部署
+   - 落地: 加 docker-compose.langfuse.yml 起 Langfuse + Postgres + Redis；在 AI SDK 调用处包一层 observeToStringification；dashboard 直接看 TTFT/inter-token-latency/reasoning-token-count
+
+【可选 — 长期方向，1-2 月】
+
+5. **LangGraph.js 或 Mastra**（B2 / B4）— 当"教学模式"要做成完整 5 步 agent（理解→检索→推理→回答→反思）时
+   - 理由: AI SDK 的 maxSteps 适合简单 ReAct，但需要状态机/分支/重试/人工干预时，LangGraph.js 更合适；Mastra 更现代 TS-first 但生态小
+   - 落地: 先用 AI SDK 跑通，等需要复杂控制流再引入 LangGraph.js 作为编排层（不一定替换 AI SDK，可以共存）
+
+6. **LightRAG sidecar**（C1）— 当现有向量检索不够、需要 multi-hop 图推理时
+   - 理由: 知识图谱 RAG 让推理链可视化天然成立（实体-关系图）；Python 服务但 REST API，MindGuide 调用即可
+   - 落地: docker 部署 LightRAG；retrieval.ts 增加 lightrag 检索路径；前端用 React Flow（A3）画实体图
+
+【技术路线图建议】
+Phase 1（本周）: AI Elements ChainOfThought + Citation 模式 → 推理动画立刻变真实
+Phase 2（下周）: 迁 AI SDK + @ai-sdk/zai + Langfuse → 真 ReAct agent + 监控
+Phase 3（下月）: 按需引入 LangGraph.js / LightRAG → 复杂多步 + 图推理
+
+【关键避坑】
+- Z.AI 的 reasoning_content 已经被 MindGuide 正确解析（parseUpstreamSse 干得很漂亮），不要重写
+- 迁 AI SDK 时务必在 provider 配置里显式传 thinking 参数，否则 reasoning part 不返回
+- Langfuse 自托管版要带 Postgres + Redis，docker-compose 至少 4GB 内存
+- assistant-ui（A2）和 AI Elements（A1）二选一，不要都装，避免组件冲突
+
+---
+Task ID: research-streaming-viz-9a
+Agent: general-purpose (open source search)
+Task: 搜索流式推理可视化开源仓库
+
+Work Log:
+- 调用 z-ai web_search CLI 跑了 36 条不同关键词的搜索（覆盖 LLM 推理可视化、CoT 流式 UI、o1 thinking 动画克隆、SSE 流式 react 库、token stream 动画、reasoning_content 显示、Vercel AI SDK 推理、ChatGPT thinking 克隆、LobeChat/Chatbot UI/Open WebUI 推理支持、FlowToken/llm-ui 细节、Azure fetch-event-source、AI SDK 5 reasoning part、DeepSeek-R1 reasoning UI 等），结果保存到 /tmp/search1-36.json
+- 用 GitHub REST API（curl + follow redirects）对 15 个候选仓库做了精确 star 数核对，结果：
+  - vercel/ai: 25,158 ⭐
+  - vercel/ai-elements: 2,151 ⭐
+  - vercel/chatbot: 20,541 ⭐
+  - lobehub/lobehub (原 lobehub/lobe-chat 已 redirect 到此): 79,131 ⭐
+  - open-webui/open-webui: 143,141 ⭐
+  - mckaywrigley/chatbot-ui: 33,269 ⭐
+  - assistant-ui/assistant-ui: 10,827 ⭐
+  - Azure/fetch-event-source: 2,832 ⭐
+  - ZongqianLi/ReasonGraph: 512 ⭐
+  - Ephibbs/flowtoken: 546 ⭐
+  - richardgill/llm-ui: ~1,747 ⭐（open-awesome.com 报数；GitHub API 已迁库，主仓 llm-ui-org/llm-ui 当前可见）
+  - openreasoner/openr: 1,849 ⭐
+  - Azure-Samples/deepseek-js: 14 ⭐
+  - AnasImloul/smooth-stream: 4 ⭐
+  - tikendraw/open-o1: 小型实验项目
+- 同时核对了 MindGuide 当前栈（Next.js 16 + TS + Tailwind 4 + shadcn/ui New York + z-ai-web-dev-sdk + Framer Motion + Tiptap），确认 AI Elements / assistant-ui / FlowToken / llm-ui 与现有 shadcn 注册表完全兼容，可直接 npx shadcn add 引入
+
+找到的仓库列表（按与"流式推理可视化"相关性排序）：
+
+| # | 仓库 | GitHub URL | Stars | 核心能力 | 对 MindGuide 的应用价值 |
+|---|------|-----------|-------|---------|----------------------|
+| 1 | Vercel AI Elements (vercel/ai-elements) | https://github.com/vercel/ai-elements | 2.1k | shadcn/ui 注册表，提供 `<Reasoning>`（流式时自动展开、结束时自动折叠、显示 thinking 时长）+ `<ReasoningTrigger>`（duration 计时）+ `<ChainOfThought>`（分步推理）+ `<Tool>`/`<ToolOutput>`/`<Sources>` 等组件 | **直接 npx shadcn add**，跟现有 components.json 完全兼容；把 ThreadThinkingAnim 的纯装饰 3 圆点替换成 `<Reasoning isStreaming={streamingPhase==='thinking'}>` 包住 streamingThinking 的 markdown 即可 |
+| 2 | Vercel AI SDK (vercel/ai) | https://github.com/vercel/ai | 25.2k | `streamText`/`generateText` 自带 `reasoning` 选项（v4.2+），`MessagePart` 类型新增 `'reasoning'` part；`useChat`/`useCompletion` 默认把 reasoning 文本流到前端；Stream Protocol 文档明确支持 reasoning file parts | MindGuide 用 z-ai-web-dev-sdk 已有 streamingThinking，可在迁移到 AI SDK 5 后直接拿到 `part.type==='reasoning'` 类型化的 part，无需手写正则切 `<think>` 块 |
+| 3 | assistant-ui (assistant-ui/assistant-ui) | https://github.com/assistant-ui/assistant-ui | 10.8k | YC W25 出品，React/TS 库，官方 Chain of Thought UI 指南（https://www.assistant-ui.com/docs/guides/chain-of-thought）；把 reasoning 当成 typed content part（issue #1720），支持流式 tool call / 中断恢复 / message metadata | 比 AI Elements 更"框架级"，自带 useChat runtime、Thread runtime、ExternalStoreRuntime 适配器；若 MindGuide 想把整个对话流换掉可考虑；但与 AI Elements 二选一（前一次 worklog 也强调过） |
+| 4 | Vercel Chatbot (vercel/chatbot) | https://github.com/vercel/chatbot | 20.5k | Vercel 官方 Next.js AI chatbot 模板，已用 AI Elements + AI SDK 5 + Reasoning part，是流式 reasoning + tool call 的"参考实现" | 直接抄它的 message-renderer 和 parts mapping 写法，省去自己摸索 message part 类型 |
+| 5 | FlowToken (Ephibbs/flowtoken) | https://github.com/Ephibbs/flowtoken | 546 | React 组件库，专门做"token 到达时的视觉反馈"：StreamText/Typewriter/Conparator 等组件，支持 fade-in、type-on、cursor 跟随、流式 chunk 节流（避免 setState 风暴）；HN 上对标 Cursor/Pi 的逐字动画 | 直接 `npm i flowtoken`，把 ThreadThinkingAnim 渲染的 reasoning token 套上 `<StreamText>`，就有 token 到达脉冲；作者 evanphibbs 还在维护，OpenAI 社区也推过 |
+| 6 | llm-ui (richardgill/llm-ui, 现 llm-ui-org/llm-ui) | https://github.com/llm-ui-org/llm-ui | ~1.7k | React 库，去除不完整 markdown 语法（流式时不会出现裸 `**` `##`），内建 throttle 平滑 LLM 流式输出的"卡顿-涌出"节奏；可注册自定义组件 | 跟 MindGuide 现有 markdown-renderer.tsx 是同类替代品；流式 reasoning 经常出现半截 markdown，llm-ui 能消除闪烁；可与 FlowToken 组合 |
+| 7 | Azure fetch-event-source (Azure/fetch-event-source) | https://github.com/Azure/fetch-event-source | 2.8k | 比 EventSource 更强的 SSE 客户端：支持 POST 请求 + 自定义 header（鉴权）、自动重连 + 指数退避、请求取消、可控的 onopen/onerror 回调 | MindGuide 当前用 fetch+ReadableStream 解 SSE（chat/route.ts），换成 fetch-event-source 可一行拿到自动重连 + 退避；POST + Authorization header 也支持，方便接 Z.AI 的鉴权头 |
+| 8 | Open WebUI (open-webui/open-webui) | https://github.com/open-webui/open-webui | 143k | 一等公民支持 thinking/reasoning 模型（DeepSeek R1 / o1 / Gemini 3 Pro），有 reasoning_content 字段处理；discussion #14974 "Expandable Status Indicators" 提案展示流式阶段化状态 | 143k stars 是行业标杆，可抄它的 reasoning UI 交互（默认折叠 + "Thought for N seconds" 标签 + 展开后 markdown 流）；它是 Python Svelte，不能直接抄代码，但 UX 模式可借鉴 |
+| 9 | LobeHub / LobeChat (lobehub/lobehub) | https://github.com/lobehub/lobehub | 79k | 完整 chat 框架，支持多 provider（含 DeepSeek/Gemini/o1）的 reasoning_content 显示；自动对 reasoning 模型 prune 掉 top_p/temperature 等不支持参数（issue #11332） | 它的 reasoning 处理逻辑（在 lobehub/chat 仓库的 utils/parseReasoning.ts）值得直接照搬，特别是"reasoning content 不计入下一轮 message history"的边界处理 |
+| 10 | Vercel Reasoning Steps Template | https://vercel.com/templates/next.js/reasoning-steps-ai-sdk | n/a (template) | Vercel 官方模板，用 AI SDK 的 streamText + maxSteps + reasoning tool 演示分步推理流式输出 | 一键 deploy 的参考实现，可直接 fork 学习 maxSteps + tool 的 part 流如何渲染 |
+| 11 | Chatbot UI (mckaywrigley/chatbot-ui) | https://github.com/mckaywrigley/chatbot-ui | 33k | 老牌 Next.js + Supabase chat UI，已支持多模型；最近未积极跟进 reasoning_content | 跟 MindGuide 栈接近，可参考其 chat 流式组件结构，但 reasoning 部分要自己写 |
+| 12 | ReasonGraph (ZongqianLi/ReasonGraph) | https://github.com/ZongqianLi/ReasonGraph | 512 | ACL 2025 Demo，把 LLM 推理过程可视化为 sequential/tree graph；支持多种 LLM provider；arxiv 2503.03979 | 偏研究 demo，跟 MindGuide 的对话式学习场景不完全契合；但若未来做"知识图谱 RAG + 推理路径图"可参考其 React Flow 可视化思路 |
+| 13 | SitePoint DeepSeek-R1 CoT Visualizer 教程 | https://www.sitepoint.com/build-reasoning-uis-with-deepseek-r1-visualize-chainofthought-2026 | n/a (article) | 用 DeepSeek R1 + Next.js App Router + WebSocket 做实时 CoT 可视化的完整教程 | 文章级参考，落地代码量小，可借鉴其 reasoning_content → 阶段化 UI 的映射逻辑 |
+| 14 | OpenR (openreasoner/openr) | https://github.com/openreasoner/openr | 1.8k | 强化学习训练 LLM 推理的开源框架（与 verl 同类）；Python | 纯研究/训练侧，跟前端可视化无关，仅作背景了解 |
+| 15 | Azure-Samples/deepseek-js | https://github.com/Azure-Samples/deepseek-js | 14 | DeepSeek-R1 JS starter，演示 reasoning_content 流式 | 极简样例代码，可作"如何在 fetch 流里解析 reasoning_content 字段"的速查 |
+
+特别关注的几个细节发现：
+- AI Elements 的 `<Reasoning>` 已知 issue #73：ReasoningTrigger duration 在 isStreaming=true 时默认为 0，需手动维护 duration 状态（要用 useRef + Date.now() 自己计时）
+- AI Elements issue #26：在 chatbot 示例里，新消息流式开始时所有历史 Reasoning 组件都会重新展开并重置时长——这是已知 bug，MindGuide 实现时需用 message id 锁定展开状态
+- AI SDK 5 已把 reasoning 当成 typed message part，issue #10197 提到 streamObject + reasoning 还在补，所以 MindGuide 如果走 streamObject（结构化输出）暂时拿不到 reasoning
+- LobeChat issue #10313 揭示：reasoning 必须在 request payload 里显式开启（不是默认），MindGuide 用 z-ai-web-dev-sdk 时要在 chat completions 里显式传 thinking 参数（前一次 worklog 也强调过）
+- Open WebUI discussion #14974 "Expandable Status Indicators via Open WebUI Events" 是个待实现提案，思路是用事件驱动展示"Thinking → Searching → Aggregating"等多阶段状态——正好对应 MindGuide 的 streamingPhase
+
+Stage Summary:
+
+【推荐采纳的仓库 — 按 ROI 排序】
+
+第一档（必装，本周落地）：
+
+1. **Vercel AI Elements (`vercel/ai-elements`, 2.1k ⭐)**
+   - 理由: 跟 MindGuide 现有 shadcn/ui New York 注册表 100% 兼容，`npx shadcn add https://ui.ai-sdk.dev/registry/reasoning.json` 即装即用；`<Reasoning>` 组件自带"流式时自动展开、结束时自动折叠 + 显示 thinking 时长"逻辑，正好解决 MindGuide 当前 ThreadThinkingAnim "纯装饰、与真实推理过程无关"的核心痛点
+   - 落地: 在 src/components/learning/thread-message.tsx（或等价文件）里把现有 ThreadThinkingAnim 替换成 `<Reasoning isStreaming={streamingPhase==='thinking'}>{streamingThinking}</Reasoning>`，外层套 markdown-renderer；保留现有 streamingPhase 信号作为 isStreaming prop
+   - 避坑: 监听 issue #26 的 bug，给每个 message 加 id 锁定展开状态；issue #73 的 duration=0 问题用 useRef+Date.now() 自己计时
+
+2. **FlowToken (`Ephibbs/flowtoken`, 546 ⭐)**
+   - 理由: 这是目前唯一的"token 到达视觉反馈"专用 React 库，正是 MindGuide 任务里第 2 条"Token 级流式动画"想要的；546 stars 不算多但作者活跃，OpenAI 开发者社区也推过；轻量（无重度依赖）
+   - 落地: `bun add flowtoken`，把 streamingThinking 文本流过 `<StreamText>` 组件，得到 token 到达时的 fade-in / cursor 跟随效果；可与 AI Elements `<Reasoning>` 嵌套（Reasoning 包结构，StreamText 包内容）
+   - 注意: 仅用于 reasoning 文本流，正式 answer 流也建议同样处理保持一致
+
+第二档（强烈建议，下个月落地）：
+
+3. **Vercel Chatbot (`vercel/chatbot`, 20.5k ⭐)**
+   - 理由: 官方 Next.js AI chatbot 模板，已经把 AI SDK 5 + AI Elements + Reasoning part + tool call 全部跑通，是"参考实现"——直接看它的 components/message-renderer.tsx 怎么 map part.type==='reasoning' 即可，不用自己踩坑
+   - 落地: 不直接引入依赖，只 fork 学习其 message parts 映射写法；MindGuide 迁移到 AI SDK 5 时对照实现
+
+4. **Azure fetch-event-source (`Azure/fetch-event-source`, 2.8k ⭐)**
+   - 理由: 解决任务第 4 条"SSE 流式前端框架 — 自动重连 / 背压 / token 缓冲 / 中断恢复"。比 EventSource 强：支持 POST + 自定义 header（接 Z.AI 鉴权）、指数退避重连、AbortController 取消；2.8k stars 工业级稳定
+   - 落地: 替换 src/app/api/chat/route.ts 前端调用处的 fetch+ReadableStream，改成 `fetchEventSource('/api/chat', { method:'POST', headers:{Authorization}, body:JSON.stringify(payload), onmessage, onclose, onerror })`；保留现有 SSE 解析逻辑只换传输层
+   - 替代方案: 若不想加依赖，AI SDK 5 的 useChat 已经内部处理了重连/取消，可等迁移 AI SDK 后自然解决
+
+第三档（看场景引入）：
+
+5. **llm-ui (`llm-ui-org/llm-ui`, ~1.7k ⭐)**
+   - 理由: 解决"流式 markdown 半截语法闪烁"问题，自带 throttle 平滑输出节奏；跟 FlowToken 不冲突（一个管 markdown 一个管动画）
+   - 落地: 替换 src/components/learning/markdown-renderer.tsx；或者只对 reasoning 文本流用 llm-ui，正式 answer 保持现有渲染器
+   - 注意: 跟现有 react-markdown + rehype-katex + remark-math 链路有重叠，需评估是否值得换
+
+6. **assistant-ui (`assistant-ui/assistant-ui`, 10.8k ⭐)**
+   - 理由: YC W25，框架级 React AI chat 库，自带 Thread runtime / ExternalStoreRuntime / 流式 tool call / 中断恢复；Chain of Thought UI 指南完善；11k stars 社区健康
+   - 落地: **不立即引入**——它跟 AI Elements 是同一生态位的竞品（前一次 worklog 也强调二选一）；只有当 MindGuide 决定把整个对话流从手写换成框架时才考虑；目前 AI Elements 已够用
+
+不推荐（场景不匹配）：
+
+- ReasonGraph / OpenR / Azure-Samples/deepseek-js — 偏研究或极简样例，跟 MindGuide 的对话式学习场景不匹配
+- Chatbot UI (mckaywrigley) — 老牌但未跟进 reasoning_content，落后于 Vercel Chatbot
+- SitePoint 教程 — 文章级，代码量小，作背景阅读即可
+
+【关键避坑】
+- AI Elements `<Reasoning>` 的两个已知 bug（duration=0 / 多消息展开串扰）必须在落地时手动修
+- FlowToken 与 AI Elements 嵌套时注意 React 渲染顺序——StreamText 内部用 setState 节流，外层 Reasoning 的 isStreaming 切换可能引起 unmount 重置
+- LobeChat 的"自动 prune reasoning 模型不支持参数"逻辑很值得抄，避免给 DeepSeek-R1 传 top_p/temperature 报错
+- fetch-event-source 默认 1s 重连太激进，遇到 503 要手动加指数退避 + jitter（参考 medium 文章 andersen-it-community）
+- AI SDK 5 的 streamObject 暂不支持 reasoning part（issue #10197），MindGuide 走 streamText 才能拿到 reasoning

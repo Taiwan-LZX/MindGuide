@@ -573,8 +573,13 @@ export function ChatComposer({
     };
   }, []);
 
+  // Hint visibility — conservative: only show the "Enter 发送 · Shift+Enter
+  // 换行" hint when the input is focused AND empty (the user is about to type
+  // but hasn't started yet). Once they start typing, the hint collapses to
+  // free up vertical space. Idle (unfocused) also hides — the composer card
+  // stays minimal until the user engages.
   const hintVisibility: 'show' | 'dim' | 'hide' =
-    scene === 'idle' || scene === 'focused-empty'
+    scene === 'focused-empty'
       ? 'show'
       : scene === 'focused-idle'
         ? 'dim'
@@ -814,7 +819,7 @@ export function ChatComposer({
 
       {/* ── Composer card ── */}
       <div
-        className={`relative z-10 flex flex-col gap-1.5 overflow-hidden rounded-2xl border bg-white p-2 transition-all dark:bg-neutral-900 ${
+        className={`relative z-10 flex flex-col gap-1 overflow-hidden rounded-2xl border bg-white p-1.5 transition-all dark:bg-neutral-900 ${
           focusMode
             ? 'border-neutral-300 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.12),0_4px_12px_-4px_rgba(0,0,0,0.06)] dark:border-neutral-600 dark:shadow-[0_12px_40px_-12px_rgba(0,0,0,0.5)]'
             : isFocused
@@ -857,7 +862,7 @@ export function ChatComposer({
           // imperative height both no-ops. `flex: 0 0 auto` (flex-none) lets
           // the inline height drive the main size, so the textarea grows to
           // fit content up to the maxHeight above.
-          className="min-h-[36px] flex-none resize-none border-0 bg-transparent px-1.5 py-0.5 text-[13px] leading-[1.55] text-neutral-800 caret-neutral-700 transition-[height] duration-200 ease-out placeholder:text-neutral-400 focus:outline-none disabled:opacity-60 dark:text-neutral-100 dark:caret-neutral-300 dark:placeholder:text-neutral-500"
+          className="min-h-[32px] flex-none resize-none border-0 bg-transparent px-1.5 py-0.5 text-[13px] leading-[1.5] text-neutral-800 caret-neutral-700 transition-[height] duration-200 ease-out placeholder:text-neutral-400 focus:outline-none disabled:opacity-60 dark:text-neutral-100 dark:caret-neutral-300 dark:placeholder:text-neutral-500"
         />
         {/* Expand / collapse toggle — appears once the draft reaches a modest
             length (≈80 chars ≈ 2-3 wrapped lines) so the user has an explicit
@@ -880,11 +885,11 @@ export function ChatComposer({
           )}
         </AnimatePresence>
 
-        {/* ── Bottom toolbar — balanced: flat config left, raised island right ──
-            Left : + (attach) + 引导模式 + 模型文本 (flat config cluster, ~3/4)
-            Right: 思考 + send (raised oval action island, ~1/4,
-                  lifted above the flat baseline via -translate-y + shadow) */}
-        <div className="flex items-center gap-1 sm:gap-1.5">
+        {/* ── Bottom toolbar — compact single row: config left, send right ──
+            Tightened: gap-1 throughout, no raised-island translate, buttons
+            all h-7. The send group keeps a subtle border + shadow to mark it
+            as the primary action, but sits flush with the config cluster. */}
+        <div className="flex items-center gap-1">
           {/* Left cluster — flat config: attach + mode + model text. */}
           <div className="flex min-w-0 items-center gap-1">
             {/* + 添加文件 — opens the attachment menu */}
@@ -895,7 +900,7 @@ export function ChatComposer({
                   onClick={() => setAttachOpen(o => !o)}
                   aria-label="添加文件"
                   aria-expanded={attachOpen}
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors sm:h-7 sm:w-7 ${
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition-colors ${
                     attachOpen
                       ? 'border-neutral-300 bg-neutral-100 text-neutral-900 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100'
                       : 'border-neutral-200 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
@@ -914,7 +919,7 @@ export function ChatComposer({
                   onClick={() => setModeOpen(o => !o)}
                   aria-label={`切换教学模式 · ${activeMode.label}`}
                   aria-expanded={modeOpen}
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors sm:h-7 sm:w-7 ${
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors ${
                     modeOpen
                       ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
                       : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
@@ -948,20 +953,21 @@ export function ChatComposer({
           {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Right cluster — raised action island: think + send.
-              Oval (rounded-xl) shape, lifted 2px above the flat toolbar
-              baseline. Border + shadow respond to focus / streaming state. */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          {/* Right cluster — send group: think + send.
+              Flush with the toolbar baseline (no -translate-y). Keeps a
+              subtle border + shadow to distinguish it as the primary action
+              cluster, but occupies the same row height as the config buttons. */}
+          <div className="flex items-center gap-1">
             <div className="relative shrink-0">
               <motion.div
                 initial={{ opacity: 0, scale: 0.94 }}
                 animate={{ opacity: 1, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 28 } }}
-                className={`relative flex items-center gap-1 rounded-xl border bg-white px-1.5 py-1 transition-all -translate-y-[2px] dark:bg-neutral-900 ${
+                className={`relative flex items-center gap-1 rounded-xl border bg-white px-1 py-0.5 transition-all dark:bg-neutral-900 ${
                   isStreaming
-                    ? 'border-neutral-400 shadow-lg dark:border-neutral-500'
+                    ? 'border-neutral-400 shadow-sm dark:border-neutral-500'
                     : isFocused
-                      ? 'border-neutral-300 shadow-lg dark:border-neutral-600'
-                      : 'border-neutral-200 shadow-md dark:border-neutral-700'
+                      ? 'border-neutral-300 shadow-sm dark:border-neutral-600'
+                      : 'border-neutral-200 dark:border-neutral-700'
                 }`}
               >
                 {/* 思考 selector — icon-only inside the island */}
@@ -1033,9 +1039,12 @@ export function ChatComposer({
           </div>
         </div>
 
-        {/* ── Hint row — left-bottom corner ──
-            Priority: morphToClear > sceneChip > hintVisibility. */}
-        <div className="flex min-h-[14px] items-start">
+        {/* ── Hint row — left-bottom corner, auto-collapse ──
+            Priority: morphToClear > sceneChip > hintVisibility.
+            No min-height — the row collapses to 0 when all hints are hidden,
+            so the composer card shrinks to just textarea + toolbar. The
+            height animation (below) handles the expand/collapse transition. */}
+        <div className="flex items-start">
           <AnimatePresence mode="wait">
             {morphToClear && value.length > 0 && !isStreaming ? (
               <motion.button

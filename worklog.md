@@ -494,3 +494,39 @@ Stage Summary:
   · src/app/api/stats/route.ts (dailyTrend + categoryDistribution + masteryTrend + category select 修复)
   · src/store/learning-store.ts (3个新状态字段 + fetchStats 写入)
   · src/components/learning/feature-views.tsx (3个 recharts 图表)
+
+---
+Task ID: polish-composer-compact-6
+Agent: main (Z.ai Code)
+Task: 输入栏打磨 — 默认紧凑收缩，提示按需外扩
+
+Work Log:
+- 用 Agent Browser + VLM 测量当前输入栏：card_height=118px, padding=8px, gap=6px, hint_row 常驻 14px，VLM 确认"输入框与工具栏间距偏大、整体偏松散"
+- 紧凑化卡片容器:
+  · p-2 (8px) → p-1.5 (6px)
+  · gap-1.5 (6px) → gap-1 (4px)
+- 紧凑化 textarea:
+  · min-h-[36px] → min-h-[32px]
+  · leading-[1.55] → leading-[1.5]
+- 统一按钮尺寸:
+  · attach/mode 按钮 h-8 w-8 sm:h-7 sm:w-7 → h-7 w-7（移除 sm 断点区分，默认就紧凑）
+  · raised island 的 px-1.5 py-1 → px-1 py-0.5
+  · shadow-lg/shadow-md → shadow-sm（减少视觉重量）
+  · 移除 -translate-y-[2px] 上浮（send 按钮组与 toolbar 对齐）
+- hint row 按需外扩:
+  · 移除 min-h-[14px]（之前常驻占位 14px）
+  · hintVisibility 逻辑调整：idle 不再 show（之前 idle + focused-empty 都 show），改为只在 focused-empty 时 show
+  · 效果：空闲时 hint_row_height=0px（完全收回），聚焦空输入时弹出 14px，开始打字后立即收回
+
+Stage Summary:
+- `bun run lint` 通过（0 errors / 0 warnings）
+- dev server HTTP 200 稳定
+- Agent Browser 测量对比:
+  · idle 状态: card_height 118px → 88px (-25%), hint_row 14px → 0px (完全收回)
+  · focused empty: hint_row 0px → 14px (按需弹出"发送·换行")
+  · typing: hint_row 14px → 0px (打字即收回), card 回到 88px
+- VLM 三态确认:
+  · idle: "紧凑且留白合理、间距合适、无发送换行提示、整体更紧凑"
+  · focused empty: "出现发送·换行提示、卡片适度扩展、紧凑不拥挤"
+  · typing: "发送·换行提示已消失、卡片收缩明显、干净利落"
+- 修改文件: src/components/learning/chat-composer.tsx

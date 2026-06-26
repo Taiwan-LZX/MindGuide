@@ -3,6 +3,11 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MOTION } from '@/lib/motion-tokens';
+import {
+  LineChart, Line, AreaChart, Area, RadarChart, Radar,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+} from 'recharts';
 
 // ─── Page-level entry/exit variants ─────────────────────────────────────────
 // OWNED BY page.tsx — animation boundary for the welcome ↔ feature transition.
@@ -758,7 +763,7 @@ const achievementIcons: Record<string, React.ElementType> = {
 };
 
 function ProgressView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
-  const { achievements, stats, fetchStats, isLoadingStats, weeklyActivity } = useLearningStore();
+  const { achievements, stats, fetchStats, isLoadingStats, weeklyActivity, dailyTrend, categoryDistribution, masteryTrend } = useLearningStore();
 
   React.useEffect(() => {
     fetchStats();
@@ -1026,6 +1031,216 @@ function ProgressView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement
                   </motion.div>
                 );
               })}
+            </div>
+          </motion.div>
+
+          {/* ── 30-day learning trajectory (recharts line chart) ───────────────
+              Shows the count of user-initiated messages per day over the last
+              30 days. The line + gradient area gives a sense of momentum that
+              the weekly bar chart (above) can't convey at this granularity. */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: 0.3 } }}
+            className="rounded-xl border border-neutral-100 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">学习轨迹</p>
+              <span className="text-[11px] text-neutral-400">近 30 天</span>
+            </div>
+            <div style={{ width: '100%', height: 180 }}>
+              {dailyTrend && dailyTrend.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={dailyTrend} margin={{ top: 5, right: 8, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-neutral-200 dark:text-neutral-800" />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fontSize: 10, fill: 'currentColor' }}
+                      className="text-neutral-400"
+                      interval={4}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 10, fill: 'currentColor' }}
+                      className="text-neutral-400"
+                      tickLine={false}
+                      axisLine={false}
+                      allowDecimals={false}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'var(--tooltip-bg, #fff)',
+                        border: '1px solid var(--tooltip-border, #e5e5e5)',
+                        borderRadius: 8,
+                        fontSize: 11,
+                      }}
+                      labelStyle={{ color: 'currentColor' }}
+                    />
+                    <defs>
+                      <linearGradient id="lineGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="var(--brand)" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="var(--brand)" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <Line
+                      type="monotone"
+                      dataKey="count"
+                      stroke="var(--brand)"
+                      strokeWidth={2}
+                      dot={false}
+                      activeDot={{ r: 4, fill: 'var(--brand)' }}
+                      fill="url(#lineGradient)"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-[11px] text-neutral-400">
+                  暂无数据
+                </div>
+              )}
+            </div>
+          </motion.div>
+
+          {/* ── 14-day mastery progression (recharts stacked area) ─────────────
+              Cumulative count of mastered vs unmastered knowledge nodes over
+              the last 14 days. Stacked areas show the learner's growing
+              mastery ratio over time. */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: 0.35 } }}
+            className="rounded-xl border border-neutral-100 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">知识掌握进度</p>
+              <span className="text-[11px] text-neutral-400">近 14 天</span>
+            </div>
+            <div style={{ width: '100%', height: 160 }}>
+              {masteryTrend && masteryTrend.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={masteryTrend} margin={{ top: 5, right: 8, left: -20, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="masteredGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="var(--brand)" stopOpacity={0.6} />
+                        <stop offset="95%" stopColor="var(--brand)" stopOpacity={0.1} />
+                      </linearGradient>
+                      <linearGradient id="unmasteredGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="currentColor" stopOpacity={0.2} />
+                        <stop offset="95%" stopColor="currentColor" stopOpacity={0.05} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-neutral-200 dark:text-neutral-800" />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fontSize: 10, fill: 'currentColor' }}
+                      className="text-neutral-400"
+                      interval={2}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 10, fill: 'currentColor' }}
+                      className="text-neutral-400"
+                      tickLine={false}
+                      axisLine={false}
+                      allowDecimals={false}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'var(--tooltip-bg, #fff)',
+                        border: '1px solid var(--tooltip-border, #e5e5e5)',
+                        borderRadius: 8,
+                        fontSize: 11,
+                      }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="unmastered"
+                      stackId="1"
+                      stroke="currentColor"
+                      className="text-neutral-300 dark:text-neutral-600"
+                      fill="url(#unmasteredGrad)"
+                      strokeWidth={1}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="mastered"
+                      stackId="1"
+                      stroke="var(--brand)"
+                      fill="url(#masteredGrad)"
+                      strokeWidth={2}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-[11px] text-neutral-400">
+                  暂无数据
+                </div>
+              )}
+            </div>
+            <div className="mt-3 flex items-center justify-center gap-4 text-[10px] text-neutral-400">
+              <span className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: 'var(--brand)' }} />
+                已掌握
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-neutral-300 dark:bg-neutral-600" />
+                未掌握
+              </span>
+            </div>
+          </motion.div>
+
+          {/* ── Knowledge category distribution (recharts radar) ───────────────
+              Five-axis radar showing how the learner's knowledge nodes are
+              distributed across concept/fact/principle/example/analogy. Gives
+              a quick visual sense of knowledge structure balance. */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: 0.4 } }}
+            className="rounded-xl border border-neutral-100 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-300">知识结构分布</p>
+              <span className="text-[11px] text-neutral-400">按类别</span>
+            </div>
+            <div style={{ width: '100%', height: 220 }}>
+              {categoryDistribution && categoryDistribution.some(c => c.count > 0) ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadarChart data={categoryDistribution} margin={{ top: 8, right: 24, left: 24, bottom: 8 }}>
+                    <PolarGrid stroke="currentColor" className="text-neutral-200 dark:text-neutral-800" />
+                    <PolarAngleAxis
+                      dataKey="category"
+                      tick={{ fontSize: 10, fill: 'currentColor' }}
+                      className="text-neutral-500 dark:text-neutral-400"
+                    />
+                    <PolarRadiusAxis
+                      tick={{ fontSize: 9, fill: 'currentColor' }}
+                      className="text-neutral-400"
+                      axisLine={false}
+                      allowDecimals={false}
+                    />
+                    <Radar
+                      name="知识点"
+                      dataKey="count"
+                      stroke="var(--brand)"
+                      fill="var(--brand)"
+                      fillOpacity={0.25}
+                      strokeWidth={2}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: 'var(--tooltip-bg, #fff)',
+                        border: '1px solid var(--tooltip-border, #e5e5e5)',
+                        borderRadius: 8,
+                        fontSize: 11,
+                      }}
+                    />
+                  </RadarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-[11px] text-neutral-400">
+                  暂无知识节点
+                </div>
+              )}
             </div>
           </motion.div>
         </div>

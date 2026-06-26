@@ -9,6 +9,7 @@ import { KnowledgeInline } from '@/components/learning/knowledge-inline';
 import { MarkdownRenderer } from '@/components/learning/markdown-renderer';
 import { MouseFollowTooltip } from '@/components/learning/mouse-follow-tooltip';
 import { ChatComposer } from '@/components/learning/chat-composer';
+import { useDraftInput, useInputHistory } from '@/hooks/use-draft-input';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -126,7 +127,15 @@ export function MainContent() {
   } = useLearningStore();
   const thinkingMode = useLearningStore(s => s.thinkingMode);
 
-  const [input, setInput] = useState('');
+  // Draft persistence — the composer's text is saved to localStorage on a
+  // per-session basis so a page refresh or session switch doesn't lose the
+  // half-written message. clearDraft is called after a successful send.
+  const [input, setInput, clearDraft] = useDraftInput(currentSessionId);
+  // Input history — ↑ recalls the previous sent message, ↓ cycles forward.
+  // Terminal-style navigation for quick re-send / variation.
+  const [inputHistory, pushHistory] = useInputHistory(currentSessionId);
+  const [historyIndex, setHistoryIndex] = useState(-1); // -1 = not browsing history
+  const savedDraftRef = useRef(''); // the draft the user had before pressing ↑
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [composerVisible, setComposerVisible] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -215,9 +224,53 @@ export function MainContent() {
   const handleSend = useCallback(async (overrideText?: string) => {
     const t = (overrideText ?? input).trim();
     if (!t || isStreaming) return;
+    // Push to input history (for ↑ recall) and clear the persisted draft.
+    pushHistory(t);
+    setHistoryIndex(-1);
+    clearDraft();
     setInput('');
     await sendMessage(t);
-  }, [input, isStreaming, sendMessage]);
+  }, [input, isStreaming, sendMessage, pushHistory, clearDraft, setInput]);
+
+  // ── Input history navigation (↑ / ↓) ──────────────────────────────────────
+  // Terminal-style recall: when the composer is empty (or the user has
+  // already started browsing history), pressing ↑ replaces the draft with
+  // the previous sent message. ↓ cycles back toward the most recent. Once
+  // the user goes past the newest entry, their original draft is restored.
+  const navigateHistory = useCallback((dir: 'up' | 'down') => {
+    if (inputHistory.length === 0) return;
+    if (dir === 'up') {
+      // Save the current draft the first time we enter history-browsing
+      // mode, so ↓ past the end restores it.
+      if (historyIndex === -1) {
+        savedDraftRef.current = input;
+      }
+      const nextIdx = historyIndex === -1 ? 0 : Math.min(historyIndex + 1, inputHistory.length - 1);
+      setHistoryIndex(nextIdx);
+      setInput(inputHistory[nextIdx]);
+    } else {
+      if (historyIndex === -1) return; // not browsing history, nothing to do
+      const nextIdx = historyIndex - 1;
+      if (nextIdx < 0) {
+        // Past the newest entry — restore the original draft.
+        setHistoryIndex(-1);
+        setInput(savedDraftRef.current);
+      } else {
+        setHistoryIndex(nextIdx);
+        setInput(inputHistory[nextIdx]);
+      }
+    }
+  }, [inputHistory, historyIndex, input, setInput]);
+
+  // Reset history browsing state when the user manually edits (types /
+  // pastes) the input — they've left "history mode" and ↑ should start
+  // fresh from the most recent entry next time.
+  const handleInputChange = useCallback((v: string) => {
+    if (historyIndex !== -1) {
+      setHistoryIndex(-1);
+    }
+    setInput(v);
+  }, [historyIndex, setInput]);
 
   const handleStop = useCallback(() => {
     useLearningStore.setState({
@@ -581,9 +634,10 @@ export function MainContent() {
           <div className="mx-auto max-w-[720px] px-6">
             <ChatComposer
               value={input}
-              onChange={setInput}
+              onChange={handleInputChange}
               onSend={handleSend}
               onStop={handleStop}
+              onNavigateHistory={navigateHistory}
               isStreaming={isStreaming}
               isThinking={isStreaming && (streamingPhase === 'thinking' || (!streamingContent && !streamingPhase))}
               placeholder={dynamicPlaceholder}
@@ -746,7 +800,10 @@ function MsgBubble({
 function WelcomeView() {
   const { createSession, sendMessage } = useLearningStore();
   const setSettingsPanelOpen = useLearningStore(s => s.setSettingsPanelOpen);
-  const [input, setInput] = useState('');
+  // Welcome draft is persisted under the 'welcome' pseudo-session key so
+  // the user's topic idea survives a refresh before they commit to creating
+  // a session.
+  const [input, setInput, clearDraft] = useDraftInput(null);
 
   // Sending from the welcome composer creates a new session from the draft
   // text and immediately fires it as the first user message, so the user
@@ -755,12 +812,13 @@ function WelcomeView() {
   const handleSubmit = useCallback(async () => {
     const t = input.trim();
     if (!t) return;
+    clearDraft();
     setInput('');
     const session = await createSession(t);
     if (session) {
       await sendMessage(t);
     }
-  }, [input, createSession, sendMessage]);
+  }, [input, createSession, sendMessage, clearDraft, setInput]);
 
   return (
     <div className="relative flex h-full flex-1 flex-col overflow-hidden">

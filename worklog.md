@@ -445,3 +445,52 @@ Stage Summary:
   · src/components/learning/sidebar.tsx (w-[260px] → w-full 适配 Panel)
   · src/components/learning/chat-composer.tsx (focusMode 读取 + effectiveExpanded + 居中限宽 + 阴影)
   · src/components/learning/keyboard-shortcuts-overlay.tsx (⌘E 文档)
+
+---
+Task ID: impl-p3-draft-recharts-5
+Agent: main (Z.ai Code)
+Task: P3 实施 — 草稿持久化 + 输入历史召回 + recharts 可视化图表
+
+Work Log:
+- P3-a 草稿持久化:
+  · 创建 /home/z/my-project/src/hooks/use-draft-input.ts，实现 useDraftInput hook
+  · per-session localStorage key: mindguide:draft:{sessionId}（welcome 页用 mindguide:draft:welcome）
+  · 400ms 防抖写入，session 切换时 flush 旧 key + load 新 key
+  · clearDraft() 在发送后调用
+  · main-content.tsx MainContent + WelcomeView 都改用 useDraftInput 替代 useState
+- P3-b 输入历史召回:
+  · 同一 hook 文件实现 useInputHistory（localStorage key: mindguide:history:{sessionId}）
+  · 最多 50 条，去重连续相同条目，最新在前
+  · main-content.tsx 新增 navigateHistory(dir) + historyIndex 状态 + savedDraftRef
+  · ↑ 在光标位于文本开头时召回上一条；↓ 在光标位于末尾时向下遍历
+  · 用户手动编辑时重置 historyIndex（退出历史浏览模式）
+  · chat-composer.tsx 新增 onNavigateHistory prop，在 handleKeyDown 里处理 ArrowUp/ArrowDown
+  · 只在 caret at boundary 时拦截，避免影响多行编辑
+- P3-c recharts 可视化（3 个图表）:
+  · stats API 扩展返回 dailyTrend（30天用户消息趋势）+ categoryDistribution（6类知识分布）+ masteryTrend（14天掌握进度）
+  · 修复 stats API 的 allKnowledge 查询没 select category 字段的 bug
+  · store 新增 dailyTrend/categoryDistribution/masteryTrend 状态 + fetchStats 写入
+  · feature-views.tsx ProgressView 新增三个 recharts 图表:
+    1. 学习轨迹 LineChart（30天，brand 色折线 + 渐变填充）
+    2. 知识掌握进度 AreaChart（14天，stacked: 已掌握 brand 色 + 未掌握 neutral 色）
+    3. 知识结构分布 RadarChart（6轴: 概念/事实/原理/示例/类比/未分类）
+  · 所有图表用 ResponsiveContainer 自适应宽度，用 var(--brand) 统一强调色
+  · 空数据时显示"暂无数据"占位
+
+Stage Summary:
+- `bun run lint` 通过（0 errors / 0 warnings）
+- dev server HTTP 200 稳定
+- Agent Browser 端到端验证:
+  · 草稿持久化: ✅ 输入"测试草稿持久化内容" → localStorage 写入 → 刷新页面 → textarea 恢复
+  · 输入历史: ✅ 发送消息后 history=[...] → 清空输入框 → 按↑ → textarea 恢复为上一条消息
+  · recharts 折线图: ✅ DOM 确认 .recharts-line 存在，VLM 确认可见（30天趋势，近期陡升）
+  · recharts 面积图: ✅ DOM 确认 .recharts-area 存在，VLM 确认可见（已掌握/未掌握堆叠 + 图例）
+  · recharts 雷达图: ✅ DOM 确认 .recharts-radar 存在，VLM 确认可见（6轴类别分布）
+- VLM 详细确认: "学习轨迹折线图 X轴5/28-6/22 Y轴0-12 近期陡升 / 知识掌握进度面积图 有图例 / 知识结构分布雷达图 6个类别"
+- 修改文件清单:
+  · src/hooks/use-draft-input.ts (新建: useDraftInput + useInputHistory)
+  · src/components/learning/main-content.tsx (草稿持久化 + 历史导航)
+  · src/components/learning/chat-composer.tsx (onNavigateHistory prop + ↑↓ keydown)
+  · src/app/api/stats/route.ts (dailyTrend + categoryDistribution + masteryTrend + category select 修复)
+  · src/store/learning-store.ts (3个新状态字段 + fetchStats 写入)
+  · src/components/learning/feature-views.tsx (3个 recharts 图表)

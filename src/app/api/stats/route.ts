@@ -16,7 +16,7 @@ export async function GET() {
     ] = await Promise.all([
       db.learningSession.findMany({ select: { id: true, createdAt: true, updatedAt: true, status: true } }),
       db.learningMessage.findMany({ select: { id: true, role: true, sessionId: true, createdAt: true } }),
-      db.knowledgeNode.findMany({ select: { id: true, mastered: true, sessionId: true, createdAt: true } }),
+      db.knowledgeNode.findMany({ select: { id: true, mastered: true, sessionId: true, createdAt: true, category: true } }),
       db.knowledgeNode.findMany({ where: { mastered: true }, select: { id: true } }),
       db.learningSession.findMany({
         take: 200,
@@ -66,6 +66,60 @@ export async function GET() {
       }
     }
     const weeklyActivity = dayBuckets.map(b => ({ label: b.label, count: b.count }));
+
+    // ─── 30-day activity trend (for recharts line chart) ────────────────────
+    // A finer-grained view than weeklyActivity — 30 daily buckets counting
+    // user messages only (learner-initiated activity, not AI responses).
+    // This powers the "学习轨迹" line chart in ProgressView.
+    const trendBuckets: Array<{ date: string; label: string; count: number }> = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const md = `${d.getMonth() + 1}/${d.getDate()}`;
+      trendBuckets.push({ date: d.toISOString().slice(0, 10), label: md, count: 0 });
+    }
+    for (const m of allMessages) {
+      if (m.role !== 'user') continue;
+      const md = new Date(m.createdAt);
+      md.setHours(0, 0, 0, 0);
+      const key = md.toISOString().slice(0, 10);
+      const bucket = trendBuckets.find(b => b.date === key);
+      if (bucket) bucket.count += 1;
+    }
+    const dailyTrend = trendBuckets.map(b => ({ label: b.label, count: b.count }));
+
+    // ─── Knowledge category distribution (for recharts radar chart) ──────────
+    // Counts knowledge nodes by category, showing the learner's knowledge
+    // structure across concept/fact/principle/example/analogy. Missing
+    // categories default to 0 so the radar chart always renders 5 axes.
+    const categoryCounts = new Map<string, number>();
+    for (const kn of allKnowledge) {
+      const cat = kn.category || '未分类';
+      categoryCounts.set(cat, (categoryCounts.get(cat) || 0) + 1);
+    }
+    const knownCategories = ['概念', '事实', '原理', '示例', '类比', '未分类'];
+    const categoryDistribution = knownCategories.map(cat => ({
+      category: cat,
+      count: categoryCounts.get(cat) || 0,
+    }));
+
+    // ─── Mastery breakdown (for recharts stacked area: mastered vs unmastered) ─
+    // Per-day cumulative count of mastered knowledge nodes over the last 14
+    // days, showing learning progress over time.
+    const masteryBuckets: Array<{ label: string; mastered: number; total: number }> = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      d.setHours(23, 59, 59, 999);
+      const mastered = allKnowledge.filter(k => k.mastered && new Date(k.createdAt) <= d).length;
+      const total = allKnowledge.filter(k => new Date(k.createdAt) <= d).length;
+      masteryBuckets.push({
+        label: `${d.getMonth() + 1}/${d.getDate()}`,
+        mastered,
+        unmastered: total - mastered,
+      });
+    }
+    const masteryTrend = masteryBuckets;
 
     // Distinct active days (for "持续学习者" — 3 consecutive days)
     // Compute current streak ending today (or yesterday if today has no activity)
@@ -186,6 +240,12 @@ export async function GET() {
         doneTasks,
       },
       weeklyActivity,
+      // 30-day user-message trend (for recharts line chart)
+      dailyTrend,
+      // Knowledge category breakdown (for recharts radar chart)
+      categoryDistribution,
+      // 14-day cumulative mastery (for recharts stacked area)
+      masteryTrend,
       achievements,
       topSessions,
     });

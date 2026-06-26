@@ -389,6 +389,9 @@ export interface ChatComposerProps {
    * layered status back card above the composer. */
   isThinking?: boolean;
   placeholder?: string;
+  /** Optional: called when the user presses ↑/↓ to navigate input history.
+   * Terminal-style recall of previously-sent messages. */
+  onNavigateHistory?: (dir: 'up' | 'down') => void;
 }
 
 export function ChatComposer({
@@ -399,6 +402,7 @@ export function ChatComposer({
   isStreaming,
   isThinking = false,
   placeholder = '问我任何学习上的问题…',
+  onNavigateHistory,
 }: ChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isFocused, setIsFocused] = useState(false);
@@ -678,6 +682,29 @@ export function ChatComposer({
         scheduleScene('typing');
       }
 
+      // ── Input history navigation (terminal-style ↑/↓) ──────────────────
+      // ↑ at the START of the text (caret at position 0) recalls the
+      // previous sent message. ↓ at the END cycles forward. This mirrors
+      // shell/terminal behavior and lets the user quickly re-send a
+      // variation without retyping. We only intercept when the caret is
+      // at the boundary so normal multi-line editing (↑/↓ to move between
+      // lines) still works.
+      if (onNavigateHistory && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        const el = e.currentTarget;
+        const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
+        const atEnd = el.selectionStart === value.length && el.selectionEnd === value.length;
+        if (e.key === 'ArrowUp' && atStart) {
+          e.preventDefault();
+          onNavigateHistory('up');
+          return;
+        }
+        if (e.key === 'ArrowDown' && atEnd) {
+          e.preventDefault();
+          onNavigateHistory('down');
+          return;
+        }
+      }
+
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         if (value.trim() && !isStreaming) onSend();
@@ -692,7 +719,7 @@ export function ChatComposer({
         }, 600);
       }
     },
-    [value, isStreaming, onSend, scheduleScene]
+    [value, isStreaming, onSend, scheduleScene, onNavigateHistory]
   );
 
   const handleKeyUp = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {

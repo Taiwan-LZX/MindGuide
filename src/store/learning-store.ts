@@ -249,6 +249,12 @@ interface LearningStore {
   // Stats state
   stats: LearningStats | null;
   weeklyActivity: WeeklyActivityItem[];
+  // 30-day user-message trend (for recharts line chart)
+  dailyTrend: Array<{ label: string; count: number }>;
+  // Knowledge category breakdown (for recharts radar chart)
+  categoryDistribution: Array<{ category: string; count: number }>;
+  // 14-day cumulative mastery (for recharts stacked area)
+  masteryTrend: Array<{ label: string; mastered: number; unmastered: number }>;
   isLoadingStats: boolean;
 
   // Notes state
@@ -431,6 +437,9 @@ const initialState = {
   notesSaveStatus: 'idle' as 'idle' | 'saving' | 'saved' | 'error',
   stats: initialStats,
   weeklyActivity: [] as WeeklyActivityItem[],
+  dailyTrend: [] as Array<{ label: string; count: number }>,
+  categoryDistribution: [] as Array<{ category: string; count: number }>,
+  masteryTrend: [] as Array<{ label: string; mastered: number; unmastered: number }>,
   isLoadingStats: false,
   achievements: [] as Achievement[],
   materials: [] as LearningMaterial[],
@@ -1164,6 +1173,9 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       set({
         stats: data.totals,
         weeklyActivity: data.weeklyActivity || [],
+        dailyTrend: data.dailyTrend || [],
+        categoryDistribution: data.categoryDistribution || [],
+        masteryTrend: data.masteryTrend || [],
         achievements: newAchievements,
       });
 

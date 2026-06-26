@@ -111,10 +111,10 @@ const iconStripVariants = {
 };
 
 function CollapsedSidebar() {
-  const { setCoursePanelOpen, coursePanelOpen, setCreateNewPanelOpen } = useLearningStore();
+  const { setCoursePanelOpen, coursePanelOpen, setCreateNewPanelOpen, setSidebarOpen } = useLearningStore();
 
   return (
-    <aside className="flex h-full w-[56px] shrink-0 flex-col items-center bg-neutral-100 py-4 dark:bg-neutral-900">
+    <aside className="flex h-full w-[56px] shrink-0 flex-col items-center bg-neutral-100 py-4 dark:bg-neutral-900" data-sidebar>
       {/* Logo */}
       <motion.div
         custom={0}
@@ -142,6 +142,7 @@ function CollapsedSidebar() {
             transition: { type: 'spring', stiffness: 600, damping: 25 },
           }}
           onClick={() => setCoursePanelOpen(!coursePanelOpen)}
+          data-course-toggle
           className={`mb-1.5 flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
             coursePanelOpen
               ? 'bg-white text-neutral-800 shadow-sm dark:bg-neutral-700 dark:text-neutral-100'
@@ -186,6 +187,19 @@ function CollapsedSidebar() {
           whileTap={{
             scale: 0.94,
             transition: { type: 'spring', stiffness: 600, damping: 25 },
+          }}
+          // Expand the sidebar and focus the search input — previously this
+          // button had no onClick (dead button). Now it expands the sidebar
+          // and focuses the unified search after a short delay for the
+          // expansion animation to mount the input.
+          onClick={() => {
+            setSidebarOpen(true);
+            setTimeout(() => {
+              const searchInput = document.querySelector<HTMLInputElement>(
+                'input[placeholder*="搜索"]'
+              );
+              searchInput?.focus();
+            }, 150);
           }}
           className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
         >
@@ -279,7 +293,7 @@ function FullSidebar() {
   }, [editTitle, updateSessionTitle]);
 
   return (
-    <aside className="flex h-full w-[260px] shrink-0 flex-col bg-neutral-100 dark:bg-neutral-900">
+    <aside className="flex h-full w-[260px] shrink-0 flex-col bg-neutral-100 dark:bg-neutral-900" data-sidebar>
       {/* ── Top: Brand + Tabs ── */}
       <motion.div
         className="space-y-3 px-3 pt-4 pb-2"

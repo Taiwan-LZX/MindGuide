@@ -49,6 +49,7 @@ export function CardReviewMode() {
   const total = reviewQueue.length;
   const current = reviewQueue[reviewIndex];
   const isDone = reviewIndex >= total && total > 0;
+  const [showExitConfirm, setShowExitConfirm] = React.useState(false);
 
   // Keyboard shortcuts: Space/Enter to flip, 1/2/3/4 to rate (after flip)
   React.useEffect(() => {
@@ -63,11 +64,22 @@ export function CardReviewMode() {
         else if (e.key === '3') { void submitReview(4); }
         else if (e.key === '4') { void submitReview(5); }
       }
-      if (e.key === 'Escape') { exitReview(); }
+      if (e.key === 'Escape') {
+        // If the user has already rated at least one card, ask for
+        // confirmation before exiting — prevents accidental ESC from
+        // discarding the session context mid-review. If no cards rated,
+        // exit immediately (no state to lose).
+        const rated = reviewStats.forgot + reviewStats.hard + reviewStats.good + reviewStats.easy;
+        if (rated > 0 && !showExitConfirm) {
+          setShowExitConfirm(true);
+        } else {
+          exitReview();
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [current, isDone, reviewFlipped, flipReviewCard, submitReview, exitReview]);
+  }, [current, isDone, reviewFlipped, flipReviewCard, submitReview, exitReview, reviewStats, showExitConfirm]);
 
   // ── Loading state ──────────────────────────────────────────────────────
   if (isFetchingReview) {
@@ -322,6 +334,56 @@ export function CardReviewMode() {
           <span>按 Esc 退出 · 评级会调整卡片下次出现的时间间隔</span>
         </div>
       </div>
+
+      {/* Exit confirmation overlay — shown when user presses ESC mid-review */}
+      <AnimatePresence>
+        {showExitConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="absolute inset-0 z-50 flex items-center justify-center bg-neutral-900/20 backdrop-blur-[2px]"
+            onClick={() => setShowExitConfirm(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 12, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1, transition: MOTION.enterSoft }}
+              exit={{ opacity: 0, y: 12, scale: 0.97, transition: MOTION.enterSoft }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-[min(360px,90vw)] rounded-2xl border border-neutral-200 bg-white p-6 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.18)] dark:border-neutral-800 dark:bg-neutral-900"
+              role="alertdialog"
+              aria-label="确认退出复习"
+            >
+              <div className="mb-4 flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-100 dark:bg-neutral-800">
+                  <AlertCircle className="h-4 w-4 text-neutral-500 dark:text-neutral-400" />
+                </div>
+                <h3 className="text-[14px] font-semibold text-neutral-900 dark:text-neutral-100">
+                  确认退出复习？
+                </h3>
+              </div>
+              <p className="mb-5 text-[12.5px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+                已评级的卡片已保存，但未评级的卡片将不会在本次会话中继续。确定要退出吗？
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setShowExitConfirm(false)}
+                  className="rounded-lg border border-neutral-200 px-3.5 py-1.5 text-[12.5px] font-medium text-neutral-600 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                >
+                  继续复习
+                </button>
+                <button
+                  onClick={() => { setShowExitConfirm(false); exitReview(); }}
+                  className="rounded-lg bg-neutral-900 px-3.5 py-1.5 text-[12.5px] font-medium text-white transition-colors hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-300"
+                >
+                  退出
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

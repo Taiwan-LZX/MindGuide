@@ -144,7 +144,7 @@ export function FeatureView() {
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
   return (
-    <div className="relative flex h-full flex-1 flex-col">
+    <div className="relative flex h-full flex-1 flex-col" data-feature-view>
       <ScrollProgress targetRef={scrollRef} />
       {/* PDF import removed during cleanup */}
       {activeFeatureView === 'tasks' && <TaskPlannerView scrollRef={scrollRef} />}
@@ -1133,7 +1133,7 @@ function MiniStat({
 // ─── 6. Knowledge Graph View ───────────────────────────────────────────────
 
 function KnowledgeGraphView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
-  const { knowledgeNodes } = useLearningStore();
+  const { knowledgeNodes, toggleKnowledgeMastered, setKnowledgeImportance } = useLearningStore();
 
   return (
     <>
@@ -1152,25 +1152,45 @@ function KnowledgeGraphView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivE
                     variants={itemVariants}
                     initial="hidden"
                     animate="visible"
-                    className={`flex items-center gap-3 rounded-xl border p-3.5 ${
+                    className={`flex items-center gap-3 rounded-xl border p-3.5 transition-colors ${
                       node.mastered
                         ? 'border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/50'
                         : 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900'
                     }`}
                   >
-                    <div className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
-                      node.mastered
-                        ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
-                        : 'border border-neutral-200 text-neutral-400 dark:border-neutral-700'
-                    }`}>
+                    {/* Mastered toggle — now clickable (was read-only before) */}
+                    <button
+                      onClick={() => toggleKnowledgeMastered(node.id)}
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-all hover:scale-105 ${
+                        node.mastered
+                          ? 'bg-[var(--brand)] text-[var(--brand-foreground)]'
+                          : 'border border-neutral-200 text-neutral-400 hover:border-neutral-400 dark:border-neutral-700'
+                      }`}
+                      aria-label={node.mastered ? '标记为未掌握' : '标记为已掌握'}
+                    >
                       {node.mastered ? <Check className="h-4 w-4" strokeWidth={2.5} /> : <span className="text-[12px] leading-none">·</span>}
-                    </div>
+                    </button>
                     <div className="flex-1 min-w-0">
                       <p className="truncate text-[13px] font-medium text-neutral-700 dark:text-neutral-200">{node.title}</p>
                       {node.category && <p className="text-[11px] text-neutral-400">{node.category}</p>}
                     </div>
-                    <div className="text-[11px] text-neutral-400 tabular-nums">
-                      重要度 {node.importance}/5
+                    {/* Importance selector — 5 clickable dots (was read-only text before) */}
+                    <div className="flex shrink-0 items-center gap-1" role="group" aria-label="重要度">
+                      {Array.from({ length: 5 }).map((_, idx) => {
+                        const filled = idx < node.importance;
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => setKnowledgeImportance(node.id, idx + 1)}
+                            className={`h-2 w-2 rounded-full transition-all hover:scale-125 ${
+                              filled
+                                ? 'bg-[var(--brand)]'
+                                : 'bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-700 dark:hover:bg-neutral-600'
+                            }`}
+                            aria-label={`重要度 ${idx + 1}`}
+                          />
+                        );
+                      })}
                     </div>
                   </motion.div>
                 ))}

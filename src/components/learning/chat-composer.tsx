@@ -26,6 +26,7 @@
 //     in StatusBackCard + main-content's thread bubble.
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowUp,
@@ -214,6 +215,168 @@ function usePopover() {
   return { open, setOpen, ref, menuRef, direction };
 }
 
+// ─── AnchoredPopover ─────────────────────────────────────────────────────────
+//
+// A portal-rendered popover that anchors itself to a trigger element via
+// getBoundingClientRect + position: fixed. This avoids the "menu drifts away
+// from trigger" problem that absolute-positioning-against-the-composer-wrapper
+// caused: the menu now tracks the trigger button's actual viewport position,
+// so it stays glued to the button regardless of composer card height, wrapper
+// padding, or where in the layout the composer is mounted.
+//
+// Positioning logic:
+//   • Vertical — opens ABOVE the trigger by default (direction='up'). If
+//     there isn't enough room above, falls back to BELOW (direction='down').
+//     usePopover already pre-flipped `direction` based on space measurement,
+//     but we re-check here at render time in case the viewport shifted
+//     between flip and render.
+//   • Horizontal — aligns the menu's LEFT edge to the trigger's LEFT edge
+//     (align='left') or the menu's RIGHT edge to the trigger's RIGHT edge
+//     (align='right'). If the menu would overflow the viewport, it is
+//     clamped to the viewport edge with an 8px margin.
+//
+// Rendered via createPortal to document.body so it isn't clipped by the
+// composer card's overflow-hidden or any other ancestor clipping context.
+// Reference implementation: appearance-popover.tsx (L75-87 + L126-133).
+
+interface AnchoredPopoverProps {
+  /** Ref to the trigger wrapper div (usePopover's `ref`). */
+  triggerRef: React.RefObject<HTMLDivElement | null>;
+  /** Ref forwarded to the inner motion.div so usePopover's outside-click
+   *  detection (menuRef.current?.contains(target)) keeps working. */
+  menuRef: React.RefObject<HTMLDivElement | null>;
+  open: boolean;
+  direction: 'up' | 'down';
+  /** Horizontal alignment relative to trigger. Default 'left'. */
+  align?: 'left' | 'right';
+  /** Pixel width — used both for the CSS width and viewport clamping math. */
+  width: number;
+  /** Visual styling for the menu card (border, bg, shadow, padding, …).
+   *  Position-related classes (absolute, bottom-full, z-50, …) are NOT
+   *  needed here — AnchoredPopover handles all positioning via inline style. */
+  className?: string;
+  children: React.ReactNode;
+}
+
+function AnchoredPopover({
+  triggerRef,
+  menuRef,
+  open,
+  direction,
+  align = 'left',
+  width,
+  className = '',
+  children,
+}: AnchoredPopoverProps) {
+  // SSR-safe mount gate — createPortal needs document.body, which doesn't
+  // exist during server rendering. We render nothing on the server and the
+  // first client render. Mirrors appearance-popover.tsx's mounted flag.
+  // Deferred to a microtask so we don't call setState synchronously inside
+  // an effect (react-hooks/set-state-in-effect rule).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    queueMicrotask(() => setMounted(true));
+  }, []);
+
+  // Computed position. `top` is set when direction='down' (menu opens below);
+  // `bottom` is set when direction='up' (menu opens above, anchored by its
+  // bottom edge to the trigger's top edge). The unused one is null.
+  const [pos, setPos] = useState<{
+    left: number;
+    top: number | null;
+    bottom: number | null;
+    dir: 'up' | 'down';
+  }>({ left: 0, top: null, bottom: 0, dir: 'up' });
+
+  // Recompute position every time the menu opens (or direction changes).
+  // We re-measure on every open (not just once) so window resize / textarea
+  // expansion between opens is handled.
+  useEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const r = triggerRef.current.getBoundingClientRect();
+    const GAP = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // Horizontal alignment with viewport-edge auto-flip:
+    //   1. Try the preferred alignment (align='left' → menu's LEFT edge at
+    //      trigger's LEFT edge, extends right; align='right' → menu's RIGHT
+    //      edge at trigger's RIGHT edge, extends left).
+    //   2. If that would push the menu past the right viewport edge, flip to
+    //      the opposite alignment (per spec: "如果菜单右边缘会超出视口，则让
+    //      菜单右边缘对齐 trigger 右边缘").
+    //   3. If BOTH alignments overflow (menu wider than trigger-to-edge
+    //      distance on both sides, e.g. very narrow viewport), clamp to the
+    //      viewport edge with a GAP margin so the menu stays on-screen.
+    const tryLeft = () => r.left;
+    const tryRight = () => r.right - width;
+    let left = align === 'right' ? tryRight() : tryLeft();
+    if (left + width > vw - GAP) {
+      // Right overflow — flip alignment.
+      left = align === 'right' ? tryLeft() : tryRight();
+    }
+    // Final clamp: if the menu still overflows either edge (very narrow
+    // viewport or very wide menu), pin it to the viewport edge.
+    if (left + width > vw - GAP) left = vw - GAP - width;
+    if (left < GAP) left = GAP;
+
+    // Vertical: 'up' → menu bottom sits GAP px above trigger top.
+    //          'down' → menu top sits GAP px below trigger bottom.
+    // If usePopover said 'up' but there isn't actually room above (e.g.,
+    // viewport shrank between flip and render), fall back to 'down'.
+    // Approximate menu height 320px is a conservative estimate; the CSS
+    // maxHeight (60vh) clamps the actual rendered height anyway.
+    let dir = direction;
+    const approxMenuH = 320;
+    if (dir === 'up' && r.top - GAP - approxMenuH < 0) {
+      dir = 'down';
+    }
+    let top: number | null = null;
+    let bottom: number | null = null;
+    if (dir === 'down') {
+      top = r.bottom + GAP;
+    } else {
+      bottom = vh - r.top + GAP;
+    }
+    // Deferred to a microtask so we don't call setState synchronously inside
+    // an effect (react-hooks/set-state-in-effect rule).
+    queueMicrotask(() => setPos({ left, top, bottom, dir }));
+  }, [open, direction, align, width, triggerRef]);
+
+  if (!mounted) return null;
+
+  // Animation y-offset flips with direction so the menu slides in from the
+  // correct side ('up' → slides down from above; 'down' → slides up from below).
+  const yAnim = pos.dir === 'down' ? 6 : -6;
+
+  return createPortal(
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          ref={menuRef}
+          initial={{ opacity: 0, y: yAnim, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
+          exit={{ opacity: 0, y: yAnim, scale: 0.97, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
+          style={{
+            position: 'fixed',
+            left: pos.left,
+            top: pos.top ?? undefined,
+            bottom: pos.bottom ?? undefined,
+            width,
+            zIndex: 70,
+            maxHeight: '60vh',
+            overflowY: 'auto',
+          }}
+          className={className}
+        >
+          {children}
+        </motion.div>
+      )}
+    </AnimatePresence>,
+    document.body,
+  );
+}
+
 // ─── Main Composer ───────────────────────────────────────────────────────────
 
 export interface ChatComposerProps {
@@ -252,7 +415,7 @@ export function ChatComposer({
   // flags property access off any object that also carries a ref, so we pull
   // `open`/`setOpen`/`ref`/`menuRef` out as independent names.
   const { open: attachOpen, setOpen: setAttachOpen, ref: attachRef, menuRef: attachMenuRef, direction: attachDir } = usePopover();
-  const { open: modeOpen, setOpen: setModeOpen, ref: modeRef, menuRef: modeMenuRef } = usePopover();
+  const { open: modeOpen, setOpen: setModeOpen, ref: modeRef, menuRef: modeMenuRef, direction: modeDir } = usePopover();
   const { open: thinkOpen, setOpen: setThinkOpen, ref: thinkRef, menuRef: thinkMenuRef, direction: thinkDir } = usePopover();
   const { open: modelOpen, setOpen: setModelOpen, ref: modelRef, menuRef: modelMenuRef, direction: modelDir } = usePopover();
 
@@ -312,9 +475,16 @@ export function ChatComposer({
 
   // Auto-resize with smooth collapse — the textarea grows to fit content up to
   // a tiered max, and COLLAPSES smoothly when text is cleared (e.g. after
-  // send). Two tiers:
-  //   • default  — min 1 line, grows to ~6 lines (compact mode)
-  //   • expanded — user clicked "展开" to get a taller editor (~14 lines)
+  // send). Two tiers, both keyed off the viewport height so the editor scales
+  // with the available screen real estate instead of being hard-coded to a
+  // fixed pixel count:
+  //   • default  — up to ~35vh (≈7-8 lines on a typical laptop), so the user
+  //                can compose multi-line questions without immediately
+  //                triggering internal scrolling.
+  //   • expanded — up to ~60vh (≈12-15 lines), an explicit escape hatch for
+  //                longer drafts. CSS maxHeight on the <textarea> mirrors this
+  //                via vh units so viewport resizes re-clamp without waiting
+  //                for the next keystroke.
   // The height transition is animated via the `transition-[height]` class on
   // the textarea, so when value shrinks (send / clear) the box eases back to
   // min instead of snapping. We reset to compact mode whenever the draft is
@@ -324,7 +494,8 @@ export function ChatComposer({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    const maxH = expanded ? 320 : 140;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+    const maxH = expanded ? Math.floor(vh * 0.6) : Math.floor(vh * 0.35);
     el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
     // When the draft is cleared, drop back to compact mode for next message.
     // Deferred to a microtask so we don't call setState synchronously inside
@@ -572,7 +743,7 @@ export function ChatComposer({
   );
 
   return (
-    <div className="relative flex flex-col">
+    <div className="relative flex flex-col" data-chat-composer>
       {/* ── Switch-confirmation toast (P8) — a tiny pill that fades in above
           the composer for ~1.8s after the user changes mode/model/thinking.
           Pure neutral, monochrome. Renders ABOVE the status back card so it
@@ -639,14 +810,24 @@ export function ChatComposer({
           placeholder={placeholder}
           disabled={isStreaming}
           rows={1}
-          style={{ maxHeight: expanded ? 320 : 140 }}
-          className="min-h-[36px] flex-1 resize-none border-0 bg-transparent px-1.5 py-0.5 text-[13px] leading-[1.55] text-neutral-800 caret-neutral-700 transition-[height] duration-200 ease-out placeholder:text-neutral-400 focus:outline-none disabled:opacity-60 dark:text-neutral-100 dark:caret-neutral-300 dark:placeholder:text-neutral-500"
+          style={{ maxHeight: expanded ? '60vh' : '35vh' }}
+          // `flex-none` (instead of the original `flex-1`) is required for the
+          // auto-resize effect's `el.style.height = …px` to actually take
+          // effect: with `flex: 1 1 0%` (flex-basis: 0), the flex algorithm
+          // ignores the `height` property and clamps the textarea to its
+          // min-content size (~36px = 1 line), making maxHeight + the
+          // imperative height both no-ops. `flex: 0 0 auto` (flex-none) lets
+          // the inline height drive the main size, so the textarea grows to
+          // fit content up to the maxHeight above.
+          className="min-h-[36px] flex-none resize-none border-0 bg-transparent px-1.5 py-0.5 text-[13px] leading-[1.55] text-neutral-800 caret-neutral-700 transition-[height] duration-200 ease-out placeholder:text-neutral-400 focus:outline-none disabled:opacity-60 dark:text-neutral-100 dark:caret-neutral-300 dark:placeholder:text-neutral-500"
         />
-        {/* Expand / collapse toggle — appears once the draft is long enough
-            that compact mode would scroll internally. Gives the user an
-            explicit escape hatch for composing long messages. */}
+        {/* Expand / collapse toggle — appears once the draft reaches a modest
+            length (≈80 chars ≈ 2-3 wrapped lines) so the user has an explicit
+            escape hatch into a taller editor before internal scrolling kicks
+            in. Once expanded, the button stays visible so the user can
+            collapse back. Pure neutral, monochrome. */}
         <AnimatePresence>
-          {charCount > 280 && (
+          {(charCount > 80 || expanded) && (
             <motion.button
               type="button"
               initial={{ opacity: 0, y: -2 }}
@@ -900,15 +1081,23 @@ export function ChatComposer({
         </div>
       </div>
 
-      {/* ── Popovers — rendered at the wrapper level (NOT inside the card) so
-          they pop OUTWARD above the composer instead of being clipped by the
-          card's overflow-hidden or overlapping the textarea. Each is anchored
-          to the wrapper's top edge (bottom-full) and stacked above the back
-          card via z-50. ── */}
-      <AttachMenu menuRef={attachMenuRef} open={attachOpen} direction={attachDir} onSelect={handleAttach} />
+      {/* ── Popovers — rendered via AnchoredPopover (portal to document.body,
+          position: fixed, anchored to each trigger's getBoundingClientRect).
+          This keeps each menu glued to its trigger button regardless of
+          composer card height or wrapper padding, and avoids clipping by
+          the card's overflow-hidden. ── */}
+      <AttachMenu
+        menuRef={attachMenuRef}
+        triggerRef={attachRef}
+        open={attachOpen}
+        direction={attachDir}
+        onSelect={handleAttach}
+      />
       <ModeMenu
-        ref={modeMenuRef}
+        menuRef={modeMenuRef}
+        triggerRef={modeRef}
         open={modeOpen}
+        direction={modeDir}
         current={teachingMode}
         onSelect={m => {
           setTeachingMode(m);
@@ -916,7 +1105,8 @@ export function ChatComposer({
         }}
       />
       <ThinkingMenu
-        ref={thinkMenuRef}
+        menuRef={thinkMenuRef}
+        triggerRef={thinkRef}
         open={thinkOpen}
         direction={thinkDir}
         current={thinkingMode}
@@ -926,7 +1116,8 @@ export function ChatComposer({
         }}
       />
       <ModelCardMenu
-        ref={modelMenuRef}
+        menuRef={modelMenuRef}
+        triggerRef={modelRef}
         open={modelOpen}
         direction={modelDir}
         current={selectedModel}
@@ -944,74 +1135,57 @@ export function ChatComposer({
 }
 
 // ─── Attachment popover menu ─────────────────────────────────────────────────
-
-// Helper: compute the absolute-positioning class for a popover menu based on
-// its flip direction. 'up' (default) anchors the menu ABOVE the trigger
-// (bottom-full + mb-2); 'down' anchors it BELOW (top-full + mt-2). The
-// animation y-offset is also flipped so the menu slides in from the correct
-// side. Menus also get a max-height + scroll so very long lists never
-// overflow the viewport.
-function menuPos(direction: 'up' | 'down', align: 'left' | 'right' = 'left') {
-  const side = align === 'right' ? 'right-0' : 'left-0';
-  if (direction === 'down') {
-    return {
-      className: `absolute top-full ${side} z-50 mt-2 max-h-[60vh] overflow-y-auto`,
-      yAnim: 6,
-    };
-  }
-  return {
-    className: `absolute bottom-full ${side} z-50 mb-2 max-h-[60vh] overflow-y-auto`,
-    yAnim: -6,
-  };
-}
+//
+// Renders via AnchoredPopover (portal + position: fixed + trigger rect
+// anchoring). The menu stays glued to the + button regardless of composer
+// card height. Width 256px = w-64.
 
 function AttachMenu({
   open,
   onSelect,
   menuRef,
+  triggerRef,
   direction = 'up',
 }: {
   open: boolean;
   onSelect: (opt: AttachmentOption) => void;
   menuRef: React.RefObject<HTMLDivElement | null>;
+  triggerRef: React.RefObject<HTMLDivElement | null>;
   direction?: 'up' | 'down';
 }) {
-  const pos = menuPos(direction, 'left');
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          ref={menuRef}
-          initial={{ opacity: 0, y: pos.yAnim, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
-          exit={{ opacity: 0, y: pos.yAnim, scale: 0.97, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
-          className={`${pos.className} w-64 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900`}
-        >
-          <p className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-            添加上下文
-          </p>
-          {ATTACH_OPTIONS.map(opt => {
-            const Icon = opt.icon;
-            return (
-              <button
-                key={opt.key}
-                type="button"
-                onClick={() => onSelect(opt)}
-                className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              >
-                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
-                  <Icon className="h-3.5 w-3.5" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
-                  <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
-                </span>
-              </button>
-            );
-          })}
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <AnchoredPopover
+      triggerRef={triggerRef}
+      menuRef={menuRef}
+      open={open}
+      direction={direction}
+      align="left"
+      width={256}
+      className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+    >
+      <p className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+        添加上下文
+      </p>
+      {ATTACH_OPTIONS.map(opt => {
+        const Icon = opt.icon;
+        return (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => onSelect(opt)}
+            className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          >
+            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+              <Icon className="h-3.5 w-3.5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
+              <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
+            </span>
+          </button>
+        );
+      })}
+    </AnchoredPopover>
   );
 }
 
@@ -1228,141 +1402,151 @@ function StructuredThinkingAnim() {
 }
 
 // ─── Teaching-mode popover menu ──────────────────────────────────────────────
+//
+// Renders via AnchoredPopover (portal + position: fixed + trigger rect
+// anchoring). Previously this menu opened to the RIGHT of the trigger
+// (left-full top-0), but that drifted off-screen on narrow viewports. Now it
+// opens up/down like the other three menus, consistent with the rest of the
+// composer's popover family. Width 288px = w-72.
 
-const ModeMenu = React.forwardRef<
-  HTMLDivElement,
-  {
-    open: boolean;
-    current: TeachingMode;
-    onSelect: (m: TeachingMode) => void;
-  }
->(({ open, current, onSelect }, menuRef) => {
-  // Mode menu opens BESIDE the trigger (to the right), not above. This gives
-  // a grounded, 3D-layered feel — the menu reads as an extension of the
-  // button rather than a floating panel, and avoids the menu drifting too
-  // high when the composer is tall (long text / expanded mode). The trigger
-  // is on the LEFT side of the toolbar, so there's room to the right.
+function ModeMenu({
+  open,
+  current,
+  onSelect,
+  menuRef,
+  triggerRef,
+  direction = 'up',
+}: {
+  open: boolean;
+  current: TeachingMode;
+  onSelect: (m: TeachingMode) => void;
+  menuRef: React.RefObject<HTMLDivElement | null>;
+  triggerRef: React.RefObject<HTMLDivElement | null>;
+  direction?: 'up' | 'down';
+}) {
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          ref={menuRef}
-          initial={{ opacity: 0, scale: 0.94, x: -8 }}
-          animate={{ opacity: 1, scale: 1, x: 0, transition: { type: 'spring', stiffness: 420, damping: 28 } }}
-          exit={{ opacity: 0, scale: 0.94, x: -8, transition: { type: 'spring', stiffness: 420, damping: 28 } }}
-          className="absolute left-full top-0 z-50 ml-2 max-h-[60vh] w-72 overflow-y-auto overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
-        >
-          <p className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-            教学模式
-          </p>
-          {MODE_OPTIONS.map(opt => {
-            const Icon = opt.icon;
-            const active = opt.key === current;
-            return (
-              <button
-                key={opt.key}
-                type="button"
-                onClick={() => onSelect(opt.key)}
-                className={`flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                  active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                }`}
-              >
-                <span
-                  className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
-                    active
-                      ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
-                      : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
-                  }`}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5">
-                    <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
-                    {active && <Check className="h-3.5 w-3.5 text-neutral-500 dark:text-neutral-400" />}
-                  </span>
-                  <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
-                </span>
-              </button>
-            );
-          })}
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <AnchoredPopover
+      triggerRef={triggerRef}
+      menuRef={menuRef}
+      open={open}
+      direction={direction}
+      align="left"
+      width={288}
+      className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+    >
+      <p className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+        教学模式
+      </p>
+      {MODE_OPTIONS.map(opt => {
+        const Icon = opt.icon;
+        const active = opt.key === current;
+        return (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => onSelect(opt.key)}
+            className={`flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+              active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
+            }`}
+          >
+            <span
+              className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+                active
+                  ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
+                  : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1.5">
+                <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
+                {active && <Check className="h-3.5 w-3.5 text-neutral-500 dark:text-neutral-400" />}
+              </span>
+              <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
+            </span>
+          </button>
+        );
+      })}
+    </AnchoredPopover>
   );
-});
-ModeMenu.displayName = 'ModeMenu';
+}
 
 // ─── Thinking-mode popover menu ──────────────────────────────────────────────
 //
 // 4 reasoning levels. Each row shows an icon, label, and a short description
 // of what the model does internally at that level. The active level gets a
 // filled grey icon chip + a check mark — neutral palette, no amber accent.
+//
+// Renders via AnchoredPopover (portal + position: fixed + trigger rect
+// anchoring). Width 288px = w-72.
 
-const ThinkingMenu = React.forwardRef<
-  HTMLDivElement,
-  {
-    open: boolean;
-    direction?: 'up' | 'down';
-    current: ThinkingMode;
-    onSelect: (m: ThinkingMode) => void;
-  }
->(({ open, direction = 'up', current, onSelect }, menuRef) => {
-  const pos = menuPos(direction, 'right');
+function ThinkingMenu({
+  open,
+  direction = 'up',
+  current,
+  onSelect,
+  menuRef,
+  triggerRef,
+}: {
+  open: boolean;
+  direction?: 'up' | 'down';
+  current: ThinkingMode;
+  onSelect: (m: ThinkingMode) => void;
+  menuRef: React.RefObject<HTMLDivElement | null>;
+  triggerRef: React.RefObject<HTMLDivElement | null>;
+}) {
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          ref={menuRef}
-          initial={{ opacity: 0, y: pos.yAnim, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
-          exit={{ opacity: 0, y: pos.yAnim, scale: 0.97, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
-          className={`${pos.className} w-72 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900`}
-        >
-          <p className="flex items-center gap-1 px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-            <BrainCircuit className="h-3 w-3" />
-            思考模式
-          </p>
-          {THINK_OPTIONS.map(opt => {
-            const Icon = opt.icon;
-            const active = opt.key === current;
-            return (
-              <button
-                key={opt.key}
-                type="button"
-                onClick={() => onSelect(opt.key)}
-                className={`flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                  active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                }`}
-              >
-                <span
-                  className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
-                    active
-                      ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
-                      : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
-                  }`}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5">
-                    <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
-                    {active && <Check className="h-3.5 w-3.5 text-neutral-700 dark:text-neutral-300" />}
-                  </span>
-                  <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
-                </span>
-              </button>
-            );
-          })}
-          <p className="px-2.5 py-1.5 text-[10px] leading-snug text-neutral-400 dark:text-neutral-500">
-            普通模型均具备深度推理能力。开启后模型在内部推理完成后再作答，回答更严谨；推理动画会在卡片上方展示当前推理形态。
-          </p>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <AnchoredPopover
+      triggerRef={triggerRef}
+      menuRef={menuRef}
+      open={open}
+      direction={direction}
+      align="right"
+      width={288}
+      className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+    >
+      <p className="flex items-center gap-1 px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+        <BrainCircuit className="h-3 w-3" />
+        思考模式
+      </p>
+      {THINK_OPTIONS.map(opt => {
+        const Icon = opt.icon;
+        const active = opt.key === current;
+        return (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => onSelect(opt.key)}
+            className={`flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+              active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
+            }`}
+          >
+            <span
+              className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+                active
+                  ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
+                  : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+              }`}
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1.5">
+                <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
+                {active && <Check className="h-3.5 w-3.5 text-neutral-700 dark:text-neutral-300" />}
+              </span>
+              <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
+            </span>
+          </button>
+        );
+      })}
+      <p className="px-2.5 py-1.5 text-[10px] leading-snug text-neutral-400 dark:text-neutral-500">
+        普通模型均具备深度推理能力。开启后模型在内部推理完成后再作答，回答更严谨；推理动画会在卡片上方展示当前推理形态。
+      </p>
+    </AnchoredPopover>
   );
-});
-ThinkingMenu.displayName = 'ThinkingMenu';
+}
 
 // ─── ModelCard popover menu ──────────────────────────────────────────────────
 //
@@ -1372,105 +1556,114 @@ ThinkingMenu.displayName = 'ThinkingMenu';
 //   3. 模型用量 — meter showing cumulative session tokens vs budget
 //
 // All in pure neutral monochrome. Active model gets a filled solid dot.
+//
+// Renders via AnchoredPopover (portal + position: fixed + trigger rect
+// anchoring). Width 320px = w-80.
 
-const ModelCardMenu = React.forwardRef<
-  HTMLDivElement,
-  {
-    open: boolean;
-    direction?: 'up' | 'down';
-    current: SelectedModel;
-    onSelect: (m: SelectedModel) => void;
-    contextUsed: number;
-    contextBudget: number;
-    modelUsed: number;
-    modelBudget: number;
-  }
->(({ open, direction = 'up', current, onSelect, contextUsed, contextBudget, modelUsed, modelBudget }, menuRef) => {
-  const pos = menuPos(direction, 'right');
+function ModelCardMenu({
+  open,
+  direction = 'up',
+  current,
+  onSelect,
+  contextUsed,
+  contextBudget,
+  modelUsed,
+  modelBudget,
+  menuRef,
+  triggerRef,
+}: {
+  open: boolean;
+  direction?: 'up' | 'down';
+  current: SelectedModel;
+  onSelect: (m: SelectedModel) => void;
+  contextUsed: number;
+  contextBudget: number;
+  modelUsed: number;
+  modelBudget: number;
+  menuRef: React.RefObject<HTMLDivElement | null>;
+  triggerRef: React.RefObject<HTMLDivElement | null>;
+}) {
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          ref={menuRef}
-          initial={{ opacity: 0, y: pos.yAnim, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
-          exit={{ opacity: 0, y: pos.yAnim, scale: 0.97, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
-          className={`${pos.className} w-80 overflow-hidden rounded-xl border border-neutral-200 bg-white p-2 shadow-lg dark:border-neutral-700 dark:bg-neutral-900`}
-        >
-          {/* ── Section 1: Model selection ── */}
-          <p className="flex items-center gap-1.5 px-1 py-1 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-            <Cpu className="h-3 w-3" />
-            模型
-          </p>
-          <div className="flex flex-col gap-0.5">
-            {MODEL_OPTIONS.map(opt => {
-              const active = opt.key === current;
-              return (
-                <button
-                  key={opt.key}
-                  type="button"
-                  onClick={() => onSelect(opt.key)}
-                  className={`flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors ${
-                    active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                  }`}
-                >
-                  <span
-                    className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
-                      active
-                        ? 'border-neutral-800 bg-neutral-800 dark:border-neutral-200 dark:bg-neutral-200'
-                        : 'border-neutral-300 dark:border-neutral-600'
-                    }`}
-                  >
-                    {active && <CircleDot className="h-2 w-2 text-white dark:text-neutral-900" strokeWidth={3} />}
+    <AnchoredPopover
+      triggerRef={triggerRef}
+      menuRef={menuRef}
+      open={open}
+      direction={direction}
+      align="right"
+      width={320}
+      className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-2 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+    >
+      {/* ── Section 1: Model selection ── */}
+      <p className="flex items-center gap-1.5 px-1 py-1 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+        <Cpu className="h-3 w-3" />
+        模型
+      </p>
+      <div className="flex flex-col gap-0.5">
+        {MODEL_OPTIONS.map(opt => {
+          const active = opt.key === current;
+          return (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={() => onSelect(opt.key)}
+              className={`flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors ${
+                active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
+              }`}
+            >
+              <span
+                className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                  active
+                    ? 'border-neutral-800 bg-neutral-800 dark:border-neutral-200 dark:bg-neutral-200'
+                    : 'border-neutral-300 dark:border-neutral-600'
+                }`}
+              >
+                {active && <CircleDot className="h-2 w-2 text-white dark:text-neutral-900" strokeWidth={3} />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5">
+                  <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
+                  <span className="rounded-full border border-neutral-200 px-1.5 py-px text-[9.5px] text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+                    {(opt.contextWindow / 1000).toFixed(0)}k 上下文
                   </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-1.5">
-                      <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
-                      <span className="rounded-full border border-neutral-200 px-1.5 py-px text-[9.5px] text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
-                        {(opt.contextWindow / 1000).toFixed(0)}k 上下文
-                      </span>
-                    </span>
-                    <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+                </span>
+                <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
-          {/* ── Section 2: Usage meters ── */}
-          <div className="my-2 h-px bg-neutral-200 dark:bg-neutral-700" />
+      {/* ── Section 2: Usage meters ── */}
+      <div className="my-2 h-px bg-neutral-200 dark:bg-neutral-700" />
 
-          <p className="flex items-center gap-1.5 px-1 py-1 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
-            <Gauge className="h-3 w-3" />
-            用量
-          </p>
+      <p className="flex items-center gap-1.5 px-1 py-1 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+        <Gauge className="h-3 w-3" />
+        用量
+      </p>
 
-          {/* Context usage meter */}
-          <UsageMeter
-            label="上下文用量"
-            icon={Layers}
-            used={contextUsed}
-            budget={contextBudget}
-            unit="tokens"
-          />
-          {/* Model usage meter (this session) */}
-          <UsageMeter
-            label="模型用量"
-            icon={Cpu}
-            used={modelUsed}
-            budget={modelBudget}
-            unit="tokens / 会话"
-          />
+      {/* Context usage meter */}
+      <UsageMeter
+        label="上下文用量"
+        icon={Layers}
+        used={contextUsed}
+        budget={contextBudget}
+        unit="tokens"
+      />
+      {/* Model usage meter (this session) */}
+      <UsageMeter
+        label="模型用量"
+        icon={Cpu}
+        used={modelUsed}
+        budget={modelBudget}
+        unit="tokens / 会话"
+      />
 
-          <p className="mt-1.5 px-1 text-[10px] leading-snug text-neutral-400 dark:text-neutral-500">
-            用量为估算值，仅作可视化参考。模型切换将影响下一次发送的请求。
-          </p>
-        </motion.div>
-      )}
-    </AnimatePresence>
+      <p className="mt-1.5 px-1 text-[10px] leading-snug text-neutral-400 dark:text-neutral-500">
+        用量为估算值，仅作可视化参考。模型切换将影响下一次发送的请求。
+      </p>
+    </AnchoredPopover>
   );
-});
-ModelCardMenu.displayName = 'ModelCardMenu';
+}
 
 // ─── Usage meter — a thin horizontal bar with numeric label ──────────────────
 //

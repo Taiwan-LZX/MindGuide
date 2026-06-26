@@ -272,6 +272,7 @@ interface LearningStore {
   fetchKnowledgeNodes: (sessionId: string) => Promise<void>;
   fetchReferences: (sessionId: string) => Promise<void>;
   toggleKnowledgeMastered: (nodeId: string) => Promise<void>;
+  setKnowledgeImportance: (nodeId: string, importance: number) => Promise<void>;
 
   // Actions - Course
   setCoursePanelOpen: (open: boolean) => void;
@@ -505,6 +506,13 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       // Returning to a conversation should always show the chat view, not
       // whatever feature view (notes/stats/etc.) was open before.
       activeFeatureView: null,
+      // Reset all floating-panel open states so panels from the previous
+      // session don't persist into the new one (course / more-features /
+      // settings-panel / settings-view).
+      coursePanelOpen: false,
+      createNewPanelOpen: false,
+      settingsPanelOpen: false,
+      settingsViewOpen: false,
       messages: [],
       knowledgeNodes: [],
       references: [],
@@ -900,9 +908,42 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
     }
   },
 
+  setKnowledgeImportance: async (nodeId: string, importance: number) => {
+    // Optimistic update — clamp to 1-5
+    const clamped = Math.max(1, Math.min(5, Math.round(importance)));
+    const prevNodes = get().knowledgeNodes;
+    set((state) => ({
+      knowledgeNodes: state.knowledgeNodes.map((n) =>
+        n.id === nodeId ? { ...n, importance: clamped } : n
+      ),
+    }));
+    try {
+      const res = await fetch(`/api/knowledge/${nodeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ importance: clamped }),
+      });
+      if (!res.ok) {
+        set({ knowledgeNodes: prevNodes });
+        console.error('setKnowledgeImportance failed:', res.status);
+      }
+    } catch (error) {
+      set({ knowledgeNodes: prevNodes });
+      console.error('Failed to update knowledge importance:', error);
+    }
+  },
+
   // ── Course ────────────────────────────────────────────────────────────────
 
-  setCoursePanelOpen: (open: boolean) => set({ coursePanelOpen: open }),
+  setCoursePanelOpen: (open: boolean) =>
+    // Opening the course panel closes any active FeatureView (mutex — the two
+    // compete for horizontal width). Closing the panel leaves the FeatureView
+    // state untouched so the user can return to it via the sidebar.
+    set(
+      open
+        ? { coursePanelOpen: true, activeFeatureView: null }
+        : { coursePanelOpen: false }
+    ),
   setActiveLessonId: (id: string | null) => set({ activeLessonId: id }),
 
   fetchCourse: async (sessionId: string) => {
@@ -1351,7 +1392,16 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
     // Forward = entering a feature from welcome, or switching features.
     const prev = get().activeFeatureView;
     const dir: 1 | -1 = prev !== null && view === null ? -1 : 1;
-    set({ activeFeatureView: view, activeFeatureViewDir: dir, createNewPanelOpen: false });
+    // Opening a FeatureView now also closes the course panel — the two are
+    // mutually exclusive to avoid them competing for horizontal width in the
+    // main area (course-panel is 420px, FeatureView content is centered
+    // max-w-600px). Closing createNewPanelOpen is the existing behavior.
+    set({
+      activeFeatureView: view,
+      activeFeatureViewDir: dir,
+      createNewPanelOpen: false,
+      coursePanelOpen: view !== null ? false : get().coursePanelOpen,
+    });
     // Pre-fetch stats when entering the progress (stats+achievements) view
     if (view === 'progress') {
       get().fetchStats();

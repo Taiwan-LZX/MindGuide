@@ -26,6 +26,9 @@ export default function Page() {
     setSettingsPanelOpen,
     settingsViewOpen,
     setSettingsViewOpen,
+    setSidebarOpen,
+    setCreateNewPanelOpen,
+    setActiveFeatureView,
   } = useLearningStore();
   const motionEnabled = usePreferences(s => s.motionEnabled);
   const accentColor = usePreferences(s => s.accentColor);
@@ -80,6 +83,64 @@ export default function Page() {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [settingsPanelOpen, setSettingsPanelOpen, settingsViewOpen, setSettingsViewOpen]);
+
+  // ── Global keyboard shortcuts ────────────────────────────────────────────
+  // Registers ⌘1-6 (feature jump), ⌘B (toggle sidebar), ⌘, (open settings)
+  // globally — these were previously only active while the MoreFeaturesPanel
+  // was open, which contradicted the keyboard-shortcuts-overlay promise that
+  // they are always available. ⌘1-6 fire even when an input is focused (they
+  // are navigation, not text input); ⌘B / ⌘, are suppressed inside editable
+  // fields so the user can still type 'b' / ',' with the modifier if needed.
+  useEffect(() => {
+    const FEATURE_VIEWS = [
+      'tasks',
+      'cards',
+      'progress',
+      'graph',
+      'notes',
+      'materials',
+    ] as const;
+    const handler = (e: KeyboardEvent) => {
+      const isMod = e.metaKey || e.ctrlKey;
+      if (!isMod) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const isEditable =
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        target?.isContentEditable === true;
+
+      // ⌘1-6: jump to a feature view (allowed even when typing — it's
+      // navigation, not text insertion).
+      if (/^[1-6]$/.test(e.key)) {
+        e.preventDefault();
+        const idx = Number(e.key) - 1;
+        const view = FEATURE_VIEWS[idx];
+        if (view) {
+          setActiveFeatureView(view);
+          setCreateNewPanelOpen(false);
+        }
+        return;
+      }
+
+      // ⌘B / ⌘, are suppressed inside editable fields to avoid hijacking
+      // legitimate modifier+key combinations during text entry.
+      if (isEditable) return;
+
+      if (e.key === 'b' || e.key === 'B') {
+        e.preventDefault();
+        setSidebarOpen(!useLearningStore.getState().sidebarOpen);
+        return;
+      }
+      if (e.key === ',') {
+        e.preventDefault();
+        setSettingsViewOpen(true);
+        return;
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [setActiveFeatureView, setCreateNewPanelOpen, setSidebarOpen, setSettingsViewOpen]);
 
   // Determine if sidebar should be shown
   const showSidebar = displayMode !== 'full' && sidebarOpen;

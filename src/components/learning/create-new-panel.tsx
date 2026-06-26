@@ -256,13 +256,28 @@ export function MoreFeaturesPanel() {
   const { createNewPanelOpen, setCreateNewPanelOpen, setActiveFeatureView } = useLearningStore();
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Close on click outside
+  // Close on click outside — but with a permissive exemption list so the panel
+  // doesn't auto-close while the user interacts with the chat composer, the
+  // sidebar, or any other persistent UI surface. The panel should only close
+  // when the user clicks on truly "blank" app chrome (the message list, the
+  // feature-view background, etc.). The 50ms deferred attach gives the open
+  // animation time to settle so the click that OPENED the panel doesn't
+  // immediately dismiss it.
   useEffect(() => {
     if (!createNewPanelOpen) return;
     const handler = (e: MouseEvent) => {
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
         const trigger = e.target as HTMLElement;
+        // The "更多功能" trigger button (sidebar footer / collapsed strip).
         if (trigger.closest('[data-more-features-trigger]')) return;
+        // The chat composer (textarea + attach/mode/think/model buttons).
+        // Without this exemption, clicking back into the input to keep typing
+        // would dismiss the panel — a regression reported by users.
+        if (trigger.closest('[data-chat-composer]')) return;
+        // The sidebar (session list, search, brand, footer buttons).
+        if (trigger.closest('[data-sidebar]')) return;
+        // Feature views (when one is already open behind the panel).
+        if (trigger.closest('[data-feature-view]')) return;
         setCreateNewPanelOpen(false);
       }
     };
@@ -275,28 +290,22 @@ export function MoreFeaturesPanel() {
     };
   }, [createNewPanelOpen, setCreateNewPanelOpen]);
 
-  // Keyboard shortcuts: ⌘1-6 / Ctrl+1-6 to jump to features, Esc to close
+  // Keyboard shortcut: Esc to close the panel.
+  // ⌘1-6 are now registered globally in page.tsx so they work regardless of
+  // whether this panel is open (matching the keyboard-shortcuts-overlay
+  // promise). When ⌘1-6 fires, the global handler calls setActiveFeatureView
+  // which atomically closes this panel via the store.
   useEffect(() => {
     if (!createNewPanelOpen) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         setCreateNewPanelOpen(false);
-        return;
-      }
-      const isMod = e.metaKey || e.ctrlKey;
-      if (isMod && /^[1-6]$/.test(e.key)) {
-        e.preventDefault();
-        const f = features.find(x => x.shortcut === e.key);
-        if (f) {
-          setActiveFeatureView(f.id);
-          setCreateNewPanelOpen(false);
-        }
       }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [createNewPanelOpen, setActiveFeatureView, setCreateNewPanelOpen]);
+  }, [createNewPanelOpen, setCreateNewPanelOpen]);
 
   return (
     <AnimatePresence>

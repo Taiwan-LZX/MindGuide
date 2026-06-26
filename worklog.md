@@ -330,3 +330,59 @@ src/app/globals.css（260 行）没有任何 textarea max-height / rows / .compo
 1. 问题1：把四个浮层改为 createPortal + fixed + getBoundingClientRect 锚定到 trigger（参考 appearance-popover.tsx 第 75-87 + 126-133 行的实现），或把每个浮层移到各自 trigger 的 `relative` wrapper 内（去掉 composer card 的 overflow-hidden，或改用 visible/clip 区分横纵裁剪）。
 2. 问题2&3：把 `maxH = expanded ? 320 : 140` 改为更宽裕的默认值（如 200/420），或彻底移除 maxHeight 改用 viewport 百分比（如 `min(scrollHeight, window.innerHeight * 0.5)`）。把"展开"按钮的触发条件从 `charCount > 280` 改为 `scrollHeight > maxH` 或始终显示一个手动展开入口。
 3. 问题4：把 click-outside handler 改为仅在用户点击非交互区域时关闭（增加对 chat-composer 容器、sidebar 容器的豁免），或干脆改为只在 Esc/显式 X 按钮时关闭。如果是从 chat-composer 的 + → 添加文件 触发的，应把 MoreFeaturesPanel 的 fixed 定位改为锚定到 trigger 位置（参考 appearance-popover.tsx 的 portal 模式）。
+
+---
+Task ID: impl-all-phases-3
+Agent: main (Z.ai Code)
+Task: 完整落地规划实施 — 课程面板重设计(参考图) + P0输入修复 + P1一致性修复
+
+Work Log:
+- 用 VLM 深度分析用户上传的课程界面参考图（三栏布局/棕褐强调色/状态图标✓▶🔒/模块进度数字X-Y/课时类型chip/圆环进度），提取 10 个设计维度
+- Phase 2 (课程面板重设计): 完整重写 course-panel.tsx
+  · 新增 CircularProgress SVG 圆环组件（顶部显示总进度百分比）
+  · 模块标题改为 "Module N" 编号 + 标题 + "X/Y" 进度数字（参考图核心特征）
+  · 课时行改为：状态图标 + 标题 + 类型chip(理论/练习/测验, 棕色tint) + 时长
+  · 课时用 border-left 竖线连接（树状视觉），替代旧的嵌套浮动卡片
+  · 活跃课时用 layoutId accent bar + brand 背景着色
+  · 容器从 380px 加宽到 420px，移除 shadow-lg 改为 hairline border
+  · 课时状态切换增加 completed → active 撤销路径（与知识节点 mastered 一致）
+  · 新增 ESC + 外部点击关闭（统一浮层关闭契约，旧版只有 X 按钮）
+  · 修复 AnimatePresence fragment 无 key 导致退出动画失效的 bug
+- Phase 1 (P0 输入修复): 由 full-stack-developer 子代理完成（尽管响应超时，代码全部落地）
+  · 1a: chat-composer 四个浮层(Attach/Mode/Thinking/Model) Portal 化，用 createPortal + getBoundingClientRect 锚定到 trigger
+  · 1b: 输入框 maxHeight 从硬编码 140/320 改为 35vh/60vh 动态视口比例，展开按钮触发条件从 280 字符降至 80 字符
+  · 1c: MoreFeaturesPanel click-outside 豁免 [data-chat-composer] + [data-sidebar]，chat-composer 和 sidebar 根容器加上对应 data 属性
+  · 1d: keyboard-shortcuts-overlay 标签同步(⌘3=学习进度/⌘4=知识图谱/⌘5=学习笔记/⌘6=文件导入)，page.tsx 全局注册 ⌘1-6/⌘B/⌘,
+- Phase 3a (卡片复习 ESC 确认): card-review-mode.tsx 新增 showExitConfirm 状态 + 确认对话框（已评级卡片 > 0 时 ESC 弹确认，否则直接退出）
+- Phase 3b (selectSession 重置浮层): learning-store.ts selectSession 新增 coursePanelOpen/createNewPanelOpen/settingsPanelOpen/settingsViewOpen 全部重置为 false
+- Phase 3c (课程/FeatureView 互斥): setCoursePanelOpen(true) 时关闭 activeFeatureView，setActiveFeatureView(view) 时 view≠null 关闭 coursePanelOpen
+- Phase 3d (知识图谱可写化 + 死按钮):
+  · API /api/knowledge/[id] PATCH 扩展支持 { mastered?, importance? } body
+  · store 新增 setKnowledgeImportance action（乐观更新 + 回滚）
+  · KnowledgeGraphView mastered 指示器改为可点击 button，重要度改为 5 个可点击圆点
+  · sidebar 折叠态搜索按钮补 onClick（展开侧栏 + 聚焦搜索框）
+- Phase 3 额外: main-content.tsx 和 sidebar.tsx 的课程切换按钮加 data-course-toggle 属性（防止 click-outside 误关）
+
+Stage Summary:
+- 所有修改通过 `bun run lint`（0 errors / 0 warnings）
+- dev server 稳定运行 HTTP 200
+- Agent Browser 端到端验证结果：
+  · 课程面板新设计: ✅ 圆环进度(6%) + Module编号 + 0/4进度数字 + ✓状态图标 + 类型chip + 时长 — VLM 确认全部匹配参考图
+  · ESC 关闭课程面板: ✅
+  · X 按钮关闭课程面板: ✅
+  · 输入框 10 行扩展: ✅ clientHeight=205px 无内部滚动（旧版 140px 只能 3 行）
+  · 更多功能面板点击输入框不关闭: ✅ (data-chat-composer 豁免生效)
+  · ⌘1 跳转任务规划: ✅
+  · 课时状态切换 completed→active 撤销: ✅
+- 修改文件清单:
+  · src/components/learning/course-panel.tsx (完整重写)
+  · src/components/learning/chat-composer.tsx (Portal化+自适应高度+data属性)
+  · src/components/learning/create-new-panel.tsx (智能关闭豁免)
+  · src/components/learning/keyboard-shortcuts-overlay.tsx (快捷键标签同步)
+  · src/components/learning/card-review-mode.tsx (ESC确认对话框)
+  · src/components/learning/feature-views.tsx (知识图谱可写化)
+  · src/components/learning/sidebar.tsx (死按钮修复+data-course-toggle)
+  · src/components/learning/main-content.tsx (data-course-toggle)
+  · src/app/page.tsx (全局⌘1-6/⌘B/⌘,注册)
+  · src/store/learning-store.ts (selectSession重置+互斥+setKnowledgeImportance)
+  · src/app/api/knowledge/[id]/route.ts (PATCH支持importance)

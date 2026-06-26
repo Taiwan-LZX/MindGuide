@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MOTION } from '@/lib/motion-tokens';
 import {
@@ -12,6 +12,7 @@ import {
   BookOpen,
   Sparkles,
   Brain,
+  RotateCcw,
 } from 'lucide-react';
 import { useLearningStore, type CourseModule, type CourseLesson } from '@/store/learning-store';
 import { InlineSpinner, LoadingOverlay } from '@/components/learning/loading-utils';
@@ -22,19 +23,11 @@ const spring = { type: 'spring' as const, stiffness: 320, damping: 28, mass: 0.8
 
 // ─── Animation Variants ─────────────────────────────────────────────────────
 //
-// Personality: "reveal" — the course panel is a sidebar that opens from the
-// right side of the chat surface. It should feel like a drawer sliding in
-// from the right (x:24 → 0) rather than a generic scale+fade. On close it
-// slides back right (x:24 + opacity 0) so the exit reads as "putting the
-// drawer away" — the exit-transition polish the user flagged.
-//
-// Differentiation vs. other panels:
-//  · Quick menu (command): top-right dropdown, snappy 380/30/0.6.
-//  · More features (discovery): bottom-left popover, soft 280/26/0.9.
-//  · Settings (ceremony): centered modal, heavy 200/24/1.0.
-//  · Course (reveal): right-side drawer, lateral 300/28/0.85, x-push not y.
+// Personality: "reveal" — redesigned to match the reference course design.
+// Clean, flat, editorial. Module sections as plain rows (not nested cards),
+// lessons as minimal rows with status icons + type chips + duration.
+// Circular progress ring in the header replaces the old plain percentage.
 
-/** Panel entrance: lateral slide-in from the right + soft scale. */
 const panelVariants = {
   hidden: { opacity: 0, scale: 0.97, x: 24 },
   visible: {
@@ -43,15 +36,6 @@ const panelVariants = {
     x: 0,
     transition: { type: 'spring' as const, stiffness: 300, damping: 28, mass: 0.85 },
   },
-  // Exit slides back toward the right edge (where the drawer came from).
-  // transformOrigin: 'right' set inline on the panel so scale-down also
-  // recedes rightward — the two cues agree directionally.
-  //
-  // EXIT EASING (anim-refine-003): split per-property. Opacity uses ease-OUT
-  // so the drawer visibly fades from frame 1 (no dead-time window). Scale + x
-  // keep ease-IN for the "sliding back into the right edge" metaphor but
-  // finish slightly before opacity completes.
-  // EXIT = ENTER reversed: same target (hidden) + same spring.
   exit: {
     opacity: 0,
     scale: 0.97,
@@ -100,8 +84,6 @@ const collapsibleVariants = {
     opacity: 1,
     transition: { ...spring },
   },
-  // Collapsing: opacity drops fast (ease-out) so the user sees the collapse
-  // start immediately; height uses ease-in so it accelerates closed.
   collapsed: {
     height: 0,
     opacity: 0,
@@ -121,7 +103,6 @@ const promptVariants = {
   },
 };
 
-/** Staggered dot animation for the message threshold indicator */
 const dotVariants = {
   hidden: { opacity: 0, scale: 0.5 },
   visible: (i: number) => ({
@@ -131,6 +112,48 @@ const dotVariants = {
   }),
 };
 
+// ─── Circular Progress Ring ──────────────────────────────────────────────────
+//
+// Replaces the old plain "{overallProgress}%" text with an SVG ring that
+// matches the reference design's top-right progress indicator. Brand-colored
+// stroke on a neutral track, with the percentage number in the center.
+
+function CircularProgress({ value, size = 36 }: { value: number; size?: number }) {
+  const strokeWidth = 2.5;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (value / 100) * circumference;
+
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          strokeWidth={strokeWidth}
+          className="fill-none stroke-neutral-200 dark:stroke-neutral-700"
+        />
+        <motion.circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          className="fill-none stroke-[var(--brand)]"
+          initial={{ strokeDashoffset: circumference }}
+          animate={{ strokeDashoffset: offset }}
+          transition={{ type: 'spring', stiffness: 120, damping: 20, mass: 0.8 }}
+          style={{ strokeDasharray: circumference }}
+        />
+      </svg>
+      <span className="absolute font-serif text-[10px] font-medium tabular-nums text-neutral-700 dark:text-neutral-300">
+        {value}
+      </span>
+    </div>
+  );
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const typeLabels: Record<CourseLesson['type'], string> = {
@@ -139,11 +162,22 @@ const typeLabels: Record<CourseLesson['type'], string> = {
   quiz: '测验',
 };
 
-const typeColors: Record<CourseLesson['type'], string> = {
+// Type chip colors — theory stays neutral, practice/quiz get a subtle brand tint
+// to distinguish hands-on content from conceptual content (matching the
+// reference design's colored type labels).
+const typeChipColors: Record<CourseLesson['type'], string> = {
   theory: 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400',
-  practice: 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400',
-  quiz: 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400',
+  practice:
+    'bg-[var(--brand)]/10 text-[var(--brand)] dark:bg-[var(--brand)]/15 dark:text-[var(--brand)]',
+  quiz: 'bg-[var(--brand)]/10 text-[var(--brand)] dark:bg-[var(--brand)]/15 dark:text-[var(--brand)]',
 };
+
+// ─── Status Icon ──────────────────────────────────────────────────────────────
+//
+// Reference design uses three distinct icons: ✓ (completed, accent), ▶
+// (in-progress, accent), 🔒 (locked, neutral). We keep MindGuide's filled-circle
+// treatment for completed/active to preserve the brand identity, but simplify
+// to match the reference's clean iconography.
 
 function StatusIcon({ status }: { status: CourseLesson['status'] }) {
   switch (status) {
@@ -154,10 +188,15 @@ function StatusIcon({ status }: { status: CourseLesson['status'] }) {
         </div>
       );
     case 'active':
+      return (
+        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--brand)] text-[var(--brand-foreground)]">
+          <Play className="h-2.5 w-2.5" fill="currentColor" />
+        </div>
+      );
     case 'available':
       return (
-        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-neutral-400 dark:border-neutral-500">
-          <Play className="h-2.5 w-2.5 text-neutral-500 dark:text-neutral-400" fill="currentColor" />
+        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-[1.5px] border-neutral-300 dark:border-neutral-600">
+          <Play className="h-2.5 w-2.5 text-neutral-400 dark:text-neutral-500" fill="currentColor" />
         </div>
       );
     case 'locked':
@@ -187,6 +226,7 @@ export function CoursePanel() {
   } = useLearningStore();
 
   const [collapsedModules, setCollapsedModules] = useState<Set<string>>(new Set());
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const toggleModule = (moduleId: string) => {
     setCollapsedModules((prev) => {
@@ -211,7 +251,7 @@ export function CoursePanel() {
   // Calculate module progress
   const getModuleProgress = (module: CourseModule) => {
     const completed = module.lessons.filter((l) => l.status === 'completed').length;
-    return `${completed}/${module.lessons.length}`;
+    return { completed, total: module.lessons.length, label: `${completed}/${module.lessons.length}` };
   };
 
   const handleLessonClick = (moduleId: string, lesson: CourseLesson) => {
@@ -222,282 +262,307 @@ export function CoursePanel() {
     } else if (lesson.status === 'active') {
       updateLessonStatus(moduleId, lesson.id, 'completed');
     }
+    // Allow toggling completed → active (undo), matching knowledge-node behavior
+    else if (lesson.status === 'completed') {
+      updateLessonStatus(moduleId, lesson.id, 'active');
+    }
     setActiveLessonId(lesson.id);
   };
 
   const userMsgCount = messages.filter((m) => m.role === 'user').length;
   const canGenerate = userMsgCount >= 3;
 
+  // ESC to close + click outside to close (unified close contract, matching
+  // other floating panels like command-palette / settings-view).
+  useEffect(() => {
+    if (!coursePanelOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setCoursePanelOpen(false);
+      }
+    };
+    const onDown = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        // Don't close if clicking the toggle button (BookOpen) — that toggles
+        const target = e.target as HTMLElement;
+        if (target.closest('[data-course-toggle]')) return;
+        setCoursePanelOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    const timer = setTimeout(() => {
+      document.addEventListener('mousedown', onDown);
+    }, 50);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      clearTimeout(timer);
+      document.removeEventListener('mousedown', onDown);
+    };
+  }, [coursePanelOpen, setCoursePanelOpen]);
+
   return (
     <AnimatePresence>
       {coursePanelOpen && (
         <motion.div
+          key="course-panel"
+          ref={panelRef}
           variants={panelVariants}
           initial="hidden"
           animate="visible"
           exit="exit"
-          className="relative flex h-full w-[380px] shrink-0 flex-col m-2 rounded-2xl bg-white shadow-lg shadow-neutral-200/50 dark:bg-neutral-900/95 dark:shadow-black/20"
+          className="relative z-40 flex h-full w-[420px] shrink-0 flex-col m-2 rounded-2xl border border-neutral-200/80 bg-white dark:border-neutral-700/50 dark:bg-neutral-900"
           style={{ maxHeight: 'calc(100% - 16px)', transformOrigin: 'right', willChange: 'transform, opacity' }}
         >
-          {!isCourseGenerated ? (
-            /* ── Not yet generated: prompt to generate ── */
-            <div className="flex h-full flex-col overflow-hidden rounded-2xl">
-              {/* Header — no harsh border, subtle separator */}
-              <div className="relative z-[41] flex h-14 shrink-0 items-center justify-between px-5">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-neutral-100 dark:bg-neutral-800">
-                    <BookOpen className="h-3.5 w-3.5 text-neutral-500 dark:text-neutral-400" />
+            {!isCourseGenerated ? (
+              /* ── Not yet generated: prompt to generate ── */
+              <div className="flex h-full flex-col overflow-hidden rounded-2xl">
+                {/* Header — minimal, with close button */}
+                <div className="relative z-[41] flex h-14 shrink-0 items-center justify-between px-5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-neutral-100 dark:bg-neutral-800">
+                      <BookOpen className="h-3.5 w-3.5 text-neutral-500 dark:text-neutral-400" />
+                    </div>
+                    <h2 className="text-[15px] font-semibold text-neutral-900 dark:text-neutral-100">
+                      课程
+                    </h2>
                   </div>
-                  <h2 className="text-[15px] font-semibold text-neutral-900 dark:text-neutral-100">
-                    课程
-                  </h2>
-                </div>
-                <motion.button
-                  whileHover={{
-                    scale: 1.06,
-                    transition: { type: 'spring', stiffness: 400, damping: 22 },
-                  }}
-                  whileTap={{
-                    scale: 0.94,
-                    transition: { type: 'spring', stiffness: 600, damping: 25 },
-                  }}
-                  onClick={() => setCoursePanelOpen(false)}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                  aria-label="关闭课程面板"
-                >
-                  <X className="h-4 w-4" />
-                </motion.button>
-              </div>
-
-              {/* Subtle divider */}
-              <div className="mx-5 h-px bg-neutral-100 dark:bg-neutral-800/60" />
-
-              {/* Prompt content */}
-              <div className="relative flex flex-1 flex-col items-center justify-center px-8 text-center">
-                {/* Shimmer overlay while generating */}
-                <LoadingOverlay active={isGeneratingCourse} label="正在分析学习状态..." blur />
-
-                <motion.div
-                  variants={promptVariants}
-                  initial="hidden"
-                  animate="visible"
-                  className="space-y-5"
-                >
-                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-neutral-100 dark:bg-neutral-800/80">
-                    <Brain className="h-6 w-6 text-neutral-400 dark:text-neutral-500" />
-                  </div>
-
-                  <div className="space-y-2">
-                    <h3 className="text-[15px] font-medium text-neutral-800 dark:text-neutral-200">
-                      AI 尚未了解你的学习状态
-                    </h3>
-                    <p className="text-[13px] leading-relaxed text-neutral-500 dark:text-neutral-400">
-                      {canGenerate
-                        ? '通过对话，AI 已经初步了解你的思考方式。现在可以生成个性化课程了。'
-                        : `继续与 AI 对话（还需至少 ${3 - userMsgCount} 条消息），让它了解你的学习水平和知识盲区。`}
-                    </p>
-                  </div>
-
-                  {/* Generate button or progress dots */}
-                  <AnimatePresence mode="wait">
-                    {canGenerate ? (
-                      <motion.button
-                        key="generate-btn"
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 8, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
-                        whileHover={{
-                          scale: 1.02,
-                          transition: { type: 'spring', stiffness: 400, damping: 22 },
-                        }}
-                        whileTap={{
-                          scale: 0.985,
-                          transition: { type: 'spring', stiffness: 600, damping: 25 },
-                        }}
-                        onClick={generateCourse}
-                        disabled={isGeneratingCourse}
-                        className="inline-flex items-center gap-2 rounded-xl bg-[var(--brand)] px-5 py-2.5 text-[13px] font-medium text-[var(--brand-foreground)] shadow-md shadow-black/10 transition-all hover:shadow-lg hover:shadow-black/15 disabled:opacity-60"
-                      >
-                        {isGeneratingCourse ? (
-                          <>
-                            <InlineSpinner size="sm" className="border-neutral-300 dark:border-neutral-600 border-t-white dark:border-t-neutral-900" />
-                            <span>生成中...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="h-4 w-4" />
-                            <span>生成课程</span>
-                          </>
-                        )}
-                      </motion.button>
-                    ) : (
-                      <motion.div
-                        key="progress-dots"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0, transition: { duration: 0.12 } }}
-                        className="flex items-center justify-center gap-3"
-                      >
-                        {Array.from({ length: 3 }).map((_, i) => (
-                          <motion.div
-                            key={i}
-                            custom={i}
-                            variants={dotVariants}
-                            initial="hidden"
-                            animate="visible"
-                            className={`h-2 w-2 rounded-full transition-colors duration-300 ${
-                              i < userMsgCount
-                                ? 'bg-[var(--brand)]'
-                                : 'bg-neutral-200 dark:bg-neutral-700'
-                            }`}
-                          />
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  {!canGenerate && (
-                    <motion.p
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1, transition: { delay: 0.3 } }}
-                      className="text-[11px] text-neutral-400 dark:text-neutral-500"
-                    >
-                      {userMsgCount} / 3 条消息
-                    </motion.p>
-                  )}
-                </motion.div>
-              </div>
-            </div>
-          ) : (
-            /* ── Course generated: show modules ── */
-            <div className="flex h-full flex-col overflow-hidden rounded-2xl">
-              {/* Header with progress — subtle separation */}
-              <div className="relative z-[41] flex h-14 shrink-0 items-center justify-between px-5">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-neutral-100 dark:bg-neutral-800">
-                    <BookOpen className="h-3.5 w-3.5 text-neutral-500 dark:text-neutral-400" />
-                  </div>
-                  <h2 className="text-[15px] font-semibold text-neutral-900 dark:text-neutral-100">
-                    课程
-                  </h2>
-                  <span className="ml-1 text-[12px] font-medium text-neutral-400 dark:text-neutral-500">
-                    {overallProgress}%
-                  </span>
-                </div>
-                <motion.button
-                  whileHover={{
-                    scale: 1.06,
-                    transition: { type: 'spring', stiffness: 400, damping: 22 },
-                  }}
-                  whileTap={{
-                    scale: 0.94,
-                    transition: { type: 'spring', stiffness: 600, damping: 25 },
-                  }}
-                  onClick={() => setCoursePanelOpen(false)}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                  aria-label="关闭课程面板"
-                >
-                  <X className="h-4 w-4" />
-                </motion.button>
-              </div>
-
-              {/* Subtle divider */}
-              <div className="mx-5 h-px bg-neutral-100 dark:bg-neutral-800/60" />
-
-              {/* Module list with shimmer overlay while regenerating */}
-              <div className="relative flex-1 overflow-hidden">
-                <LoadingOverlay active={isGeneratingCourse} label="重新生成中..." blur />
-
-                <div className="h-full overflow-y-auto px-3 py-4 custom-scrollbar">
-                  <motion.div
-                    variants={moduleContainerVariants}
-                    initial="hidden"
-                    animate="visible"
-                    className="space-y-2.5"
+                  <motion.button
+                    whileHover={{ scale: 1.06, transition: { type: 'spring', stiffness: 400, damping: 22 } }}
+                    whileTap={{ scale: 0.94, transition: { type: 'spring', stiffness: 600, damping: 25 } }}
+                    onClick={() => setCoursePanelOpen(false)}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    aria-label="关闭课程面板"
                   >
-                    {courseModules.map((mod) => {
-                      const isCollapsed = collapsedModules.has(mod.id);
-                      const progress = getModuleProgress(mod);
+                    <X className="h-4 w-4" />
+                  </motion.button>
+                </div>
 
-                      return (
-                        <motion.div
-                          key={mod.id}
-                          variants={moduleVariants}
-                          layout
-                          className="overflow-hidden rounded-xl bg-neutral-50/80 shadow-sm shadow-neutral-200/40 dark:bg-neutral-800/60 dark:shadow-black/10"
+                <div className="mx-5 h-px bg-neutral-100 dark:bg-neutral-800/60" />
+
+                {/* Prompt content */}
+                <div className="relative flex flex-1 flex-col items-center justify-center px-8 text-center">
+                  <LoadingOverlay active={isGeneratingCourse} label="正在分析学习状态..." blur />
+                  <motion.div variants={promptVariants} initial="hidden" animate="visible" className="space-y-5">
+                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-neutral-100 dark:bg-neutral-800/80">
+                      <Brain className="h-6 w-6 text-neutral-400 dark:text-neutral-500" />
+                    </div>
+                    <div className="space-y-2">
+                      <h3 className="text-[15px] font-medium text-neutral-800 dark:text-neutral-200">
+                        AI 尚未了解你的学习状态
+                      </h3>
+                      <p className="text-[13px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+                        {canGenerate
+                          ? '通过对话，AI 已经初步了解你的思考方式。现在可以生成个性化课程了。'
+                          : `继续与 AI 对话（还需至少 ${3 - userMsgCount} 条消息），让它了解你的学习水平和知识盲区。`}
+                      </p>
+                    </div>
+                    <AnimatePresence mode="wait">
+                      {canGenerate ? (
+                        <motion.button
+                          key="generate-btn"
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 8, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
+                          whileHover={{ scale: 1.02, transition: { type: 'spring', stiffness: 400, damping: 22 } }}
+                          whileTap={{ scale: 0.985, transition: { type: 'spring', stiffness: 600, damping: 25 } }}
+                          onClick={generateCourse}
+                          disabled={isGeneratingCourse}
+                          className="inline-flex items-center gap-2 rounded-xl bg-[var(--brand)] px-5 py-2.5 text-[13px] font-medium text-[var(--brand-foreground)] shadow-md shadow-black/10 transition-all hover:shadow-lg hover:shadow-black/15 disabled:opacity-60"
                         >
-                          {/* Module header */}
-                          <button
-                            onClick={() => toggleModule(mod.id)}
-                            className="flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors duration-150 hover:bg-white/60 dark:hover:bg-neutral-700/40"
-                          >
+                          {isGeneratingCourse ? (
+                            <>
+                              <InlineSpinner size="sm" className="border-neutral-300 dark:border-neutral-600 border-t-white dark:border-t-neutral-900" />
+                              <span>生成中...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="h-4 w-4" />
+                              <span>生成课程</span>
+                            </>
+                          )}
+                        </motion.button>
+                      ) : (
+                        <motion.div
+                          key="progress-dots"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0, transition: { duration: 0.12 } }}
+                          className="flex items-center justify-center gap-3"
+                        >
+                          {Array.from({ length: 3 }).map((_, i) => (
                             <motion.div
-                              animate={{ rotate: isCollapsed ? 0 : 90 }}
-                              transition={spring}
-                              className="flex h-5 w-5 shrink-0 items-center justify-center"
-                            >
-                              <ChevronDown className="h-3.5 w-3.5 text-neutral-400" />
-                            </motion.div>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-[13px] font-medium text-neutral-800 dark:text-neutral-200">
-                                {mod.title}
-                              </p>
-                              <p className="mt-0.5 text-[11px] text-neutral-400 dark:text-neutral-500">
-                                {progress} 已完成
-                              </p>
-                            </div>
-                          </button>
+                              key={i}
+                              custom={i}
+                              variants={dotVariants}
+                              initial="hidden"
+                              animate="visible"
+                              className={`h-2 w-2 rounded-full transition-colors duration-300 ${
+                                i < userMsgCount ? 'bg-[var(--brand)]' : 'bg-neutral-200 dark:bg-neutral-700'
+                              }`}
+                            />
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                    {!canGenerate && (
+                      <motion.p
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1, transition: { delay: 0.3 } }}
+                        className="text-[11px] text-neutral-400 dark:text-neutral-500"
+                      >
+                        {userMsgCount} / 3 条消息
+                      </motion.p>
+                    )}
+                  </motion.div>
+                </div>
+              </div>
+            ) : (
+              /* ── Course generated: clean editorial layout (reference design) ── */
+              <div className="flex h-full flex-col overflow-hidden rounded-2xl">
+                {/* Header with circular progress ring */}
+                <div className="relative z-[41] flex h-14 shrink-0 items-center justify-between px-5">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-neutral-100 dark:bg-neutral-800">
+                      <BookOpen className="h-3.5 w-3.5 text-neutral-500 dark:text-neutral-400" />
+                    </div>
+                    <h2 className="text-[15px] font-semibold text-neutral-900 dark:text-neutral-100">
+                      课程
+                    </h2>
+                    <span className="ml-0.5 font-serif text-[11px] uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+                      Lessons
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <CircularProgress value={overallProgress} />
+                    <motion.button
+                      whileHover={{ scale: 1.06, transition: { type: 'spring', stiffness: 400, damping: 22 } }}
+                      whileTap={{ scale: 0.94, transition: { type: 'spring', stiffness: 600, damping: 25 } }}
+                      onClick={() => setCoursePanelOpen(false)}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                      aria-label="关闭课程面板"
+                    >
+                      <X className="h-4 w-4" />
+                    </motion.button>
+                  </div>
+                </div>
 
-                          {/* Lessons — inner floating cards */}
-                          <AnimatePresence initial={false}>
-                            {!isCollapsed && (
+                <div className="mx-5 h-px bg-neutral-100 dark:bg-neutral-800/60" />
+
+                {/* Module list */}
+                <div className="relative flex-1 overflow-hidden">
+                  <LoadingOverlay active={isGeneratingCourse} label="重新生成中..." blur />
+                  <div className="h-full overflow-y-auto px-5 py-4 custom-scrollbar">
+                    <motion.div
+                      variants={moduleContainerVariants}
+                      initial="hidden"
+                      animate="visible"
+                      className="space-y-1"
+                    >
+                      {courseModules.map((mod, modIdx) => {
+                        const isCollapsed = collapsedModules.has(mod.id);
+                        const progress = getModuleProgress(mod);
+                        const isModuleComplete = progress.completed === progress.total;
+
+                        return (
+                          <motion.div key={mod.id} variants={moduleVariants} layout>
+                            {/* Module header — clean row, no card bg */}
+                            <button
+                              onClick={() => toggleModule(mod.id)}
+                              className="group flex w-full items-center gap-2.5 px-1 py-2.5 text-left transition-colors duration-150 hover:bg-neutral-50 dark:hover:bg-neutral-800/40"
+                            >
                               <motion.div
-                                variants={collapsibleVariants}
-                                initial="collapsed"
-                                animate="expanded"
-                                exit="collapsed"
-                                className="overflow-hidden"
+                                animate={{ rotate: isCollapsed ? 0 : 90 }}
+                                transition={spring}
+                                className="flex h-4 w-4 shrink-0 items-center justify-center"
                               >
-                                <div className="mx-2.5 mb-2.5 rounded-lg bg-white/90 shadow-sm shadow-neutral-200/30 dark:bg-neutral-800/90 dark:shadow-black/10">
+                                <ChevronDown className="h-3.5 w-3.5 text-neutral-400 group-hover:text-neutral-600 dark:group-hover:text-neutral-300" />
+                              </motion.div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-baseline gap-2">
+                                  <span className="font-serif text-[10px] uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+                                    Module {modIdx + 1}
+                                  </span>
+                                </div>
+                                <p className="truncate text-[13px] font-semibold text-neutral-800 dark:text-neutral-200">
+                                  {mod.title}
+                                </p>
+                              </div>
+                              {/* Module progress number — "X/Y" style from reference */}
+                              <span
+                                className={`shrink-0 font-serif text-[12px] font-medium tabular-nums ${
+                                  isModuleComplete
+                                    ? 'text-[var(--brand)]'
+                                    : 'text-neutral-400 dark:text-neutral-500'
+                                }`}
+                              >
+                                {progress.label}
+                              </span>
+                            </button>
+
+                            {/* Lessons — flat list, no nested card */}
+                            <AnimatePresence initial={false}>
+                              {!isCollapsed && (
+                                <motion.div
+                                  variants={collapsibleVariants}
+                                  initial="collapsed"
+                                  animate="expanded"
+                                  exit="collapsed"
+                                  className="overflow-hidden"
+                                >
                                   <motion.div
                                     variants={lessonContainerVariants}
                                     initial="hidden"
                                     animate="visible"
-                                    className="divide-y divide-neutral-100 px-1 py-1 dark:divide-neutral-700/50"
+                                    className="ml-5 border-l border-neutral-100 dark:border-neutral-800"
                                   >
                                     {mod.lessons.map((lesson) => {
                                       const isActive = lesson.id === activeLessonId;
                                       const isLocked = lesson.status === 'locked';
+                                      const isCompleted = lesson.status === 'completed';
 
                                       return (
                                         <motion.button
                                           key={lesson.id}
                                           variants={lessonVariants}
-                                          whileHover={isLocked ? {} : {
-                                            x: 2,
-                                            transition: { type: 'spring', stiffness: 400, damping: 22 },
-                                          }}
-                                          whileTap={isLocked ? {} : {
-                                            scale: 0.985,
-                                            transition: { type: 'spring', stiffness: 600, damping: 25 },
-                                          }}
+                                          whileHover={
+                                            isLocked
+                                              ? {}
+                                              : {
+                                                  backgroundColor: 'rgba(0,0,0,0.02)',
+                                                  transition: { duration: 0.15 },
+                                                }
+                                          }
+                                          whileTap={
+                                            isLocked
+                                              ? {}
+                                              : { scale: 0.99, transition: { type: 'spring', stiffness: 600, damping: 25 } }
+                                          }
                                           onClick={() => handleLessonClick(mod.id, lesson)}
                                           disabled={isLocked}
-                                          className={`group flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left transition-all duration-150 ${
+                                          className={`group relative flex w-full items-center gap-3 pl-4 pr-1 py-2 text-left transition-all duration-150 ${
                                             isActive
-                                              ? 'bg-neutral-100/80 shadow-sm shadow-neutral-200/20 dark:bg-neutral-700/50 dark:shadow-black/10 border-l-2 border-[var(--brand)]'
+                                              ? 'bg-[var(--brand)]/[0.04]'
                                               : isLocked
-                                              ? 'cursor-not-allowed opacity-40'
-                                              : 'hover:bg-neutral-50/80 dark:hover:bg-neutral-700/30'
+                                              ? 'cursor-not-allowed opacity-50'
+                                              : ''
                                           }`}
                                         >
+                                          {/* Active indicator — left accent bar */}
+                                          {isActive && (
+                                            <motion.div
+                                              layoutId={`lesson-active-${mod.id}`}
+                                              className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-full bg-[var(--brand)]"
+                                            />
+                                          )}
+
                                           <StatusIcon status={lesson.status} />
 
                                           <div className="min-w-0 flex-1">
                                             <p
                                               className={`truncate text-[13px] leading-tight transition-colors duration-150 ${
-                                                lesson.status === 'completed'
-                                                  ? 'text-neutral-400 line-through dark:text-neutral-500'
+                                                isCompleted
+                                                  ? 'text-neutral-400 dark:text-neutral-500'
                                                   : isActive
                                                   ? 'text-neutral-900 font-medium dark:text-neutral-100'
                                                   : 'text-neutral-700 dark:text-neutral-300'
@@ -507,15 +572,14 @@ export function CoursePanel() {
                                             </p>
                                           </div>
 
+                                          {/* Type chip + duration */}
                                           <div className="flex shrink-0 items-center gap-2">
                                             <span
-                                              className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium ${
-                                                typeColors[lesson.type]
-                                              }`}
+                                              className={`rounded-md px-1.5 py-0.5 text-[10px] font-medium ${typeChipColors[lesson.type]}`}
                                             >
                                               {typeLabels[lesson.type]}
                                             </span>
-                                            <span className="text-[11px] text-neutral-400 dark:text-neutral-500">
+                                            <span className="font-sans text-[11px] tabular-nums text-neutral-400 dark:text-neutral-500">
                                               {lesson.duration}
                                             </span>
                                           </div>
@@ -523,42 +587,35 @@ export function CoursePanel() {
                                       );
                                     })}
                                   </motion.div>
-                                </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </motion.div>
-                      );
-                    })}
-                  </motion.div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </motion.div>
+                        );
+                      })}
+                    </motion.div>
 
-                  {/* Regenerate button */}
-                  <div className="mt-4 px-1 pb-2">
-                    <motion.button
-                      whileHover={{
-                        scale: 1.015,
-                        transition: { type: 'spring', stiffness: 400, damping: 22 },
-                      }}
-                      whileTap={{
-                        scale: 0.975,
-                        transition: { type: 'spring', stiffness: 600, damping: 25 },
-                      }}
-                      onClick={generateCourse}
-                      disabled={isGeneratingCourse}
-                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-neutral-200/80 bg-white/80 px-4 py-2.5 text-[13px] font-medium text-neutral-500 shadow-sm shadow-neutral-200/30 transition-all duration-150 hover:bg-neutral-50 hover:text-neutral-700 hover:shadow-md disabled:opacity-50 dark:border-neutral-700/50 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:bg-neutral-800/80 dark:hover:text-neutral-300 dark:shadow-black/10"
-                    >
-                      {isGeneratingCourse ? (
-                        <InlineSpinner size="sm" className="border-neutral-300 dark:border-neutral-600 border-t-neutral-500 dark:border-t-neutral-300" />
-                      ) : (
-                        <Sparkles className="h-3.5 w-3.5" />
-                      )}
-                      重新生成课程
-                    </motion.button>
+                    {/* Regenerate button — minimal footer */}
+                    <div className="mt-5 px-1 pb-2">
+                      <motion.button
+                        whileHover={{ scale: 1.015, transition: { type: 'spring', stiffness: 400, damping: 22 } }}
+                        whileTap={{ scale: 0.975, transition: { type: 'spring', stiffness: 600, damping: 25 } }}
+                        onClick={generateCourse}
+                        disabled={isGeneratingCourse}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-neutral-200/80 bg-white px-4 py-2.5 text-[13px] font-medium text-neutral-500 transition-all duration-150 hover:bg-neutral-50 hover:text-neutral-700 disabled:opacity-50 dark:border-neutral-700/50 dark:bg-neutral-800/60 dark:text-neutral-400 dark:hover:bg-neutral-800/80 dark:hover:text-neutral-300"
+                      >
+                        {isGeneratingCourse ? (
+                          <InlineSpinner size="sm" className="border-neutral-300 dark:border-neutral-600 border-t-neutral-500 dark:border-t-neutral-300" />
+                        ) : (
+                          <RotateCcw className="h-3.5 w-3.5" />
+                        )}
+                        重新生成课程
+                      </motion.button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
         </motion.div>
       )}
     </AnimatePresence>

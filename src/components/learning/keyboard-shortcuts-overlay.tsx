@@ -39,10 +39,10 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     items: [
       { keys: '⌘ 1', desc: '任务规划' },
       { keys: '⌘ 2', desc: '学习卡片' },
-      { keys: '⌘ 3', desc: '成就系统' },
-      { keys: '⌘ 4', desc: '学习统计' },
-      { keys: '⌘ 5', desc: '知识图谱' },
-      { keys: '⌘ 6', desc: '学习笔记' },
+      { keys: '⌘ 3', desc: '学习进度' },
+      { keys: '⌘ 4', desc: '知识图谱' },
+      { keys: '⌘ 5', desc: '学习笔记' },
+      { keys: '⌘ 6', desc: '文件导入' },
     ],
   },
   {

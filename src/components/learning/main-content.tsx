@@ -337,6 +337,7 @@ export function MainContent() {
                 transition: { type: 'spring', stiffness: 600, damping: 25 },
               }}
               onClick={() => setCoursePanelOpen(!coursePanelOpen)}
+              data-course-toggle
               className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
                 coursePanelOpen
                   ? 'bg-neutral-100 text-neutral-800 dark:bg-neutral-800 dark:text-neutral-100'

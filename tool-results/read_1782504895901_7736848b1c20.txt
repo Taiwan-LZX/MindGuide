@@ -1,0 +1,1616 @@
+     1→'use client';
+     2→
+     3→// ─── Chat Composer — monochrome, single-row toolbar ─────────────────────────
+     4→//
+     5→// Layout (matches the user's reference screenshot):
+     6→//
+     7→//   ┌──────────────────────────────────────────────────────────────────────┐
+     8→//   │  textarea                                                            │
+     9→//   ├──────────────────────────────────────────────────────────────────────┤
+    10→//   │ [+] [引导模式▾]              [GLM-4.6 · 14k▾] [思考▾] [↑]            │
+    11→//   │                                                                      │
+    12→//   │   ↵ 发送 · ⇧↵ 换行                                       清空        │
+    13→//   └──────────────────────────────────────────────────────────────────────┘
+    14→//
+    15→// Left  : + (add file)  +  引导模式 selector
+    16→// Right : ModelCard (model name + usage meters + switcher) → 思考 selector → send
+    17→// The bottom row carries the tiny keyboard hint + clear affordance.
+    18→//
+    19→// Design rules (per user spec):
+    20→//   • Monochrome neutral palette — NO amber / blue / green. Selected/active
+    21→//     states use solid neutral-800 (light) / neutral-200 (dark) so the chip
+    22→//     reads as a filled grey token, not a harsh black/white block.
+    23→//   • NO emoji anywhere — only lucide-react line icons or hand-drawn SVG.
+    24→//   • Thinking levels (off / standard / deep / structured) still drive the
+    25→//     API `thinking` config + reasoning-style overlay; their animations live
+    26→//     in StatusBackCard + main-content's thread bubble.
+    27→
+    28→import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+    29→import { motion, AnimatePresence } from 'framer-motion';
+    30→import {
+    31→  ArrowUp,
+    32→  Square,
+    33→  Plus,
+    34→  FileText,
+    35→  BookMarked,
+    36→  Image as ImageIcon,
+    37→  Link2,
+    38→  StickyNote,
+    39→  Compass,
+    40→  GraduationCap,
+    41→  Dumbbell,
+    42→  RotateCw,
+    43→  Check,
+    44→  X,
+    45→  BrainCircuit,
+    46→  Zap,
+    47→  ZapOff,
+    48→  Network,
+    49→  Cpu,
+    50→  Gauge,
+    51→  Layers,
+    52→  CircleDot,
+    53→  Eraser,
+    54→  Maximize2,
+    55→  Code2,
+    56→} from 'lucide-react';
+    57→import { useLearningStore } from '@/store/learning-store';
+    58→import { MouseFollowTooltip } from '@/components/learning/mouse-follow-tooltip';
+    59→
+    60→// ─── Types ───────────────────────────────────────────────────────────────────
+    61→
+    62→type TeachingMode = 'guide' | 'explain' | 'practice' | 'review';
+    63→type ThinkingMode = 'off' | 'standard' | 'deep' | 'structured';
+    64→type SelectedModel = 'GLM-4.6' | 'GLM-4.5' | 'GLM-4-Air';
+    65→
+    66→type IconType = React.ComponentType<{ className?: string; strokeWidth?: number }>;
+    67→
+    68→interface AttachmentOption {
+    69→  key: string;
+    70→  label: string;
+    71→  desc: string;
+    72→  icon: IconType;
+    73→}
+    74→
+    75→interface ModeOption {
+    76→  key: TeachingMode;
+    77→  label: string;
+    78→  desc: string;
+    79→  icon: IconType;
+    80→}
+    81→
+    82→interface ThinkingOption {
+    83→  key: ThinkingMode;
+    84→  label: string;
+    85→  short: string;
+    86→  desc: string;
+    87→  icon: IconType;
+    88→}
+    89→
+    90→interface ModelOption {
+    91→  key: SelectedModel;
+    92→  label: string;
+    93→  desc: string;
+    94→  contextWindow: number; // tokens
+    95→  icon?: IconType;
+    96→}
+    97→
+    98→const ATTACH_OPTIONS: AttachmentOption[] = [
+    99→  { key: 'file', label: '添加文件', desc: 'PDF / Word / Markdown 等学习材料', icon: FileText },
+   100→  { key: 'knowledge', label: '知识库', desc: '引用本会话已上传的材料段落', icon: BookMarked },
+   101→  { key: 'image', label: '添加图片', desc: '截图或公式图片，让 AI 识别', icon: ImageIcon },
+   102→  { key: 'link', label: '添加链接', desc: '网页 URL，自动抓取正文', icon: Link2 },
+   103→  { key: 'note', label: '添加笔记', desc: '引用你的学习笔记片段', icon: StickyNote },
+   104→];
+   105→
+   106→const MODE_OPTIONS: ModeOption[] = [
+   107→  { key: 'guide', label: '引导模式', desc: '苏格拉底式提问，让你自己想通', icon: Compass },
+   108→  { key: 'explain', label: '讲解模式', desc: '直接、完整地把概念讲透', icon: GraduationCap },
+   109→  { key: 'practice', label: '练习模式', desc: '出题让你动手试，再给反馈', icon: Dumbbell },
+   110→  { key: 'review', label: '复习模式', desc: '间隔出题，检验已学知识', icon: RotateCw },
+   111→];
+   112→
+   113→// Four thinking levels — each maps to API `thinking` config + an additive
+   114→// reasoning-style prompt overlay (see THINK_OVERLAYS in chat route). The icon
+   115→// and the reasoning animation in StatusBackCard are chosen per-level.
+   116→const THINK_OPTIONS: ThinkingOption[] = [
+   117→  {
+   118→    key: 'off',
+   119→    label: '关闭思考',
+   120→    short: '思考',
+   121→    desc: '不启用深度推理，最快给出直接答案',
+   122→    icon: ZapOff,
+   123→  },
+   124→  {
+   125→    key: 'standard',
+   126→    label: '标准思考',
+   127→    short: '思考',
+   128→    desc: '模型内置深度推理，回答更周全',
+   129→    icon: Zap,
+   130→  },
+   131→  {
+   132→    key: 'deep',
+   133→    label: '深度推理',
+   134→    short: '思考',
+   135→    desc: '多角度 + 反例 + 边界检验，严谨全面',
+   136→    icon: BrainCircuit,
+   137→  },
+   138→  {
+   139→    key: 'structured',
+   140→    label: '结构化推理',
+   141→    short: '思考',
+   142→    desc: '链式推理 → 自我批评 → 多路径收敛',
+   143→    icon: Network,
+   144→  },
+   145→];
+   146→
+   147→const MODEL_OPTIONS: ModelOption[] = [
+   148→  { key: 'GLM-4.6', label: 'GLM-4.6', desc: '最新旗舰 · 推理与长文本均衡', contextWindow: 200_000 },
+   149→  { key: 'GLM-4.5', label: 'GLM-4.5', desc: '稳定可靠 · 日常学习场景', contextWindow: 128_000 },
+   150→  { key: 'GLM-4-Air', label: 'GLM-4-Air', desc: '轻量高速 · 短问答与速记', contextWindow: 128_000 },
+   151→];
+   152→
+   153→const MODEL_BUDGET = 200_000; // visualization budget for the model-usage meter
+   154→
+   155→// ─── Popover hook (click-outside + escape + auto-flip) ──────────────────────
+   156→//
+   157→// The trigger button lives inside the composer card, but its menu renders at
+   158→// the wrapper level (so it can pop OUTWARD above the card without being
+   159→// clipped by the card's overflow-hidden). To keep click-outside working we
+   160→// track TWO refs: `ref` on the trigger wrapper + `menuRef` on the floating
+   161→// menu — a press inside either is treated as "inside" and won't dismiss.
+   162→//
+   163→// AUTO-FLIP: when the menu opens we measure how much vertical space is
+   164→// available above vs below the trigger. If there isn't enough room ABOVE
+   165→// (the default direction — menus pop upward from a bottom-docked composer),
+   166→// we flip the menu to open DOWNWARD instead, inside the composer card. This
+   167→// prevents the menu from being pushed off-screen when the textarea is tall
+   168→// (expanded mode) or the viewport is short.
+   169→
+   170→function usePopover() {
+   171→  const [open, setOpen] = useState(false);
+   172→  const [direction, setDirection] = useState<'up' | 'down'>('up');
+   173→  const ref = useRef<HTMLDivElement>(null);
+   174→  const menuRef = useRef<HTMLDivElement>(null);
+   175→
+   176→  // On open, measure available space and pick a direction. We re-measure on
+   177→  // every open (not just once) so window resize / textarea expansion between
+   178→  // opens is handled.
+   179→  useEffect(() => {
+   180→    if (!open) return;
+   181→    const trigger = ref.current;
+   182→    if (!trigger) return;
+   183→    const rect = trigger.getBoundingClientRect();
+   184→    const spaceAbove = rect.top;
+   185→    const spaceBelow = window.innerHeight - rect.bottom;
+   186→    // Need at least 260px (a typical menu height) to open in that direction.
+   187→    // Prefer 'up' (default for a bottom-docked composer) but flip to 'down'
+   188→    // if there's not enough room above AND there's more room below.
+   189→    // Deferred to a microtask so we don't call setState synchronously inside
+   190→    // this effect (react-hooks/set-state-in-effect rule).
+   191→    const next: 'up' | 'down' = spaceAbove < 260 && spaceBelow > spaceAbove ? 'down' : 'up';
+   192→    queueMicrotask(() => setDirection(next));
+   193→  }, [open]);
+   194→
+   195→  useEffect(() => {
+   196→    if (!open) return;
+   197→    const onDown = (e: MouseEvent) => {
+   198→      const t = e.target as Node;
+   199→      if (ref.current?.contains(t)) return;
+   200→      if (menuRef.current?.contains(t)) return;
+   201→      setOpen(false);
+   202→    };
+   203→    const onKey = (e: KeyboardEvent) => {
+   204→      if (e.key === 'Escape') setOpen(false);
+   205→    };
+   206→    document.addEventListener('mousedown', onDown);
+   207→    document.addEventListener('keydown', onKey);
+   208→    return () => {
+   209→      document.removeEventListener('mousedown', onDown);
+   210→      document.removeEventListener('keydown', onKey);
+   211→    };
+   212→  }, [open]);
+   213→
+   214→  return { open, setOpen, ref, menuRef, direction };
+   215→}
+   216→
+   217→// ─── Main Composer ───────────────────────────────────────────────────────────
+   218→
+   219→export interface ChatComposerProps {
+   220→  value: string;
+   221→  onChange: (v: string) => void;
+   222→  onSend: () => void;
+   223→  onStop: () => void;
+   224→  isStreaming: boolean;
+   225→  /** True while the model is in its pre-token "thinking" phase — drives the
+   226→   * layered status back card above the composer. */
+   227→  isThinking?: boolean;
+   228→  placeholder?: string;
+   229→}
+   230→
+   231→export function ChatComposer({
+   232→  value,
+   233→  onChange,
+   234→  onSend,
+   235→  onStop,
+   236→  isStreaming,
+   237→  isThinking = false,
+   238→  placeholder = '问我任何学习上的问题…',
+   239→}: ChatComposerProps) {
+   240→  const textareaRef = useRef<HTMLTextAreaElement>(null);
+   241→  const [isFocused, setIsFocused] = useState(false);
+   242→  const teachingMode = useLearningStore(s => s.teachingMode);
+   243→  const setTeachingMode = useLearningStore(s => s.setTeachingMode);
+   244→  const thinkingMode = useLearningStore(s => s.thinkingMode);
+   245→  const setThinkingMode = useLearningStore(s => s.setThinkingMode);
+   246→  const selectedModel = useLearningStore(s => s.selectedModel);
+   247→  const setSelectedModel = useLearningStore(s => s.setSelectedModel);
+   248→  const modelUsageTokens = useLearningStore(s => s.modelUsageTokens);
+   249→  const setCreateNewPanelOpen = useLearningStore(s => s.setCreateNewPanelOpen);
+   250→
+   251→  // Destructure popover state into plain locals — the `react-hooks/refs` rule
+   252→  // flags property access off any object that also carries a ref, so we pull
+   253→  // `open`/`setOpen`/`ref`/`menuRef` out as independent names.
+   254→  const { open: attachOpen, setOpen: setAttachOpen, ref: attachRef, menuRef: attachMenuRef, direction: attachDir } = usePopover();
+   255→  const { open: modeOpen, setOpen: setModeOpen, ref: modeRef, menuRef: modeMenuRef } = usePopover();
+   256→  const { open: thinkOpen, setOpen: setThinkOpen, ref: thinkRef, menuRef: thinkMenuRef, direction: thinkDir } = usePopover();
+   257→  const { open: modelOpen, setOpen: setModelOpen, ref: modelRef, menuRef: modelMenuRef, direction: modelDir } = usePopover();
+   258→
+   259→  // ── Confirmation toast on mode/model/thinking switch ──
+   260→  // Settings changes have no immediate visible effect, so a brief inline
+   261→  // toast naming the new value closes the feedback loop within ~1.5s.
+   262→  const [toast, setToast] = useState<string | null>(null);
+   263→  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+   264→  const prevTeaching = useRef(teachingMode);
+   265→  const prevThinking = useRef(thinkingMode);
+   266→  const prevModel = useRef(selectedModel);
+   267→  useEffect(() => {
+   268→    const messages: string[] = [];
+   269→    if (teachingMode !== prevTeaching.current) {
+   270→      const m = MODE_OPTIONS.find(o => o.key === teachingMode);
+   271→      messages.push(`教学模式：${m?.label || teachingMode}`);
+   272→      prevTeaching.current = teachingMode;
+   273→    }
+   274→    if (thinkingMode !== prevThinking.current) {
+   275→      const m = THINK_OPTIONS.find(o => o.key === thinkingMode);
+   276→      messages.push(`思考：${m?.label || thinkingMode}`);
+   277→      prevThinking.current = thinkingMode;
+   278→    }
+   279→    if (selectedModel !== prevModel.current) {
+   280→      messages.push(`模型：${selectedModel}`);
+   281→      prevModel.current = selectedModel;
+   282→    }
+   283→    if (messages.length > 0) {
+   284→      const msg = messages.join(' · ');
+   285→      // Deferred to a microtask so we don't call setState synchronously inside
+   286→      // this effect (react-hooks/set-state-in-effect rule).
+   287→      queueMicrotask(() => setToast(msg));
+   288→      if (toastTimer.current) clearTimeout(toastTimer.current);
+   289→      toastTimer.current = setTimeout(() => queueMicrotask(() => setToast(null)), 1800);
+   290→    }
+   291→    return () => {
+   292→      if (toastTimer.current) clearTimeout(toastTimer.current);
+   293→    };
+   294→  }, [teachingMode, thinkingMode, selectedModel]);
+   295→
+   296→  // Context tokens embedded in the draft (e.g. `@[知识库]` `@[添加图片]`) —
+   297→  // these are the "imported files / context" the status back card surfaces.
+   298→  // Parsing them at render time keeps the chip list in sync with the textarea
+   299→  // without a separate attachment store.
+   300→  const contextTokens = useMemo(() => {
+   301→    const matches = value.match(/@\[([^\]]+)\]/g) || [];
+   302→    return matches.map(m => m.slice(2, -1));
+   303→  }, [value]);
+   304→
+   305→  const handleRemoveToken = useCallback(
+   306→    (label: string) => {
+   307→      onChange(value.replace(`@[${label}]`, '').replace(/[ \t]{2,}/g, ' ').replace(/^\s+/, '').trimEnd());
+   308→      requestAnimationFrame(() => textareaRef.current?.focus());
+   309→    },
+   310→    [value, onChange]
+   311→  );
+   312→
+   313→  // Auto-resize with smooth collapse — the textarea grows to fit content up to
+   314→  // a tiered max, and COLLAPSES smoothly when text is cleared (e.g. after
+   315→  // send). Two tiers:
+   316→  //   • default  — min 1 line, grows to ~6 lines (compact mode)
+   317→  //   • expanded — user clicked "展开" to get a taller editor (~14 lines)
+   318→  // The height transition is animated via the `transition-[height]` class on
+   319→  // the textarea, so when value shrinks (send / clear) the box eases back to
+   320→  // min instead of snapping. We reset to compact mode whenever the draft is
+   321→  // emptied so the next message starts fresh.
+   322→  const [expanded, setExpanded] = useState(false);
+   323→  useEffect(() => {
+   324→    const el = textareaRef.current;
+   325→    if (!el) return;
+   326→    el.style.height = 'auto';
+   327→    const maxH = expanded ? 320 : 140;
+   328→    el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
+   329→    // When the draft is cleared, drop back to compact mode for next message.
+   330→    // Deferred to a microtask so we don't call setState synchronously inside
+   331→    // this effect (which would trigger a cascading re-render per the
+   332→    // react-hooks/set-state-in-effect rule).
+   333→    if (value === '' && expanded) {
+   334→      queueMicrotask(() => setExpanded(false));
+   335→    }
+   336→  }, [value, expanded]);
+   337→
+   338→  // ── Attention-focus state machine ──
+   339→  // hint visibility by scene:
+   340→  //   idle / focused-empty → show
+   341→  //   typing / selecting / cursor-moving → hide
+   342→  //   focused-idle (>2s no key) → dim (45% opacity)
+   343→  // 180ms debounce prevents flicker. 300ms poll while focused catches idle +
+   344→  // selection transitions that don't fire key events.
+   345→  type AttentionScene = 'idle' | 'focused-empty' | 'typing' | 'focused-idle' | 'selecting' | 'cursor-moving';
+   346→  const [scene, setScene] = useState<AttentionScene>('idle');
+   347→  const lastKeyAt = useRef<number>(0);
+   348→  const lastCursorMoveAt = useRef<number>(0);
+   349→  const hasSelection = useRef<boolean>(false);
+   350→  const sceneDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+   351→
+   352→  const scheduleScene = useCallback((next: AttentionScene) => {
+   353→    if (sceneDebounce.current) clearTimeout(sceneDebounce.current);
+   354→    sceneDebounce.current = setTimeout(() => {
+   355→      queueMicrotask(() => setScene(prev => (prev === next ? prev : next)));
+   356→    }, 180);
+   357→  }, []);
+   358→
+   359→  useEffect(() => {
+   360→    if (!isFocused) {
+   361→      scheduleScene('idle');
+   362→      return;
+   363→    }
+   364→    const iv = setInterval(() => {
+   365→      const now = Date.now();
+   366→      const sinceKey = now - lastKeyAt.current;
+   367→      const sinceCursor = now - lastCursorMoveAt.current;
+   368→      const el = textareaRef.current;
+   369→      const sel = el ? el.selectionStart !== el.selectionEnd : false;
+   370→      hasSelection.current = sel;
+   371→
+   372→      if (sel) {
+   373→        scheduleScene('selecting');
+   374→      } else if (sinceCursor < 800) {
+   375→        scheduleScene('cursor-moving');
+   376→      } else if (value.length === 0) {
+   377→        scheduleScene('focused-empty');
+   378→      } else if (sinceKey < 1200) {
+   379→        scheduleScene('typing');
+   380→      } else if (sinceKey > 2000) {
+   381→        scheduleScene('focused-idle');
+   382→      } else {
+   383→        scheduleScene('typing');
+   384→      }
+   385→    }, 300);
+   386→    return () => clearInterval(iv);
+   387→  }, [isFocused, value.length, scheduleScene]);
+   388→
+   389→  useEffect(() => {
+   390→    return () => {
+   391→      if (sceneDebounce.current) clearTimeout(sceneDebounce.current);
+   392→    };
+   393→  }, []);
+   394→
+   395→  const hintVisibility: 'show' | 'dim' | 'hide' =
+   396→    scene === 'idle' || scene === 'focused-empty'
+   397→      ? 'show'
+   398→      : scene === 'focused-idle'
+   399→        ? 'dim'
+   400→        : 'hide';
+   401→
+   402→  // ── Scene-aware suggestion chips ──
+   403→  // Contextual action chips surface in the left-bottom corner based on input
+   404→  // patterns. Priority: pause > expand > deep-think > code.
+   405→  // Replaces the keyboard hint in the same position; auto-dismisses after 6s.
+   406→  type SceneChip = 'pause' | 'expand' | 'deep-think' | 'code' | null;
+   407→  const [sceneChip, setSceneChip] = useState<SceneChip>(null);
+   408→  const chipDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+   409→
+   410→  useEffect(() => {
+   411→    let next: SceneChip = null;
+   412→    if (isStreaming && value.trim().length > 0) {
+   413→      next = 'pause';
+   414→    } else if (value.length > 280 && !expanded) {
+   415→      next = 'expand';
+   416→    } else if (/[?？]\s*$/.test(value.trim()) && value.length > 4) {
+   417→      next = 'deep-think';
+   418→    } else if (/```|\n    \S/.test(value)) {
+   419→      next = 'code';
+   420→    }
+   421→
+   422→    if (next !== sceneChip) {
+   423→      queueMicrotask(() => setSceneChip(next));
+   424→      if (next !== null) {
+   425→        if (chipDismissTimer.current) clearTimeout(chipDismissTimer.current);
+   426→        chipDismissTimer.current = setTimeout(() => {
+   427→          queueMicrotask(() => setSceneChip(null));
+   428→        }, 6000);
+   429→      }
+   430→    }
+   431→  }, [value, isStreaming, expanded, sceneChip]);
+   432→
+   433→  useEffect(() => {
+   434→    return () => {
+   435→      if (chipDismissTimer.current) clearTimeout(chipDismissTimer.current);
+   436→    };
+   437→  }, []);
+   438→
+   439→  const handleSceneChipClick = useCallback((chip: Exclude<SceneChip, null>) => {
+   440→    if (chip === 'pause' && isStreaming) {
+   441→      onStop();
+   442→    } else if (chip === 'expand') {
+   443→      queueMicrotask(() => setExpanded(true));
+   444→    } else if (chip === 'deep-think') {
+   445→      setThinkingMode('deep');
+   446→      const t = THINK_OPTIONS.find(o => o.key === 'deep');
+   447→      if (t) {
+   448→        queueMicrotask(() => setToast(`思考：${t.label}`));
+   449→      }
+   450→    } else if (chip === 'code') {
+   451→      queueMicrotask(() => setToast('代码模式（即将推出）'));
+   452→    }
+   453→    queueMicrotask(() => setSceneChip(null));
+   454→    if (chipDismissTimer.current) clearTimeout(chipDismissTimer.current);
+   455→  }, [isStreaming, onStop, setThinkingMode]);
+   456→
+   457→  // ── Long-press Backspace → morph left-bottom hint into "清空全部内容" ──
+   458→  // Hold Backspace >600ms while text exists → swap the hint position into a
+   459→  // clear-all button. Same corner, contextual clear action.
+   460→  // Lifecycle: keydown starts timer; keyup cancels pending (keeps visible if
+   461→  // fired); click clears text; 4s auto-dismiss; empty text un-morphs.
+   462→  const backspaceDownAt = useRef<number | null>(null);
+   463→  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+   464→  const morphDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+   465→  const [morphToClear, setMorphToClear] = useState(false);
+   466→
+   467→  // Auto-dismiss the morph after 4s (user didn't click — they changed their mind).
+   468→  useEffect(() => {
+   469→    if (!morphToClear) return;
+   470→    morphDismissTimer.current = setTimeout(() => {
+   471→      queueMicrotask(() => setMorphToClear(false));
+   472→    }, 4000);
+   473→    return () => {
+   474→      if (morphDismissTimer.current) clearTimeout(morphDismissTimer.current);
+   475→    };
+   476→  }, [morphToClear]);
+   477→
+   478→  // Un-morph once text is empty (the clear action completed, or was never needed).
+   479→  useEffect(() => {
+   480→    if (morphToClear && value.length === 0) {
+   481→      queueMicrotask(() => setMorphToClear(false));
+   482→    }
+   483→  }, [value, morphToClear]);
+   484→
+   485→  useEffect(() => {
+   486→    return () => {
+   487→      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+   488→      if (morphDismissTimer.current) clearTimeout(morphDismissTimer.current);
+   489→    };
+   490→  }, []);
+   491→
+   492→  const handleKeyDown = useCallback(
+   493→    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+   494→      lastKeyAt.current = Date.now();
+   495→      // Cursor-moving keys → cursor-moving scene (hint hides).
+   496→      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) {
+   497→        lastCursorMoveAt.current = Date.now();
+   498→        scheduleScene('cursor-moving');
+   499→      } else if (e.key !== 'Shift' && e.key !== 'Control' && e.key !== 'Alt' && e.key !== 'Meta') {
+   500→        // Real input keys (excl. modifiers) → typing scene.
+   501→        scheduleScene('typing');
+   502→      }
+   503→
+   504→      if (e.key === 'Enter' && !e.shiftKey) {
+   505→        e.preventDefault();
+   506→        if (value.trim() && !isStreaming) onSend();
+   507→        return;
+   508→      }
+   509→      // Long-press Backspace → start 600ms morph timer.
+   510→      if (e.key === 'Backspace' && value.length > 0 && backspaceDownAt.current === null) {
+   511→        backspaceDownAt.current = Date.now();
+   512→        if (longPressTimer.current) clearTimeout(longPressTimer.current);
+   513→        longPressTimer.current = setTimeout(() => {
+   514→          queueMicrotask(() => setMorphToClear(true));
+   515→        }, 600);
+   516→      }
+   517→    },
+   518→    [value, isStreaming, onSend, scheduleScene]
+   519→  );
+   520→
+   521→  const handleKeyUp = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+   522→    if (e.key === 'Backspace') {
+   523→      backspaceDownAt.current = null;
+   524→      if (longPressTimer.current) {
+   525→        clearTimeout(longPressTimer.current);
+   526→        longPressTimer.current = null;
+   527→      }
+   528→      // Note: we do NOT immediately un-morph on keyup — the user just
+   529→      // triggered it, give them time to click. The 4s auto-dismiss handles
+   530→      // the case where they change their mind.
+   531→    }
+   532→  }, []);
+   533→
+   534→  const handleClearAll = useCallback(() => {
+   535→    onChange('');
+   536→    queueMicrotask(() => setMorphToClear(false));
+   537→    if (morphDismissTimer.current) clearTimeout(morphDismissTimer.current);
+   538→    requestAnimationFrame(() => textareaRef.current?.focus());
+   539→  }, [onChange]);
+   540→
+   541→  const canSend = value.trim().length > 0 && !isStreaming;
+   542→  const charCount = value.length;
+   543→  // Visual context-used estimate — char count + a base overhead so the usage
+   544→  // meter shows progress even for short messages.
+   545→  const contextUsed = charCount + 8000;
+   546→
+   547→  const activeMode = MODE_OPTIONS.find(m => m.key === teachingMode) || MODE_OPTIONS[0];
+   548→  const activeThink = THINK_OPTIONS.find(m => m.key === thinkingMode) || THINK_OPTIONS[1];
+   549→  const activeModel = MODEL_OPTIONS.find(m => m.key === selectedModel) || MODEL_OPTIONS[0];
+   550→
+   551→  const handleAttach = useCallback(
+   552→    (opt: AttachmentOption) => {
+   553→      setAttachOpen(false);
+   554→      // For now, "file" opens the existing create-new panel (which has the
+   555→      // upload flow). Other attachment types are placeholders that insert a
+   556→      // mention token into the composer so the user sees the intent captured.
+   557→      if (opt.key === 'file') {
+   558→        setCreateNewPanelOpen(true);
+   559→        return;
+   560→      }
+   561→      const token = `@[${opt.label}] `;
+   562→      onChange(value + (value.endsWith(' ') || value === '' ? '' : ' ') + token);
+   563→      requestAnimationFrame(() => {
+   564→        textareaRef.current?.focus();
+   565→        const el = textareaRef.current;
+   566→        if (el) {
+   567→          el.selectionStart = el.selectionEnd = el.value.length;
+   568→        }
+   569→      });
+   570→    },
+   571→    [setAttachOpen, setCreateNewPanelOpen, onChange, value]
+   572→  );
+   573→
+   574→  return (
+   575→    <div className="relative flex flex-col">
+   576→      {/* ── Switch-confirmation toast (P8) — a tiny pill that fades in above
+   577→          the composer for ~1.8s after the user changes mode/model/thinking.
+   578→          Pure neutral, monochrome. Renders ABOVE the status back card so it
+   579→          never collides with thinking/context chips. ── */}
+   580→      <AnimatePresence>
+   581→        {toast && (
+   582→          <motion.div
+   583→            initial={{ opacity: 0, y: 6, scale: 0.96 }}
+   584→            animate={{ opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 28 } }}
+   585→            exit={{ opacity: 0, y: 6, scale: 0.96, transition: { duration: 0.16 } }}
+   586→            className="pointer-events-none absolute -top-7 left-1/2 z-50 -translate-x-1/2 whitespace-nowrap rounded-full border border-neutral-200 bg-white px-2.5 py-0.5 text-[10.5px] font-medium text-neutral-700 shadow-md dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+   587→            role="status"
+   588→            aria-live="polite"
+   589→          >
+   590→            {toast}
+   591→          </motion.div>
+   592→        )}
+   593→      </AnimatePresence>
+   594→
+   595→      {/* ── Status back card — a layered shelf that pops up above the composer
+   596→          when the model is thinking or when the draft carries context tokens
+   597→          (imported files / knowledge / links). Visually it reads as a second
+   598→          card stacked behind the main input, its bottom edge tucked under the
+   599→          composer card's top border (mb-[-2px] + rounded-t-xl) so the pair
+   600→          reads as overlapping cards, not two separate bars. ── */}
+   601→      <StatusBackCard
+   602→        isThinking={isThinking}
+   603→        thinkingMode={thinkingMode}
+   604→        contextTokens={contextTokens}
+   605→        onRemoveToken={handleRemoveToken}
+   606→      />
+   607→
+   608→      {/* ── Composer card ── */}
+   609→      <div
+   610→        className={`relative z-10 flex flex-col gap-1.5 overflow-hidden rounded-2xl border bg-white p-2 transition-colors dark:bg-neutral-900 ${
+   611→          isFocused
+   612→            ? 'border-neutral-300 dark:border-neutral-600'
+   613→            : 'border-neutral-200/80 hover:border-neutral-300 dark:border-neutral-800 dark:hover:border-neutral-700'
+   614→        }`}
+   615→      >
+   616→        {/* Textarea — real textarea for accessibility + IME reliability.
+   617→            Height is driven imperatively by the auto-resize effect above, but
+   618→            the `transition-[height]` class makes growth AND collapse smooth
+   619→            (collapse matters: after send/clear the box eases back to 1 line
+   620→            instead of snapping). Tiered max: 140px compact / 320px expanded. */}
+   621→        <textarea
+   622→          ref={textareaRef}
+   623→          value={value}
+   624→          onChange={e => onChange(e.target.value)}
+   625→          onKeyDown={handleKeyDown}
+   626→          onKeyUp={handleKeyUp}
+   627→          onSelect={e => {
+   628→            // Track text selection for attention-focus: when the user selects
+   629→            // a range, transition to 'selecting' scene so the hint hides and
+   630→            // doesn't overlap the selection highlight. Fires on mousedrag
+   631→            // select, double-click word select, and Shift+arrow select.
+   632→            const el = e.currentTarget;
+   633→            const sel = el.selectionStart !== el.selectionEnd;
+   634→            hasSelection.current = sel;
+   635→            if (sel) scheduleScene('selecting');
+   636→          }}
+   637→          onFocus={() => setIsFocused(true)}
+   638→          onBlur={() => setIsFocused(false)}
+   639→          placeholder={placeholder}
+   640→          disabled={isStreaming}
+   641→          rows={1}
+   642→          style={{ maxHeight: expanded ? 320 : 140 }}
+   643→          className="min-h-[36px] flex-1 resize-none border-0 bg-transparent px-1.5 py-0.5 text-[13px] leading-[1.55] text-neutral-800 caret-neutral-700 transition-[height] duration-200 ease-out placeholder:text-neutral-400 focus:outline-none disabled:opacity-60 dark:text-neutral-100 dark:caret-neutral-300 dark:placeholder:text-neutral-500"
+   644→        />
+   645→        {/* Expand / collapse toggle — appears once the draft is long enough
+   646→            that compact mode would scroll internally. Gives the user an
+   647→            explicit escape hatch for composing long messages. */}
+   648→        <AnimatePresence>
+   649→          {charCount > 280 && (
+   650→            <motion.button
+   651→              type="button"
+   652→              initial={{ opacity: 0, y: -2 }}
+   653→              animate={{ opacity: 1, y: 0 }}
+   654→              exit={{ opacity: 0, y: -2 }}
+   655→              onClick={() => setExpanded(e => !e)}
+   656→              className="absolute right-2 top-1.5 flex h-5 items-center gap-0.5 rounded border border-neutral-200 bg-white/90 px-1 text-[10px] text-neutral-500 backdrop-blur-sm transition-colors hover:bg-neutral-50 hover:text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900/90 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+   657→              aria-label={expanded ? '收起输入框' : '展开输入框'}
+   658→            >
+   659→              {expanded ? '收起' : '展开'}
+   660→            </motion.button>
+   661→          )}
+   662→        </AnimatePresence>
+   663→
+   664→        {/* ── Bottom toolbar — balanced: flat config left, raised island right ──
+   665→            Left : + (attach) + 引导模式 + 模型文本 (flat config cluster, ~3/4)
+   666→            Right: 思考 + send (raised oval action island, ~1/4,
+   667→                  lifted above the flat baseline via -translate-y + shadow) */}
+   668→        <div className="flex items-center gap-1 sm:gap-1.5">
+   669→          {/* Left cluster — flat config: attach + mode + model text. */}
+   670→          <div className="flex min-w-0 items-center gap-1">
+   671→            {/* + 添加文件 — opens the attachment menu */}
+   672→            <div ref={attachRef} className="relative">
+   673→              <MouseFollowTooltip content="添加文件 / 上下文">
+   674→                <button
+   675→                  type="button"
+   676→                  onClick={() => setAttachOpen(o => !o)}
+   677→                  aria-label="添加文件"
+   678→                  aria-expanded={attachOpen}
+   679→                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors sm:h-7 sm:w-7 ${
+   680→                    attachOpen
+   681→                      ? 'border-neutral-300 bg-neutral-100 text-neutral-900 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100'
+   682→                      : 'border-neutral-200 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
+   683→                  }`}
+   684→                >
+   685→                  <Plus className="h-4 w-4" strokeWidth={2.2} />
+   686→                </button>
+   687→              </MouseFollowTooltip>
+   688→            </div>
+   689→
+   690→            {/* 引导模式 selector — icon-only, hover tooltip, menu opens BESIDE (right) */}
+   691→            <div ref={modeRef} className="relative">
+   692→              <MouseFollowTooltip content={`教学模式 · ${activeMode.label}`}>
+   693→                <button
+   694→                  type="button"
+   695→                  onClick={() => setModeOpen(o => !o)}
+   696→                  aria-label={`切换教学模式 · ${activeMode.label}`}
+   697→                  aria-expanded={modeOpen}
+   698→                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors sm:h-7 sm:w-7 ${
+   699→                    modeOpen
+   700→                      ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
+   701→                      : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
+   702→                  }`}
+   703→                >
+   704→                  <activeMode.icon className="h-4 w-4" strokeWidth={2} />
+   705→                </button>
+   706→              </MouseFollowTooltip>
+   707→            </div>
+   708→
+   709→            {/* 模型文本 — flat, no frame, just text. */}
+   710→            <div ref={modelRef} className="relative">
+   711→              <MouseFollowTooltip content={`切换模型 · ${activeModel.label} · 上下文 ${(contextUsed / 1000).toFixed(1)}k / ${(activeModel.contextWindow / 1000).toFixed(0)}k`}>
+   712→                <button
+   713→                  type="button"
+   714→                  onClick={() => setModelOpen(o => !o)}
+   715→                  aria-label={`切换模型 · ${activeModel.label}`}
+   716→                  aria-expanded={modelOpen}
+   717→                  className={`flex h-7 shrink-0 items-center rounded-md px-1.5 text-[12px] font-medium transition-colors ${
+   718→                    modelOpen
+   719→                      ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
+   720→                      : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
+   721→                  }`}
+   722→                >
+   723→                  {activeModel.label}
+   724→                </button>
+   725→              </MouseFollowTooltip>
+   726→            </div>
+   727→          </div>
+   728→
+   729→          {/* Spacer */}
+   730→          <div className="flex-1" />
+   731→
+   732→          {/* Right cluster — raised action island: think + send.
+   733→              Oval (rounded-xl) shape, lifted 2px above the flat toolbar
+   734→              baseline. Border + shadow respond to focus / streaming state. */}
+   735→          <div className="flex items-center gap-2 sm:gap-3">
+   736→            <div className="relative shrink-0">
+   737→              <motion.div
+   738→                initial={{ opacity: 0, scale: 0.94 }}
+   739→                animate={{ opacity: 1, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 28 } }}
+   740→                className={`relative flex items-center gap-1 rounded-xl border bg-white px-1.5 py-1 transition-all -translate-y-[2px] dark:bg-neutral-900 ${
+   741→                  isStreaming
+   742→                    ? 'border-neutral-400 shadow-lg dark:border-neutral-500'
+   743→                    : isFocused
+   744→                      ? 'border-neutral-300 shadow-lg dark:border-neutral-600'
+   745→                      : 'border-neutral-200 shadow-md dark:border-neutral-700'
+   746→                }`}
+   747→              >
+   748→                {/* 思考 selector — icon-only inside the island */}
+   749→                <div ref={thinkRef} className="relative">
+   750→                  <MouseFollowTooltip content={`推理强度 · ${activeThink.label}`}>
+   751→                    <button
+   752→                      type="button"
+   753→                      onClick={() => setThinkOpen(o => !o)}
+   754→                      aria-label={`切换思考模式 · ${activeThink.label}`}
+   755→                      aria-expanded={thinkOpen}
+   756→                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors ${
+   757→                        thinkOpen
+   758→                          ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
+   759→                          : thinkingMode === 'off'
+   760→                            ? 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
+   761→                            : 'text-neutral-800 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800'
+   762→                      }`}
+   763→                    >
+   764→                      <activeThink.icon className="h-4 w-4" strokeWidth={2} />
+   765→                    </button>
+   766→                  </MouseFollowTooltip>
+   767→                </div>
+   768→
+   769→                {/* Send / Stop — the single solid-filled focal point */}
+   770→                <AnimatePresence mode="wait">
+   771→                  {isStreaming ? (
+   772→                    <motion.button
+   773→                      key="stop"
+   774→                      type="button"
+   775→                      initial={{ scale: 0.82, opacity: 0 }}
+   776→                      animate={{ scale: 1, opacity: 1, transition: { type: 'spring', stiffness: 500, damping: 26, mass: 0.6 } }}
+   777→                      exit={{ scale: 0.82, opacity: 0, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
+   778→                      whileTap={{ scale: 0.9 }}
+   779→                      onClick={onStop}
+   780→                      aria-label="停止生成"
+   781→                      className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-neutral-800 text-white transition-colors hover:bg-neutral-700 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-neutral-300"
+   782→                    >
+   783→                      <motion.span
+   784→                        className="pointer-events-none absolute inset-0 rounded-lg border border-neutral-400/50"
+   785→                        animate={{ scale: [1, 1.2], opacity: [0.6, 0] }}
+   786→                        transition={{ repeat: Infinity, duration: 1.4, ease: 'easeOut' }}
+   787→                      />
+   788→                      <Square className="h-3.5 w-3.5 fill-current" />
+   789→                    </motion.button>
+   790→                  ) : (
+   791→                    <motion.button
+   792→                      key="send"
+   793→                      type="button"
+   794→                      initial={{ scale: 0.82, opacity: 0 }}
+   795→                      animate={{ scale: 1, opacity: 1, transition: { type: 'spring', stiffness: 500, damping: 26, mass: 0.6 } }}
+   796→                      exit={{ scale: 0.82, opacity: 0, transition: { duration: 0.14, ease: [0.16, 1, 0.3, 1] } }}
+   797→                      whileHover={canSend ? { scale: 1.08, transition: { type: 'spring', stiffness: 400, damping: 18 } } : undefined}
+   798→                      whileTap={canSend ? { scale: 0.9, transition: { type: 'spring', stiffness: 600, damping: 25 } } : undefined}
+   799→                      onClick={canSend ? () => onSend() : undefined}
+   800→                      disabled={!canSend}
+   801→                      aria-label="发送消息"
+   802→                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors duration-200 ${
+   803→                        canSend
+   804→                          ? 'bg-neutral-800 text-white hover:bg-neutral-700 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-neutral-300'
+   805→                          : 'bg-neutral-100 text-neutral-300 dark:bg-neutral-800 dark:text-neutral-600'
+   806→                      }`}
+   807→                    >
+   808→                      <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+   809→                    </motion.button>
+   810→                  )}
+   811→                </AnimatePresence>
+   812→              </motion.div>
+   813→            </div>
+   814→          </div>
+   815→        </div>
+   816→
+   817→        {/* ── Hint row — left-bottom corner ──
+   818→            Priority: morphToClear > sceneChip > hintVisibility. */}
+   819→        <div className="flex min-h-[14px] items-start">
+   820→          <AnimatePresence mode="wait">
+   821→            {morphToClear && value.length > 0 && !isStreaming ? (
+   822→              <motion.button
+   823→                key="clear-all-hint"
+   824→                type="button"
+   825→                initial={{ opacity: 0, scale: 0.88, y: 4 }}
+   826→                animate={{ opacity: 1, scale: 1, y: 0, transition: { type: 'spring', stiffness: 420, damping: 24 } }}
+   827→                exit={{ opacity: 0, scale: 0.88, y: 4, transition: { duration: 0.16, ease: [0.4, 0, 1, 1] } }}
+   828→                whileTap={{ scale: 0.94 }}
+   829→                whileHover={{ scale: 1.03 }}
+   830→                onClick={handleClearAll}
+   831→                className="flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-2.5 py-1 text-[10.5px] font-semibold text-neutral-900 shadow-sm transition-colors hover:border-neutral-800 hover:bg-neutral-800 hover:text-white dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:border-neutral-200 dark:hover:bg-neutral-200 dark:hover:text-neutral-900"
+   832→                aria-label="清空全部内容"
+   833→              >
+   834→                <Eraser className="h-3.5 w-3.5" strokeWidth={2.2} />
+   835→                清空全部内容
+   836→              </motion.button>
+   837→            ) : sceneChip !== null ? (
+   838→              // Scene-aware contextual chip.
+   839→              <motion.button
+   840→                key={`scene-chip-${sceneChip}`}
+   841→                type="button"
+   842→                initial={{ opacity: 0, scale: 0.88, y: 4 }}
+   843→                animate={{ opacity: 1, scale: 1, y: 0, transition: { type: 'spring', stiffness: 420, damping: 24 } }}
+   844→                exit={{ opacity: 0, scale: 0.88, y: 4, transition: { duration: 0.16, ease: [0.4, 0, 1, 1] } }}
+   845→                whileTap={{ scale: 0.94 }}
+   846→                whileHover={{ scale: 1.03 }}
+   847→                onClick={() => handleSceneChipClick(sceneChip)}
+   848→                className="flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-2.5 py-1 text-[10.5px] font-medium text-neutral-700 shadow-sm transition-colors hover:border-neutral-800 hover:bg-neutral-800 hover:text-white dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-200 dark:hover:border-neutral-200 dark:hover:bg-neutral-200 dark:hover:text-neutral-900"
+   849→                aria-label={
+   850→                  sceneChip === 'pause' ? '暂停生成'
+   851→                    : sceneChip === 'expand' ? '展开编辑器'
+   852→                      : sceneChip === 'deep-think' ? '切换到深度思考'
+   853→                        : '代码模式'
+   854→                }
+   855→              >
+   856→                {sceneChip === 'pause' && <Square className="h-3 w-3 fill-current" />}
+   857→                {sceneChip === 'expand' && <Maximize2 className="h-3 w-3" strokeWidth={2.2} />}
+   858→                {sceneChip === 'deep-think' && <BrainCircuit className="h-3 w-3" strokeWidth={2.2} />}
+   859→                {sceneChip === 'code' && <Code2 className="h-3 w-3" strokeWidth={2.2} />}
+   860→                <span>
+   861→                  {sceneChip === 'pause' ? '暂停生成'
+   862→                    : sceneChip === 'expand' ? '展开编辑器'
+   863→                      : sceneChip === 'deep-think' ? '深度思考'
+   864→                        : '代码模式'}
+   865→                </span>
+   866→              </motion.button>
+   867→            ) : hintVisibility === 'hide' ? (
+   868→              // Hidden placeholder for AnimatePresence collapse.
+   869→              <motion.div
+   870→                key="hint-hidden"
+   871→                initial={{ height: 'auto', opacity: 0.5 }}
+   872→                animate={{ height: 0, opacity: 0, transition: { height: { duration: 0.2, ease: [0.4, 0, 1, 1] }, opacity: { duration: 0.12 } } }}
+   873→                exit={{ height: 'auto', opacity: 0.5, transition: { duration: 0.1 } }}
+   874→                className="overflow-hidden"
+   875→                aria-hidden
+   876→              />
+   877→            ) : (
+   878→              <motion.div
+   879→                key={`hint-${hintVisibility}`}
+   880→                initial={{ height: 0, opacity: 0 }}
+   881→                animate={{
+   882→                  height: 'auto',
+   883→                  opacity: hintVisibility === 'dim' ? 0.45 : 1,
+   884→                  transition: { height: { duration: 0.22, ease: [0.16, 1, 0.3, 1] }, opacity: { duration: 0.2 } },
+   885→                }}
+   886→                exit={{ height: 0, opacity: 0, transition: { height: { duration: 0.18, ease: [0.4, 0, 1, 1] }, opacity: { duration: 0.1 } } }}
+   887→                className="overflow-hidden"
+   888→              >
+   889→                <div className="flex min-w-0 items-center gap-0.5 px-0.5 text-[9.5px] text-neutral-400 transition-opacity dark:text-neutral-500">
+   890→                  <KbdKey variant="enter" />
+   891→                  <span>发送</span>
+   892→                  <span className="text-neutral-300 dark:text-neutral-600">·</span>
+   893→                  <KbdKey variant="shift" />
+   894→                  <KbdKey variant="enter" />
+   895→                  <span>换行</span>
+   896→                </div>
+   897→              </motion.div>
+   898→            )}
+   899→          </AnimatePresence>
+   900→        </div>
+   901→      </div>
+   902→
+   903→      {/* ── Popovers — rendered at the wrapper level (NOT inside the card) so
+   904→          they pop OUTWARD above the composer instead of being clipped by the
+   905→          card's overflow-hidden or overlapping the textarea. Each is anchored
+   906→          to the wrapper's top edge (bottom-full) and stacked above the back
+   907→          card via z-50. ── */}
+   908→      <AttachMenu menuRef={attachMenuRef} open={attachOpen} direction={attachDir} onSelect={handleAttach} />
+   909→      <ModeMenu
+   910→        ref={modeMenuRef}
+   911→        open={modeOpen}
+   912→        current={teachingMode}
+   913→        onSelect={m => {
+   914→          setTeachingMode(m);
+   915→          setModeOpen(false);
+   916→        }}
+   917→      />
+   918→      <ThinkingMenu
+   919→        ref={thinkMenuRef}
+   920→        open={thinkOpen}
+   921→        direction={thinkDir}
+   922→        current={thinkingMode}
+   923→        onSelect={m => {
+   924→          setThinkingMode(m);
+   925→          setThinkOpen(false);
+   926→        }}
+   927→      />
+   928→      <ModelCardMenu
+   929→        ref={modelMenuRef}
+   930→        open={modelOpen}
+   931→        direction={modelDir}
+   932→        current={selectedModel}
+   933→        onSelect={m => {
+   934→          setSelectedModel(m);
+   935→          setModelOpen(false);
+   936→        }}
+   937→        contextUsed={contextUsed}
+   938→        contextBudget={activeModel.contextWindow}
+   939→        modelUsed={modelUsageTokens}
+   940→        modelBudget={MODEL_BUDGET}
+   941→      />
+   942→    </div>
+   943→  );
+   944→}
+   945→
+   946→// ─── Attachment popover menu ─────────────────────────────────────────────────
+   947→
+   948→// Helper: compute the absolute-positioning class for a popover menu based on
+   949→// its flip direction. 'up' (default) anchors the menu ABOVE the trigger
+   950→// (bottom-full + mb-2); 'down' anchors it BELOW (top-full + mt-2). The
+   951→// animation y-offset is also flipped so the menu slides in from the correct
+   952→// side. Menus also get a max-height + scroll so very long lists never
+   953→// overflow the viewport.
+   954→function menuPos(direction: 'up' | 'down', align: 'left' | 'right' = 'left') {
+   955→  const side = align === 'right' ? 'right-0' : 'left-0';
+   956→  if (direction === 'down') {
+   957→    return {
+   958→      className: `absolute top-full ${side} z-50 mt-2 max-h-[60vh] overflow-y-auto`,
+   959→      yAnim: 6,
+   960→    };
+   961→  }
+   962→  return {
+   963→    className: `absolute bottom-full ${side} z-50 mb-2 max-h-[60vh] overflow-y-auto`,
+   964→    yAnim: -6,
+   965→  };
+   966→}
+   967→
+   968→function AttachMenu({
+   969→  open,
+   970→  onSelect,
+   971→  menuRef,
+   972→  direction = 'up',
+   973→}: {
+   974→  open: boolean;
+   975→  onSelect: (opt: AttachmentOption) => void;
+   976→  menuRef: React.RefObject<HTMLDivElement | null>;
+   977→  direction?: 'up' | 'down';
+   978→}) {
+   979→  const pos = menuPos(direction, 'left');
+   980→  return (
+   981→    <AnimatePresence>
+   982→      {open && (
+   983→        <motion.div
+   984→          ref={menuRef}
+   985→          initial={{ opacity: 0, y: pos.yAnim, scale: 0.97 }}
+   986→          animate={{ opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
+   987→          exit={{ opacity: 0, y: pos.yAnim, scale: 0.97, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
+   988→          className={`${pos.className} w-64 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900`}
+   989→        >
+   990→          <p className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+   991→            添加上下文
+   992→          </p>
+   993→          {ATTACH_OPTIONS.map(opt => {
+   994→            const Icon = opt.icon;
+   995→            return (
+   996→              <button
+   997→                key={opt.key}
+   998→                type="button"
+   999→                onClick={() => onSelect(opt)}
+  1000→                className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-800"
+  1001→              >
+  1002→                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+  1003→                  <Icon className="h-3.5 w-3.5" />
+  1004→                </span>
+  1005→                <span className="min-w-0 flex-1">
+  1006→                  <span className="block text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
+  1007→                  <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
+  1008→                </span>
+  1009→              </button>
+  1010→            );
+  1011→          })}
+  1012→        </motion.div>
+  1013→      )}
+  1014→    </AnimatePresence>
+  1015→  );
+  1016→}
+  1017→
+  1018→// ─── Status back card ────────────────────────────────────────────────────────
+  1019→//
+  1020→// A layered "shelf" that pops up above the composer card. Two states:
+  1021→//   • Thinking — the model is in its pre-token phase: a reasoning animation
+  1022→//     chosen by `thinkingMode` (wave / orbit / cascade) + a label.
+  1023→//   • Context  — the draft carries @[标签] tokens (imported files / knowledge /
+  1024→//     links): rendered as removable chips so the user sees exactly what context
+  1025→//     will be sent.
+  1026→//
+  1027→// The shelf is in normal flow (first child of the composer wrapper) so its
+  1028→// expand/collapse animates the wrapper height naturally, and popovers anchored
+  1029→// to the wrapper's top edge always clear it. A -2px bottom margin tucks the
+  1030→// shelf's bottom edge under the composer card's top border + rounded-t-xl +
+  1031→// flush bottom corners, so the pair reads as two overlapping cards (the back
+  1032→// card peeking up behind the main input) rather than two stacked bars.
+  1033→
+  1034→function StatusBackCard({
+  1035→  isThinking,
+  1036→  thinkingMode,
+  1037→  contextTokens,
+  1038→  onRemoveToken,
+  1039→}: {
+  1040→  isThinking: boolean;
+  1041→  thinkingMode: ThinkingMode;
+  1042→  contextTokens: string[];
+  1043→  onRemoveToken: (label: string) => void;
+  1044→}) {
+  1045→  const active = isThinking || contextTokens.length > 0;
+  1046→  return (
+  1047→    <AnimatePresence initial={false}>
+  1048→      {active && (
+  1049→        <motion.div
+  1050→          initial={{ opacity: 0, height: 0 }}
+  1051→          animate={{ opacity: 1, height: 'auto' }}
+  1052→          exit={{ opacity: 0, height: 0 }}
+  1053→          transition={{ type: 'spring', stiffness: 320, damping: 30, mass: 0.7 }}
+  1054→          className="overflow-hidden"
+  1055→        >
+  1056→          <div className="relative mx-1 mb-[-2px] flex h-9 items-center gap-2 rounded-t-xl border border-b-0 border-neutral-200 bg-neutral-50/80 px-3 dark:border-neutral-700 dark:bg-neutral-800/60">
+  1057→            {isThinking ? (
+  1058→              <ThinkingAnimation mode={thinkingMode} />
+  1059→            ) : (
+  1060→              <>
+  1061→                <span className="shrink-0 text-[10px] font-medium uppercase tracking-[0.1em] text-neutral-400 dark:text-neutral-500">
+  1062→                  上下文
+  1063→                </span>
+  1064→                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 overflow-hidden">
+  1065→                  {contextTokens.map(label => {
+  1066→                    const opt = ATTACH_OPTIONS.find(o => o.label === label);
+  1067→                    const Icon = opt?.icon || FileText;
+  1068→                    return (
+  1069→                      <span
+  1070→                        key={label}
+  1071→                        className="inline-flex items-center gap-1 rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[11px] text-neutral-600 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-300"
+  1072→                      >
+  1073→                        <Icon className="h-3 w-3" />
+  1074→                        {label}
+  1075→                        <button
+  1076→                          type="button"
+  1077→                          onClick={() => onRemoveToken(label)}
+  1078→                          className="ml-0.5 flex h-3.5 w-3.5 items-center justify-center rounded text-neutral-400 transition-colors hover:bg-neutral-200 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-600 dark:hover:text-neutral-200"
+  1079→                          aria-label={`移除 ${label}`}
+  1080→                        >
+  1081→                          <X className="h-2.5 w-2.5" />
+  1082→                        </button>
+  1083→                      </span>
+  1084→                    );
+  1085→                  })}
+  1086→                </div>
+  1087→              </>
+  1088→            )}
+  1089→          </div>
+  1090→        </motion.div>
+  1091→      )}
+  1092→    </AnimatePresence>
+  1093→  );
+  1094→}
+  1095→
+  1096→// ─── Thinking animation — chosen by thinkingMode ─────────────────────────────
+  1097→//
+  1098→// Each reasoning level gets its own visual so the user can tell at a glance
+  1099→// HOW the model is reasoning, not just that it is. All animations use the
+  1100→// neutral grey palette (no amber/blue) — selection state is conveyed by motion
+  1101→// intensity, not color.
+  1102→//
+  1103→//   off         — (never shown; isThinking is false when thinking is off
+  1104→//                 because the model returns fast. Kept here for completeness.)
+  1105→//   standard    — three-dot wave: a calm, rhythmic "thinking" pulse.
+  1106→//   deep        — orbiting electrons around a solid core: multi-angle
+  1107→//                 exploration visualized as satellites circling a central node.
+  1108→//   structured  — cascading node layers: a 3-tier chain that lights up
+  1109→//                 sequentially (chain → critique → converge), mirroring the
+  1110→//                 structured reasoning framework.
+  1111→
+  1112→function ThinkingAnimation({ mode }: { mode: ThinkingMode }) {
+  1113→  if (mode === 'deep') {
+  1114→    return <DeepThinkingAnim />;
+  1115→  }
+  1116→  if (mode === 'structured') {
+  1117→    return <StructuredThinkingAnim />;
+  1118→  }
+  1119→  // off + standard both use the calm wave (off won't reach here in practice).
+  1120→  return <StandardThinkingAnim />;
+  1121→}
+  1122→
+  1123→function StandardThinkingAnim() {
+  1124→  return (
+  1125→    <div className="flex items-center gap-2">
+  1126→      <span className="flex items-center gap-1">
+  1127→        {[0, 1, 2].map(d => (
+  1128→          <motion.span
+  1129→            key={d}
+  1130→            className="h-1.5 w-1.5 rounded-full bg-neutral-500 dark:bg-neutral-300"
+  1131→            animate={{ y: [0, -3, 0], opacity: [0.4, 1, 0.4] }}
+  1132→            transition={{ repeat: Infinity, duration: 1, delay: d * 0.15, ease: 'easeInOut' }}
+  1133→          />
+  1134→        ))}
+  1135→      </span>
+  1136→      <span className="text-[11.5px] font-medium text-neutral-600 dark:text-neutral-300">
+  1137→        模型正在思考
+  1138→      </span>
+  1139→    </div>
+  1140→  );
+  1141→}
+  1142→
+  1143→function DeepThinkingAnim() {
+  1144→  // A solid core with 3 orbiting satellites — multi-angle exploration.
+  1145→  // Pure monochrome: the core is solid neutral-900 (light) / neutral-100 (dark),
+  1146→  // the orbit rings + electron are muted neutrals.
+  1147→  return (
+  1148→    <div className="flex items-center gap-2">
+  1149→      <span className="relative flex h-4 w-4 items-center justify-center">
+  1150→        {/* core */}
+  1151→        <motion.span
+  1152→          className="absolute h-1.5 w-1.5 rounded-full bg-neutral-800 dark:bg-neutral-200"
+  1153→          animate={{ scale: [1, 1.25, 1], opacity: [0.7, 1, 0.7] }}
+  1154→          transition={{ repeat: Infinity, duration: 1.6, ease: 'easeInOut' }}
+  1155→        />
+  1156→        {/* orbit ring 1 (tilted) */}
+  1157→        <motion.span
+  1158→          className="absolute h-4 w-4 rounded-full border border-neutral-400/60 dark:border-neutral-500/60"
+  1159→          style={{ transform: 'rotateX(65deg)' }}
+  1160→          animate={{ rotate: 360 }}
+  1161→          transition={{ repeat: Infinity, duration: 2.4, ease: 'linear' }}
+  1162→        />
+  1163→        {/* orbit ring 2 (different tilt) */}
+  1164→        <motion.span
+  1165→          className="absolute h-4 w-4 rounded-full border border-neutral-400/40 dark:border-neutral-500/40"
+  1166→          style={{ transform: 'rotateY(65deg)' }}
+  1167→          animate={{ rotate: -360 }}
+  1168→          transition={{ repeat: Infinity, duration: 3, ease: 'linear' }}
+  1169→        />
+  1170→        {/* electron (orbiting dot) */}
+  1171→        <motion.span
+  1172→          className="absolute h-1 w-1 rounded-full bg-neutral-700 dark:bg-neutral-300"
+  1173→          animate={{ rotate: 360 }}
+  1174→          transition={{ repeat: Infinity, duration: 1.8, ease: 'linear' }}
+  1175→          style={{ transformOrigin: '0px 8px' }}
+  1176→        />
+  1177→      </span>
+  1178→      <span className="text-[11.5px] font-medium text-neutral-600 dark:text-neutral-300">
+  1179→        深度推理中
+  1180→        <span className="ml-1 text-neutral-400 dark:text-neutral-500">· 多角度 · 反例检验</span>
+  1181→      </span>
+  1182→    </div>
+  1183→  );
+  1184→}
+  1185→
+  1186→function StructuredThinkingAnim() {
+  1187→  // 3 node tiers lighting up sequentially: chain → critique → converge.
+  1188→  // Each tier pulses opacity + scale + border contrast (no color shift).
+  1189→  const tiers = ['链式', '批判', '收敛'];
+  1190→  return (
+  1191→    <div className="flex items-center gap-2">
+  1192→      <span className="flex items-center gap-1">
+  1193→        {tiers.map((t, i) => (
+  1194→          <motion.span
+  1195→            key={t}
+  1196→            className="flex h-4 items-center gap-0.5 rounded-full border border-neutral-300/70 bg-white px-1 text-[8.5px] font-medium text-neutral-600 dark:border-neutral-600/70 dark:bg-neutral-800 dark:text-neutral-300"
+  1197→            animate={{
+  1198→              opacity: [0.4, 1, 0.4],
+  1199→              scale: [0.92, 1.04, 0.92],
+  1200→              borderColor: [
+  1201→                'rgba(168,162,158,0.5)',
+  1202→                'rgba(23,23,23,0.7)',
+  1203→                'rgba(168,162,158,0.5)',
+  1204→              ],
+  1205→            }}
+  1206→            transition={{
+  1207→              repeat: Infinity,
+  1208→              duration: 2.1,
+  1209→              delay: i * 0.4,
+  1210→              ease: 'easeInOut',
+  1211→            }}
+  1212→          >
+  1213→            <span
+  1214→              className="h-1 w-1 rounded-full bg-neutral-500 dark:bg-neutral-400"
+  1215→              style={{ animation: 'none' }}
+  1216→            />
+  1217→            {t}
+  1218→          </motion.span>
+  1219→        ))}
+  1220→        {/* connecting lines */}
+  1221→        <span className="sr-only">→</span>
+  1222→      </span>
+  1223→      <span className="text-[11.5px] font-medium text-neutral-600 dark:text-neutral-300">
+  1224→        结构化推理中
+  1225→      </span>
+  1226→    </div>
+  1227→  );
+  1228→}
+  1229→
+  1230→// ─── Teaching-mode popover menu ──────────────────────────────────────────────
+  1231→
+  1232→const ModeMenu = React.forwardRef<
+  1233→  HTMLDivElement,
+  1234→  {
+  1235→    open: boolean;
+  1236→    current: TeachingMode;
+  1237→    onSelect: (m: TeachingMode) => void;
+  1238→  }
+  1239→>(({ open, current, onSelect }, menuRef) => {
+  1240→  // Mode menu opens BESIDE the trigger (to the right), not above. This gives
+  1241→  // a grounded, 3D-layered feel — the menu reads as an extension of the
+  1242→  // button rather than a floating panel, and avoids the menu drifting too
+  1243→  // high when the composer is tall (long text / expanded mode). The trigger
+  1244→  // is on the LEFT side of the toolbar, so there's room to the right.
+  1245→  return (
+  1246→    <AnimatePresence>
+  1247→      {open && (
+  1248→        <motion.div
+  1249→          ref={menuRef}
+  1250→          initial={{ opacity: 0, scale: 0.94, x: -8 }}
+  1251→          animate={{ opacity: 1, scale: 1, x: 0, transition: { type: 'spring', stiffness: 420, damping: 28 } }}
+  1252→          exit={{ opacity: 0, scale: 0.94, x: -8, transition: { type: 'spring', stiffness: 420, damping: 28 } }}
+  1253→          className="absolute left-full top-0 z-50 ml-2 max-h-[60vh] w-72 overflow-y-auto overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+  1254→        >
+  1255→          <p className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+  1256→            教学模式
+  1257→          </p>
+  1258→          {MODE_OPTIONS.map(opt => {
+  1259→            const Icon = opt.icon;
+  1260→            const active = opt.key === current;
+  1261→            return (
+  1262→              <button
+  1263→                key={opt.key}
+  1264→                type="button"
+  1265→                onClick={() => onSelect(opt.key)}
+  1266→                className={`flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+  1267→                  active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
+  1268→                }`}
+  1269→              >
+  1270→                <span
+  1271→                  className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+  1272→                    active
+  1273→                      ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
+  1274→                      : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+  1275→                  }`}
+  1276→                >
+  1277→                  <Icon className="h-3.5 w-3.5" />
+  1278→                </span>
+  1279→                <span className="min-w-0 flex-1">
+  1280→                  <span className="flex items-center gap-1.5">
+  1281→                    <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
+  1282→                    {active && <Check className="h-3.5 w-3.5 text-neutral-500 dark:text-neutral-400" />}
+  1283→                  </span>
+  1284→                  <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
+  1285→                </span>
+  1286→              </button>
+  1287→            );
+  1288→          })}
+  1289→        </motion.div>
+  1290→      )}
+  1291→    </AnimatePresence>
+  1292→  );
+  1293→});
+  1294→ModeMenu.displayName = 'ModeMenu';
+  1295→
+  1296→// ─── Thinking-mode popover menu ──────────────────────────────────────────────
+  1297→//
+  1298→// 4 reasoning levels. Each row shows an icon, label, and a short description
+  1299→// of what the model does internally at that level. The active level gets a
+  1300→// filled grey icon chip + a check mark — neutral palette, no amber accent.
+  1301→
+  1302→const ThinkingMenu = React.forwardRef<
+  1303→  HTMLDivElement,
+  1304→  {
+  1305→    open: boolean;
+  1306→    direction?: 'up' | 'down';
+  1307→    current: ThinkingMode;
+  1308→    onSelect: (m: ThinkingMode) => void;
+  1309→  }
+  1310→>(({ open, direction = 'up', current, onSelect }, menuRef) => {
+  1311→  const pos = menuPos(direction, 'right');
+  1312→  return (
+  1313→    <AnimatePresence>
+  1314→      {open && (
+  1315→        <motion.div
+  1316→          ref={menuRef}
+  1317→          initial={{ opacity: 0, y: pos.yAnim, scale: 0.97 }}
+  1318→          animate={{ opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
+  1319→          exit={{ opacity: 0, y: pos.yAnim, scale: 0.97, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
+  1320→          className={`${pos.className} w-72 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900`}
+  1321→        >
+  1322→          <p className="flex items-center gap-1 px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+  1323→            <BrainCircuit className="h-3 w-3" />
+  1324→            思考模式
+  1325→          </p>
+  1326→          {THINK_OPTIONS.map(opt => {
+  1327→            const Icon = opt.icon;
+  1328→            const active = opt.key === current;
+  1329→            return (
+  1330→              <button
+  1331→                key={opt.key}
+  1332→                type="button"
+  1333→                onClick={() => onSelect(opt.key)}
+  1334→                className={`flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors ${
+  1335→                  active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
+  1336→                }`}
+  1337→              >
+  1338→                <span
+  1339→                  className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+  1340→                    active
+  1341→                      ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
+  1342→                      : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+  1343→                  }`}
+  1344→                >
+  1345→                  <Icon className="h-3.5 w-3.5" />
+  1346→                </span>
+  1347→                <span className="min-w-0 flex-1">
+  1348→                  <span className="flex items-center gap-1.5">
+  1349→                    <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
+  1350→                    {active && <Check className="h-3.5 w-3.5 text-neutral-700 dark:text-neutral-300" />}
+  1351→                  </span>
+  1352→                  <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
+  1353→                </span>
+  1354→              </button>
+  1355→            );
+  1356→          })}
+  1357→          <p className="px-2.5 py-1.5 text-[10px] leading-snug text-neutral-400 dark:text-neutral-500">
+  1358→            普通模型均具备深度推理能力。开启后模型在内部推理完成后再作答，回答更严谨；推理动画会在卡片上方展示当前推理形态。
+  1359→          </p>
+  1360→        </motion.div>
+  1361→      )}
+  1362→    </AnimatePresence>
+  1363→  );
+  1364→});
+  1365→ThinkingMenu.displayName = 'ThinkingMenu';
+  1366→
+  1367→// ─── ModelCard popover menu ──────────────────────────────────────────────────
+  1368→//
+  1369→// The merged "选项卡片" the user requested: a single popover that exposes
+  1370→//   1. Model selection (GLM-4.6 / GLM-4.5 / GLM-4-Air) — radio list
+  1371→//   2. 上下文用量 — meter showing current draft + history vs context window
+  1372→//   3. 模型用量 — meter showing cumulative session tokens vs budget
+  1373→//
+  1374→// All in pure neutral monochrome. Active model gets a filled solid dot.
+  1375→
+  1376→const ModelCardMenu = React.forwardRef<
+  1377→  HTMLDivElement,
+  1378→  {
+  1379→    open: boolean;
+  1380→    direction?: 'up' | 'down';
+  1381→    current: SelectedModel;
+  1382→    onSelect: (m: SelectedModel) => void;
+  1383→    contextUsed: number;
+  1384→    contextBudget: number;
+  1385→    modelUsed: number;
+  1386→    modelBudget: number;
+  1387→  }
+  1388→>(({ open, direction = 'up', current, onSelect, contextUsed, contextBudget, modelUsed, modelBudget }, menuRef) => {
+  1389→  const pos = menuPos(direction, 'right');
+  1390→  return (
+  1391→    <AnimatePresence>
+  1392→      {open && (
+  1393→        <motion.div
+  1394→          ref={menuRef}
+  1395→          initial={{ opacity: 0, y: pos.yAnim, scale: 0.97 }}
+  1396→          animate={{ opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
+  1397→          exit={{ opacity: 0, y: pos.yAnim, scale: 0.97, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
+  1398→          className={`${pos.className} w-80 overflow-hidden rounded-xl border border-neutral-200 bg-white p-2 shadow-lg dark:border-neutral-700 dark:bg-neutral-900`}
+  1399→        >
+  1400→          {/* ── Section 1: Model selection ── */}
+  1401→          <p className="flex items-center gap-1.5 px-1 py-1 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+  1402→            <Cpu className="h-3 w-3" />
+  1403→            模型
+  1404→          </p>
+  1405→          <div className="flex flex-col gap-0.5">
+  1406→            {MODEL_OPTIONS.map(opt => {
+  1407→              const active = opt.key === current;
+  1408→              return (
+  1409→                <button
+  1410→                  key={opt.key}
+  1411→                  type="button"
+  1412→                  onClick={() => onSelect(opt.key)}
+  1413→                  className={`flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors ${
+  1414→                    active ? 'bg-neutral-100 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
+  1415→                  }`}
+  1416→                >
+  1417→                  <span
+  1418→                    className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+  1419→                      active
+  1420→                        ? 'border-neutral-800 bg-neutral-800 dark:border-neutral-200 dark:bg-neutral-200'
+  1421→                        : 'border-neutral-300 dark:border-neutral-600'
+  1422→                    }`}
+  1423→                  >
+  1424→                    {active && <CircleDot className="h-2 w-2 text-white dark:text-neutral-900" strokeWidth={3} />}
+  1425→                  </span>
+  1426→                  <span className="min-w-0 flex-1">
+  1427→                    <span className="flex items-center gap-1.5">
+  1428→                      <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{opt.label}</span>
+  1429→                      <span className="rounded-full border border-neutral-200 px-1.5 py-px text-[9.5px] text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+  1430→                        {(opt.contextWindow / 1000).toFixed(0)}k 上下文
+  1431→                      </span>
+  1432→                    </span>
+  1433→                    <span className="block text-[11.5px] leading-snug text-neutral-400 dark:text-neutral-500">{opt.desc}</span>
+  1434→                  </span>
+  1435→                </button>
+  1436→              );
+  1437→            })}
+  1438→          </div>
+  1439→
+  1440→          {/* ── Section 2: Usage meters ── */}
+  1441→          <div className="my-2 h-px bg-neutral-200 dark:bg-neutral-700" />
+  1442→
+  1443→          <p className="flex items-center gap-1.5 px-1 py-1 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+  1444→            <Gauge className="h-3 w-3" />
+  1445→            用量
+  1446→          </p>
+  1447→
+  1448→          {/* Context usage meter */}
+  1449→          <UsageMeter
+  1450→            label="上下文用量"
+  1451→            icon={Layers}
+  1452→            used={contextUsed}
+  1453→            budget={contextBudget}
+  1454→            unit="tokens"
+  1455→          />
+  1456→          {/* Model usage meter (this session) */}
+  1457→          <UsageMeter
+  1458→            label="模型用量"
+  1459→            icon={Cpu}
+  1460→            used={modelUsed}
+  1461→            budget={modelBudget}
+  1462→            unit="tokens / 会话"
+  1463→          />
+  1464→
+  1465→          <p className="mt-1.5 px-1 text-[10px] leading-snug text-neutral-400 dark:text-neutral-500">
+  1466→            用量为估算值，仅作可视化参考。模型切换将影响下一次发送的请求。
+  1467→          </p>
+  1468→        </motion.div>
+  1469→      )}
+  1470→    </AnimatePresence>
+  1471→  );
+  1472→});
+  1473→ModelCardMenu.displayName = 'ModelCardMenu';
+  1474→
+  1475→// ─── Usage meter — a thin horizontal bar with numeric label ──────────────────
+  1476→//
+  1477→// Pure monochrome: track is neutral-200/700, fill is neutral-900/100.
+  1478→// When usage exceeds 85%, the fill gains a subtle striped pattern (still B/W)
+  1479→// to hint at pressure without introducing a warning color.
+  1480→
+  1481→function UsageMeter({
+  1482→  label,
+  1483→  icon: Icon,
+  1484→  used,
+  1485→  budget,
+  1486→  unit,
+  1487→}: {
+  1488→  label: string;
+  1489→  icon: React.ComponentType<{ className?: string }>;
+  1490→  used: number;
+  1491→  budget: number;
+  1492→  unit: string;
+  1493→}) {
+  1494→  const fraction = Math.min(1, used / budget);
+  1495→  const pressure = fraction > 0.85;
+  1496→  const fmt = (n: number) => {
+  1497→    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  1498→    return `${n}`;
+  1499→  };
+  1500→  // Semantic label — plain-language reading of the token count
+  1501→  // ("还很轻松" / "余量充足" / "接近上限" / "建议新建会话"). Raw numbers like
+  1502→  // "8k/200k" are hard to act on; a qualitative label maps the number to an action.
+  1503→  let semantic: string;
+  1504→  if (fraction < 0.25) semantic = '还很轻松';
+  1505→  else if (fraction < 0.6) semantic = '余量充足';
+  1506→  else if (fraction < 0.85) semantic = '接近上限';
+  1507→  else semantic = '建议新建会话';
+  1508→  return (
+  1509→    <div className="px-1 py-1.5">
+  1510→      <div className="mb-1 flex items-center justify-between text-[11px]">
+  1511→        <span className="flex items-center gap-1 text-neutral-600 dark:text-neutral-300">
+  1512→          <Icon className="h-3 w-3" />
+  1513→          {label}
+  1514→          <span className="ml-1 rounded-full border border-neutral-200 px-1.5 py-px text-[9px] text-neutral-400 dark:border-neutral-700 dark:text-neutral-500">
+  1515→            {semantic}
+  1516→          </span>
+  1517→        </span>
+  1518→        <span className="tabular-nums text-neutral-400 dark:text-neutral-500">
+  1519→          {fmt(used)} / {fmt(budget)} <span className="text-neutral-400 dark:text-neutral-600">{unit}</span>
+  1520→        </span>
+  1521→      </div>
+  1522→      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700">
+  1523→        <motion.div
+  1524→          className={`h-full rounded-full ${pressure ? 'bg-neutral-800 dark:bg-neutral-200' : 'bg-neutral-600 dark:bg-neutral-400'}`}
+  1525→          initial={false}
+  1526→          animate={{ width: `${Math.max(2, fraction * 100)}%` }}
+  1527→          transition={{ type: 'spring', stiffness: 200, damping: 26 }}
+  1528→        />
+  1529→        {pressure && (
+  1530→          <motion.div
+  1531→            className="absolute inset-0 opacity-30"
+  1532→            style={{
+  1533→              backgroundImage:
+  1534→                'repeating-linear-gradient(45deg, rgba(0,0,0,0.4) 0, rgba(0,0,0,0.4) 1px, transparent 1px, transparent 4px)',
+  1535→            }}
+  1536→            animate={{ x: [0, 8] }}
+  1537→            transition={{ repeat: Infinity, duration: 0.6, ease: 'linear' }}
+  1538→          />
+  1539→        )}
+  1540→      </div>
+  1541→    </div>
+  1542→  );
+  1543→}
+  1544→
+  1545→// ─── KbdKey — hand-drawn miniature keyboard-key SVG ──────────────────────────
+  1546→//
+  1547→// The user asked for the keyboard hint to look like an actual keyboard key
+  1548→// (so the hint maps to a physical key location, not an abstract arrow
+  1549→// direction). We draw a tiny isometric key cap:
+  1550→//
+  1551→//   ┌──────┐
+  1552→//   │ ⏎    │   ← Enter variant: a bent arrow inside the cap
+  1553→//   └──────┘
+  1554→//
+  1555→//   ┌──────┐
+  1556→//   │ ⇧    │   ← Shift variant: an upward hollow triangle
+  1557→//   └──────┘
+  1558→//
+  1559→// The cap has a 1px top highlight + 1px bottom shadow to read as a pressed
+  1560→// key. Stroke is neutral-500; the glyph is neutral-700 so it's legible at
+  1561→// 11px. Pure SVG, no emoji, no external icon dependency.
+  1562→
+  1563→function KbdKey({ variant }: { variant: 'enter' | 'shift' }) {
+  1564→  // 16x14 viewBox: a key cap with a subtle 3D edge.
+  1565→  return (
+  1566→    <svg
+  1567→      width="14"
+  1568→      height="11"
+  1569→      viewBox="0 0 16 14"
+  1570→      fill="none"
+  1571→      className="shrink-0 text-neutral-500 dark:text-neutral-400"
+  1572→      aria-hidden
+  1573→    >
+  1574→      {/* key cap body */}
+  1575→      <rect
+  1576→        x="1"
+  1577→        y="2.5"
+  1578→        width="14"
+  1579→        height="9.5"
+  1580→        rx="1.5"
+  1581→        className="fill-neutral-100 stroke-current stroke-[1] dark:fill-neutral-800"
+  1582→      />
+  1583→      {/* top highlight (1px) */}
+  1584→      <path
+  1585→        d="M 2.5 3 L 13.5 3"
+  1586→        className="stroke-white/70 stroke-[0.75] dark:stroke-white/20"
+  1587→        strokeLinecap="round"
+  1588→      />
+  1589→      {/* bottom shadow (1px) */}
+  1590→      <path
+  1591→        d="M 2.5 11.5 L 13.5 11.5"
+  1592→        className="stroke-black/20 stroke-[0.75] dark:stroke-black/40"
+  1593→        strokeLinecap="round"
+  1594→      />
+  1595→      {variant === 'enter' ? (
+  1596→        // Enter glyph: a bent arrow (down-then-left) — the universal "Enter"
+  1597→        // key symbol on physical keyboards.
+  1598→        <path
+  1599→          d="M 10 4.5 L 10 8 L 5 8 M 10 4.5 L 8 6.5 M 10 4.5 L 12 6.5"
+  1600→          className="stroke-current stroke-[1.2]"
+  1601→          strokeLinecap="round"
+  1602→          strokeLinejoin="round"
+  1603→          fill="none"
+  1604→        />
+  1605→      ) : (
+  1606→        // Shift glyph: a hollow upward arrow — the universal "Shift" symbol.
+  1607→        <path
+  1608→          d="M 8 4 L 5 7 L 6.7 7 L 6.7 8.5 L 9.3 8.5 L 9.3 7 L 11 7 Z"
+  1609→          className="fill-current stroke-current stroke-[0.8]"
+  1610→          strokeLinejoin="round"
+  1611→        />
+  1612→      )}
+  1613→    </svg>
+  1614→  );
+  1615→}
+  1616→

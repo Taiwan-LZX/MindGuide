@@ -1,0 +1,1183 @@
+     1→'use client';
+     2→
+     3→import React, { createContext, useCallback, useContext, useRef, useState, useSyncExternalStore } from 'react';
+     4→import { motion, AnimatePresence } from 'framer-motion';
+     5→import { MOTION, panelMotion, slideMotion } from '@/lib/motion-tokens';
+     6→import {
+     7→  X,
+     8→  Sun,
+     9→  Moon,
+    10→  Monitor,
+    11→  PanelLeft,
+    12→  Columns2,
+    13→  Maximize2,
+    14→  GraduationCap,
+    15→  Upload,
+    16→  Check,
+    17→  RotateCcw,
+    18→  Palette,
+    19→  Sparkles,
+    20→  Zap,
+    21→  Eye,
+    22→  Layout,
+    23→  Image as ImageIcon,
+    24→} from 'lucide-react';
+    25→import { useTheme } from 'next-themes';
+    26→import { useLearningStore } from '@/store/learning-store';
+    27→import { usePreferences } from '@/store/preferences-store';
+    28→import { extractDominantColor, type ExtractedColor } from '@/lib/color-extract';
+    29→
+    30→// ─── SettingsView ──────────────────────────────────────────────────────────
+    31→// A full-screen, in-app detailed settings interface. Triggered by the "设置"
+    32→// entry inside the three-dot quick menu (display-panel.tsx). Consolidates all
+    33→// display preferences — 外观 (theme + motion), 布局, 配色 (image → accent),
+    34→// 关于 — that previously lived scattered across the small popover.
+    35→//
+    36→// Layout mirrors a portfolio-card reference (left nav/list 60% + right preview
+    37→// 40%). The right "preview" pane is the key creative touch: every interactive
+    38→// *sub-item* (a theme option, the motion toggle, a layout card, the palette
+    39→// upload…) publishes a structured "hint" — kicker / title / Currently list /
+    40→// Previously note — and hovering that item retargets the right pane to show
+    41→// it, with a soft cross-fade. So the right pane is both a live preview AND an
+    42→// contextual explainer, the same "hover to reveal" mechanism as 更多功能 but
+    43→// rendered in-place and far more detailed.
+    44→
+    45→// SSR-safe mounted flag (next-themes is undefined until hydration).
+    46→const emptySubscribe = () => () => {};
+    47→const getTrue = () => true;
+    48→const getFalse = () => false;
+    49→
+    50→const themeOptions = [
+    51→  { value: 'light', label: '浅色', icon: Sun },
+    52→  { value: 'dark', label: '深色', icon: Moon },
+    53→  { value: 'system', label: '系统', icon: Monitor },
+    54→] as const;
+    55→
+    56→type TabKey = 'appearance' | 'layout' | 'palette' | 'about';
+    57→
+    58→const tabs: { key: TabKey; label: string }[] = [
+    59→  { key: 'appearance', label: '外观' },
+    60→  { key: 'layout', label: '布局' },
+    61→  { key: 'palette', label: '配色' },
+    62→  { key: 'about', label: '关于' },
+    63→];
+    64→
+    65→// ─── Hint system ───────────────────────────────────────────────────────────
+    66→// Each interactive sub-item registers a `hintId`. When hovered, the right
+    67→// preview pane swaps to that hint's structured content (kicker / title /
+    68→// Currently bullets / Previously note / demo kind). When nothing is hovered,
+    69→// the pane shows the active tab's default hint. This is the "hover to reveal"
+    70→// pattern from 更多功能, but rendered in-place on the right pane instead of as
+    71→// a floating tooltip — so it can carry much richer content without overlapping
+    72→// the UI.
+    73→
+    74→type DemoKind = 'theme-swatch' | 'motion' | 'layout-mock' | 'palette-flow' | 'about-card';
+    75→
+    76→interface Hint {
+    77→  /** Small uppercase label, e.g. "外观 · 浅色". */
+    78→  kicker: string;
+    79→  /** Large serif title, e.g. "浅色模式". */
+    80→  title: string;
+    81→  /** One-line subtitle under the title. */
+    82→  subtitle: string;
+    83→  /** Bulleted "currently" list — the reference image's signature structure. */
+    84→  currently: string[];
+    85→  /** Optional "previously" paragraph for extra context. */
+    86→  note?: string;
+    87→  /** Which mini-demo to render at the bottom of the pane. */
+    88→  demo: DemoKind;
+    89→  /** Optional icon override for the top-right demo mark. */
+    90→  icon?: React.ElementType;
+    91→}
+    92→
+    93→const hintMap: Record<string, Hint> = {
+    94→  // ── Appearance: theme ──
+    95→  'theme-light': {
+    96→    kicker: '外观 · 主题',
+    97→    title: '浅色模式',
+    98→    subtitle: '明亮清爽的阅读环境',
+    99→    currently: ['白底高对比，适合白天与高亮环境', '长时间阅读文字更清晰', '与多数学习材料默认排版一致'],
+   100→    note: '若系统处于深色，此处仍保持浅色。',
+   101→    demo: 'theme-swatch',
+   102→    icon: Sun,
+   103→  },
+   104→  'theme-dark': {
+   105→    kicker: '外观 · 主题',
+   106→    title: '深色模式',
+   107→    subtitle: '降低屏幕亮度，减少眼睛疲劳',
+   108→    currently: ['深灰底色，夜间专注更舒适', '减少蓝光刺激', 'UI 元素以浅色描边呈现'],
+   109→    note: 'OLED 屏幕可额外省电。',
+   110→    demo: 'theme-swatch',
+   111→    icon: Moon,
+   112→  },
+   113→  'theme-system': {
+   114→    kicker: '外观 · 主题',
+   115→    title: '跟随系统',
+   116→    subtitle: '随操作系统自动切换',
+   117→    currently: ['日间浅色 / 夜间深色自动切换', '与 macOS / iOS 外观偏好同步', '无需手动维护两套偏好'],
+   118→    note: '系统切换时即时生效，无需刷新。',
+   119→    demo: 'theme-swatch',
+   120→    icon: Monitor,
+   121→  },
+   122→  // ── Appearance: motion ──
+   123→  'motion-on': {
+   124→    kicker: '外观 · 动态效果',
+   125→    title: '启用动画',
+   126→    subtitle: '丝滑的过渡与微交互',
+   127→    currently: ['卡片渐入与列表错峰出现', '鼠标跟随提示平滑跟随', '面板弹簧式展开'],
+   128→    note: '尊重系统「减少动态效果」偏好——若系统已开启，动画仍会被精简。',
+   129→    demo: 'motion',
+   130→    icon: Zap,
+   131→  },
+   132→  'motion-off': {
+   133→    kicker: '外观 · 动态效果',
+   134→    title: '关闭动画',
+   135→    subtitle: '即时响应，减少视觉波动',
+   136→    currently: ['所有过渡瞬时完成', '去除弹簧与缩放反馈', '适合专注与无障碍场景'],
+   137→    note: '仅保留淡入淡出，界面仍清晰可读。',
+   138→    demo: 'motion',
+   139→    icon: Eye,
+   140→  },
+   141→  // ── Layout ──
+   142→  'layout-side': {
+   143→    kicker: '布局 · 显示模式',
+   144→    title: '侧栏模式',
+   145→    subtitle: '侧边栏 + 主区域',
+   146→    currently: ['会话列表常驻左侧', '快速切换学习主题', '主区域居中阅读宽度'],
+   147→    note: '默认布局，适合日常学习。',
+   148→    demo: 'layout-mock',
+   149→    icon: PanelLeft,
+   150→  },
+   151→  'layout-half': {
+   152→    kicker: '布局 · 显示模式',
+   153→    title: '分屏模式',
+   154→    subtitle: '侧边栏与内容并排',
+   155→    currently: ['宽屏高效浏览', '列表与对话同屏可见', '适合大尺寸显示器'],
+   156→    note: '侧边栏宽度自适应。',
+   157→    demo: 'layout-mock',
+   158→    icon: Columns2,
+   159→  },
+   160→  'layout-full': {
+   161→    kicker: '布局 · 显示模式',
+   162→    title: '全屏模式',
+   163→    subtitle: '隐藏侧边栏，沉浸专注',
+   164→    currently: ['主区域占据全部宽度', '无会话列表干扰', '适合深度阅读与写作'],
+   165→    note: '侧边栏可随时通过折叠图标恢复。',
+   166→    demo: 'layout-mock',
+   167→    icon: Maximize2,
+   168→  },
+   169→  // ── Palette ──
+   170→  'palette-upload': {
+   171→    kicker: '配色 · 图片取色',
+   172→    title: '智能提取主色',
+   173→    subtitle: '从任意图片生成项目主题色',
+   174→    currently: ['Canvas 降采样并量化像素', '饱和度加权选出最鲜活的色调', '一键应用到全站强调元素'],
+   175→    note: '颜色持久化到本地，刷新后保留；可随时重置恢复中性灰。',
+   176→    demo: 'palette-flow',
+   177→    icon: ImageIcon,
+   178→  },
+   179→  'palette-reset': {
+   180→    kicker: '配色 · 重置',
+   181→    title: '恢复中性配色',
+   182→    subtitle: '回到默认的中性灰强调',
+   183→    currently: ['移除自定义主题色', '主按钮与图标恢复深色 / 浅色', '保留主题与动态效果偏好'],
+   184→    note: '可随时重新上传图片提取新色。',
+   185→    demo: 'palette-flow',
+   186→    icon: RotateCcw,
+   187→  },
+   188→  // ── Tab defaults (shown when nothing is hovered) ──
+   189→  'tab-appearance': {
+   190→    kicker: '预览 · 外观',
+   191→    title: '外观',
+   192→    subtitle: '主题与动态效果',
+   193→    currently: ['浅色 / 深色 / 跟随系统', '动画开关与无障碍偏好', '悬停各项查看详细说明'],
+   194→    demo: 'theme-swatch',
+   195→    icon: Sparkles,
+   196→  },
+   197→  'tab-layout': {
+   198→    kicker: '预览 · 布局',
+   199→    title: '布局',
+   200→    subtitle: '侧边栏与内容的显示比例',
+   201→    currently: ['侧栏 / 分屏 / 全屏 三种模式', '悬停各项查看示意图', '选择会即时应用'],
+   202→    demo: 'layout-mock',
+   203→    icon: Layout,
+   204→  },
+   205→  'tab-palette': {
+   206→    kicker: '预览 · 配色',
+   207→    title: '配色',
+   208→    subtitle: '从图片提取主题色',
+   209→    currently: ['上传图片智能取色', '应用到全站强调元素', '悬停各区域了解机制'],
+   210→    demo: 'palette-flow',
+   211→    icon: Palette,
+   212→  },
+   213→  'tab-about': {
+   214→    kicker: '预览 · 关于',
+   215→    title: 'MindGuide',
+   216→    subtitle: 'AI 对话式学习平台',
+   217→    currently: ['苏格拉底式追问引导建构知识', '自动生成结构化课程', '知识图谱与间隔重复卡片'],
+   218→    note: '悬停各项可了解更多细节。',
+   219→    demo: 'about-card',
+   220→    icon: GraduationCap,
+   221→  },
+   222→  // ── About sub-items ──
+   223→  'about-version': {
+   224→    kicker: '关于 · 版本',
+   225→    title: 'v1.2.0',
+   226→    subtitle: '当前发布版本',
+   227→    currently: ['集成设置界面与图片取色', 'hover 提示精致化', '外观设置入口统一至三个点菜单'],
+   228→    note: '遵循语义化版本号，后续迭代持续向后兼容。',
+   229→    demo: 'about-card',
+   230→    icon: GraduationCap,
+   231→  },
+   232→  'about-stack': {
+   233→    kicker: '关于 · 技术栈',
+   234→    title: 'Next.js 16 · TypeScript',
+   235→    subtitle: '现代全栈技术栈',
+   236→    currently: ['App Router + Turbopack 热更新', 'Tailwind CSS 4 原子化样式', 'Prisma ORM + SQLite 数据层'],
+   237→    note: 'AI 能力由 z-ai-web-dev-sdk 提供，仅在后端调用。',
+   238→    demo: 'about-card',
+   239→    icon: Layout,
+   240→  },
+   241→  'about-accent': {
+   242→    kicker: '关于 · 主题色',
+   243→    title: '可自定义的项目配色',
+   244→    subtitle: '从「配色」tab 上传图片提取',
+   245→    currently: ['Canvas 像素采样与量化', '饱和度加权选出主色', 'CSS 变量驱动全站强调元素'],
+   246→    note: '颜色持久化到 localStorage，可随时重置。',
+   247→    demo: 'palette-flow',
+   248→    icon: Palette,
+   249→  },
+   250→};
+   251→
+   252→interface HintCtx {
+   253→  /** The currently hovered hint id, or null when nothing is hovered. */
+   254→  hovered: string | null;
+   255→  setHovered: (id: string | null) => void;
+   256→}
+   257→
+   258→const HintContext = createContext<HintCtx>({ hovered: null, setHovered: () => {} });
+   259→const useHint = () => useContext(HintContext);
+   260→
+   261→// ─── Personality: "ceremony" ───────────────────────────────────────────────
+   262→// The settings modal is the most "formal" surface in the app — the user has
+   263→// paused their work to change a preference. The motion should signal that
+   264→// gravity: heavier mass, slower settle, a touch of depth via scale.
+   265→//
+   266→// Differentiation vs. other panels:
+   267→//  · Quick menu (command): 380/30/0.6 — snappy, ~260ms, near-zero overshoot.
+   268→//  · More features (discovery): 280/26/0.9 — soft, ~520ms, ~2% overshoot.
+   269→//  · Settings (ceremony): 200/24/1.0 — heavy, ~700ms, deliberate settle.
+   270→//
+   271→// The scale 0.94 → 1 with transformOrigin 'center' gives a subtle "opening
+   272→// up" depth cue — like a card pulled from a deck and laid flat.
+   273→//
+   274→// EXIT EASING RATIONALE (anim-refine-003 — "关闭的过渡动画无帧数直接闪现"):
+   275→//   · Previous exit used a single transition { duration: 0.28, ease: [0.4,0,1,1] }
+   276→//     applied to ALL three properties (opacity, scale, y).
+   277→//   · [0.4, 0, 1, 1] is a strong ease-IN (slow start, fast end). For opacity,
+   278→//     this meant: opacity stayed near 1.0 for the first 40% of duration
+   279→//     (112ms), then crashed to 0 in the last 60%. Combined with the React
+   280→//     commit delay (~50ms), the user perceived ~160ms of "nothing happening"
+   281→//     followed by a sudden vanish — the "instant close" perception.
+   282→//   · Diagnostic measurement (worklog anim-refine-003) confirmed: settings
+   283→//     close captured only 4 frames over 348ms — well below the 12-frame
+   284→//     "perceived as animation" threshold — and one frame gap stretched to
+   285→//     112ms (8.9fps), which the brain reads as a "still image" not motion.
+   286→//
+   287→// FIX:
+   288→//   · Split per-property transitions so opacity can lead (fast fade from
+   289→//     frame 1) while scale/y provide the physical "departing" metaphor.
+   290→//   · Switch opacity to ease-OUT [0.16, 1, 0.3, 1] (snoozeOut): 70% of the
+   291→//     opacity drop happens in the first 30% of duration — the user sees the
+   292→//     modal becoming transparent IMMEDIATELY, no dead-time window.
+   293→//   · Keep scale/y on ease-IN [0.4, 0, 1, 1] but with a SHORTER duration
+   294→//     (0.20s vs 0.28s) so they finish before opacity completes — the panel
+   295→//     "shrinks + drops" first, then continues fading out as a ghost.
+   296→//   · Total perceived duration ~260ms, with visible motion starting at
+   297→//     frame 1 (vs ~frame 12 before).
+   298→// ─── Motion variants ───────────────────────────────────────────────────────
+   299→// Uses shared motion-tokens. Principle: EXIT = ENTER reversed (same target
+   300→// values as `hidden`, same spring physics). See motion-tokens.ts.
+   301→//
+   302→// `panelVariants` = panelMotion (spring, exit mirrors enter).
+   303→// `contentVariants` = slideMotion (direction-aware, exit slides opposite way).
+   304→// `hintVariants` = custom (exit = hidden values + same spring).
+   305→const panelVariants = panelMotion;
+   306→
+   307→const contentVariants = slideMotion;
+   308→
+   309→const hintVariants = {
+   310→  hidden: { opacity: 0, y: 6, scale: 0.99 },
+   311→  visible: {
+   312→    opacity: 1,
+   313→    y: 0,
+   314→    scale: 1,
+   315→    transition: MOTION.enterSnappy,
+   316→  },
+   317→  // Exit = hidden values + same spring. Reverse of enter.
+   318→  exit: {
+   319→    opacity: 0,
+   320→    y: 6,
+   321→    scale: 0.99,
+   322→    transition: MOTION.enterSnappy,
+   323→  },
+   324→};
+   325→
+   326→export function SettingsView() {
+   327→  const open = useLearningStore(s => s.settingsViewOpen);
+   328→  const setOpen = useLearningStore(s => s.setSettingsViewOpen);
+   329→  const [activeTab, setActiveTab] = useState<TabKey>('appearance');
+   330→  const [hovered, setHovered] = useState<string | null>(null);
+   331→
+   332→  // Track tab-switch direction so the content slide knows which way to push.
+   333→  // -1 = moving left (back in tab order), +1 = moving right (forward).
+   334→  const prevTabIdxRef = useRef(0);
+   335→  const [tabDir, setTabDir] = useState<1 | -1>(1);
+   336→  const switchTab = (next: TabKey) => {
+   337→    if (next === activeTab) return;
+   338→    const nextIdx = tabs.findIndex(t => t.key === next);
+   339→    setTabDir(nextIdx >= prevTabIdxRef.current ? 1 : -1);
+   340→    prevTabIdxRef.current = nextIdx;
+   341→    setActiveTab(next);
+   342→  };
+   343→
+   344→  // Close on Escape.
+   345→  React.useEffect(() => {
+   346→    if (!open) return;
+   347→    const onKey = (e: KeyboardEvent) => {
+   348→      if (e.key === 'Escape') setOpen(false);
+   349→    };
+   350→    document.addEventListener('keydown', onKey);
+   351→    return () => document.removeEventListener('keydown', onKey);
+   352→  }, [open, setOpen]);
+   353→
+   354→  // Reset hover when the panel closes / tab changes, so reopening doesn't show
+   355→  // a stale hint from a previous session. Also reset tab direction so a fresh
+   356→  // open always reads as "forward".
+   357→  React.useEffect(() => {
+   358→    if (!open) {
+   359→      setHovered(null);
+   360→      prevTabIdxRef.current = 0;
+   361→      setTabDir(1);
+   362→    }
+   363→  }, [open]);
+   364→  React.useEffect(() => {
+   365→    setHovered(null);
+   366→  }, [activeTab]);
+   367→
+   368→  return (
+   369→    <HintContext.Provider value={{ hovered, setHovered }}>
+   370→      <AnimatePresence>
+   371→        {open && (
+   372→          <>
+   373→            {/* Backdrop — solid dark overlay (no backdrop-blur: it caused a
+   374→                124ms main-thread stall on close, see worklog anim-refine-003).
+   375→                Symmetric enter/exit: same duration + ease so close mirrors open. */}
+   376→            <motion.div
+   377→              initial={{ opacity: 0 }}
+   378→              animate={{ opacity: 1, transition: MOTION.backdrop }}
+   379→              exit={{ opacity: 0, transition: MOTION.backdropExit }}
+   380→              className="fixed inset-0 z-[60] bg-black/55"
+   381→              onClick={() => setOpen(false)}
+   382→            />
+   383→
+   384→            {/* Card — centered, replicates the portfolio-card reference: one
+   385→                rounded container split left (nav + content) / right (preview). */}
+   386→            <motion.div
+   387→              variants={panelVariants}
+   388→              initial="hidden"
+   389→              animate="visible"
+   390→              exit="exit"
+   391→              role="dialog"
+   392→              aria-label="设置"
+   393→              className="fixed left-1/2 top-1/2 z-[61] flex h-[min(640px,90vh)] w-[min(1000px,94vw)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_24px_64px_-12px_rgba(0,0,0,0.22)] dark:border-neutral-700 dark:bg-neutral-900"
+   394→            >
+   395→              {/* ── Left: nav + content (≈58%) ── */}
+   396→              <div className="flex w-[58%] flex-col border-r border-neutral-200 dark:border-neutral-800">
+   397→                {/* Header — title row */}
+   398→                <div className="flex items-center justify-between px-6 pt-5 pb-3">
+   399→                  <div className="flex items-center gap-2">
+   400→                    <span className="font-serif text-[18px] font-medium tracking-tight text-neutral-900 dark:text-neutral-100">
+   401→                      设置
+   402→                    </span>
+   403→                    <span className="text-[11px] text-neutral-400 dark:text-neutral-500">· Settings</span>
+   404→                  </div>
+   405→                  {/* Close button — spring hover/tap. The previous version used
+   406→                      a CSS transition-transform which felt flat and had no
+   407→                      press feedback, the "exit function transition" issue the
+   408→                      user flagged. Now it has a tactile depress on click. */}
+   409→                  <motion.button
+   410→                    type="button"
+   411→                    onClick={() => setOpen(false)}
+   412→                    aria-label="关闭"
+   413→                    whileHover={{
+   414→                      scale: 1.1,
+   415→                      rotate: 90,
+   416→                      transition: { type: 'spring', stiffness: 320, damping: 18, mass: 0.6 },
+   417→                    }}
+   418→                    whileTap={{
+   419→                      scale: 0.88,
+   420→                      transition: { type: 'spring', stiffness: 700, damping: 28 },
+   421→                    }}
+   422→                    className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-200 text-white transition-colors hover:bg-neutral-300 dark:bg-neutral-700 dark:hover:bg-neutral-600"
+   423→                  >
+   424→                    <X className="h-3.5 w-3.5" strokeWidth={2.5} />
+   425→                  </motion.button>
+   426→                </div>
+   427→
+   428→                {/* Tab strip — pill-style. Selected tab gets a layoutId-backed
+   429→                    shared background that slides between tabs (a single
+   430→                    motion.span with layoutId='settings-tab-pill' lives inside
+   431→                    the selected button). This gives the "liquid follow" feel
+   432→                    the user asked about for the more-features panel, applied
+   433→                    here to the tab navigation. */}
+   434→                <div className="flex gap-1 px-6 pb-3">
+   435→                  {tabs.map(t => {
+   436→                    const selected = activeTab === t.key;
+   437→                    return (
+   438→                      <button
+   439→                        key={t.key}
+   440→                        type="button"
+   441→                        onClick={() => switchTab(t.key)}
+   442→                        className={`relative rounded-lg px-3.5 py-1.5 text-[12.5px] font-medium transition-colors duration-200 ${
+   443→                          selected
+   444→                            ? 'text-neutral-900 dark:text-neutral-100'
+   445→                            : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200'
+   446→                        }`}
+   447→                      >
+   448→                        {selected && (
+   449→                          <motion.span
+   450→                            layoutId="settings-tab-pill"
+   451→                            className="absolute inset-0 rounded-lg bg-neutral-100 dark:bg-neutral-800"
+   452→                            transition={{ type: 'spring', stiffness: 380, damping: 30, mass: 0.7 }}
+   453→                            style={{ zIndex: -1 }}
+   454→                          />
+   455→                        )}
+   456→                        <span className="relative z-10">{t.label}</span>
+   457→                      </button>
+   458→                    );
+   459→                  })}
+   460→                </div>
+   461→
+   462→                <div className="mx-6 h-px bg-neutral-100 dark:bg-neutral-800" />
+   463→
+   464→                {/* Content — scrollable. Direction-aware: the new tab slides in
+   465→                    from the direction the user clicked (right tab → enters
+   466→                    from the right; left tab → enters from the left). The exit
+   467→                    mirrors it so the old content leaves the opposite way. */}
+   468→                <div className="custom-scrollbar flex-1 overflow-y-auto px-6 py-5">
+   469→                  <AnimatePresence mode="wait" custom={tabDir}>
+   470→                    <motion.div
+   471→                      key={activeTab}
+   472→                      custom={tabDir}
+   473→                      variants={contentVariants}
+   474→                      initial="hidden"
+   475→                      animate="visible"
+   476→                      exit="exit"
+   477→                    >
+   478→                      {activeTab === 'appearance' && <AppearanceTab />}
+   479→                      {activeTab === 'layout' && <LayoutTab />}
+   480→                      {activeTab === 'palette' && <PaletteTab />}
+   481→                      {activeTab === 'about' && <AboutTab />}
+   482→                    </motion.div>
+   483→                  </AnimatePresence>
+   484→                </div>
+   485→              </div>
+   486→
+   487→              {/* ── Right: preview pane (≈42%) ── */}
+   488→              <SettingsPreview activeTab={activeTab} />
+   489→            </motion.div>
+   490→          </>
+   491→        )}
+   492→      </AnimatePresence>
+   493→    </HintContext.Provider>
+   494→  );
+   495→}
+   496→
+   497→// ─── Appearance Tab ────────────────────────────────────────────────────────
+   498→
+   499→function AppearanceTab() {
+   500→  const { theme, setTheme, resolvedTheme } = useTheme();
+   501→  const { motionEnabled, setMotionEnabled } = usePreferences();
+   502→  const { setHovered } = useHint();
+   503→  const mounted = useSyncExternalStore(emptySubscribe, getTrue, getFalse);
+   504→  const isDark = mounted && resolvedTheme === 'dark';
+   505→  const activeTheme = theme ?? (isDark ? 'dark' : 'light');
+   506→
+   507→  return (
+   508→    <div className="space-y-6">
+   509→      {/* Theme */}
+   510→      <section>
+   511→        <SectionLabel title="主题" hint="色彩模式" />
+   512→        <div className="flex gap-1 rounded-xl bg-neutral-100 p-1 dark:bg-neutral-800/80">
+   513→          {themeOptions.map(opt => {
+   514→            const selected = activeTheme === opt.value;
+   515→            const OptIcon = opt.icon;
+   516→            return (
+   517→              <button
+   518→                key={opt.value}
+   519→                type="button"
+   520→                onClick={() => setTheme(opt.value)}
+   521→                onMouseEnter={() => setHovered(`theme-${opt.value}`)}
+   522→                onMouseLeave={() => setHovered(null)}
+   523→                onFocus={() => setHovered(`theme-${opt.value}`)}
+   524→                onBlur={() => setHovered(null)}
+   525→                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[12.5px] font-medium transition-colors duration-200 ${
+   526→                  selected
+   527→                    ? 'bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-50'
+   528→                    : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200'
+   529→                }`}
+   530→              >
+   531→                <OptIcon className="h-3.5 w-3.5" />
+   532→                {opt.label}
+   533→              </button>
+   534→            );
+   535→          })}
+   536→        </div>
+   537→      </section>
+   538→
+   539→      {/* Motion */}
+   540→      <section>
+   541→        <SectionLabel title="动态效果" hint="动画与过渡" />
+   542→        <div
+   543→          onMouseEnter={() => setHovered(motionEnabled ? 'motion-on' : 'motion-off')}
+   544→          onMouseLeave={() => setHovered(null)}
+   545→          className="flex items-start justify-between gap-3 rounded-xl border border-neutral-200 px-4 py-3 transition-colors hover:border-neutral-300 dark:border-neutral-800 dark:hover:border-neutral-700"
+   546→        >
+   547→          <div className="min-w-0">
+   548→            <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-200">
+   549→              启用界面动画
+   550→            </p>
+   551→            <p className="mt-1 text-[11.5px] leading-relaxed text-neutral-400 dark:text-neutral-500">
+   552→              关闭后动画即时完成，减少视觉波动；尊重系统「减少动态效果」偏好
+   553→            </p>
+   554→          </div>
+   555→          <Toggle checked={motionEnabled} onChange={() => setMotionEnabled(!motionEnabled)} label="切换动态效果" />
+   556→        </div>
+   557→      </section>
+   558→    </div>
+   559→  );
+   560→}
+   561→
+   562→// ─── Layout Tab ────────────────────────────────────────────────────────────
+   563→
+   564→const layoutOptions = [
+   565→  { value: 'side' as const, label: '侧栏', icon: PanelLeft, desc: '侧边栏 + 主区域' },
+   566→  { value: 'half' as const, label: '分屏', icon: Columns2, desc: '侧边栏与内容分屏' },
+   567→  { value: 'full' as const, label: '全屏', icon: Maximize2, desc: '隐藏侧边栏，专注内容' },
+   568→];
+   569→
+   570→function LayoutTab() {
+   571→  const displayMode = useLearningStore(s => s.displayMode);
+   572→  const setDisplayMode = useLearningStore(s => s.setDisplayMode);
+   573→  const { setHovered } = useHint();
+   574→  return (
+   575→    <div className="space-y-5">
+   576→      <SectionLabel title="布局" hint="显示模式" />
+   577→      <div className="grid grid-cols-3 gap-3">
+   578→        {layoutOptions.map(opt => {
+   579→          const selected = displayMode === opt.value;
+   580→          const OptIcon = opt.icon;
+   581→          return (
+   582→            <button
+   583→              key={opt.value}
+   584→              type="button"
+   585→              onClick={() => setDisplayMode(opt.value)}
+   586→              onMouseEnter={() => setHovered(`layout-${opt.value}`)}
+   587→              onMouseLeave={() => setHovered(null)}
+   588→              onFocus={() => setHovered(`layout-${opt.value}`)}
+   589→              onBlur={() => setHovered(null)}
+   590→              className={`flex aspect-square flex-col items-center justify-center gap-1.5 rounded-xl border transition-all duration-200 ${
+   591→                selected
+   592→                  ? 'border-neutral-900 bg-white shadow-sm dark:border-neutral-200 dark:bg-neutral-800'
+   593→                  : 'border-neutral-200 bg-white hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700'
+   594→              }`}
+   595→            >
+   596→              <OptIcon
+   597→                className={`h-5 w-5 transition-colors ${
+   598→                  selected ? 'text-neutral-900 dark:text-neutral-100' : 'text-neutral-400 dark:text-neutral-500'
+   599→                }`}
+   600→              />
+   601→              <span
+   602→                className={`text-[11.5px] font-medium leading-none transition-colors ${
+   603→                  selected ? 'text-neutral-900 dark:text-neutral-100' : 'text-neutral-500 dark:text-neutral-400'
+   604→                }`}
+   605→              >
+   606→                {opt.label}
+   607→              </span>
+   608→            </button>
+   609→          );
+   610→        })}
+   611→      </div>
+   612→      <p className="text-[11.5px] leading-relaxed text-neutral-400 dark:text-neutral-500">
+   613→        {layoutOptions.find(o => o.value === displayMode)?.desc}
+   614→      </p>
+   615→    </div>
+   616→  );
+   617→}
+   618→
+   619→// ─── Palette Tab (image → accent extraction) ──────────────────────────────
+   620→
+   621→function PaletteTab() {
+   622→  const { accentColor, setAccentColor } = usePreferences();
+   623→  const { setHovered } = useHint();
+   624→  const fileRef = useRef<HTMLInputElement>(null);
+   625→  const [extracting, setExtracting] = useState(false);
+   626→  const [preview, setPreview] = useState<ExtractedColor | null>(null);
+   627→  const [error, setError] = useState<string | null>(null);
+   628→  const [thumb, setThumb] = useState<string | null>(null);
+   629→
+   630→  const hasAccent = Boolean(accentColor);
+   631→
+   632→  const handleFile = useCallback(
+   633→    async (file: File) => {
+   634→      setError(null);
+   635→      if (!file.type.startsWith('image/')) {
+   636→        setError('请选择图片文件');
+   637→        return;
+   638→      }
+   639→      setExtracting(true);
+   640→      // Show a thumbnail of the picked image while we compute the color.
+   641→      const url = URL.createObjectURL(file);
+   642→      setThumb(url);
+   643→      try {
+   644→        const color = await extractDominantColor(file);
+   645→        if (!color) {
+   646→          setError('未能从图片中提取到合适的颜色，请换一张试试');
+   647→          setPreview(null);
+   648→        } else {
+   649→          setPreview(color);
+   650→        }
+   651→      } catch {
+   652→        setError('图片解析失败');
+   653→        setPreview(null);
+   654→      } finally {
+   655→        setExtracting(false);
+   656→      }
+   657→    },
+   658→    [],
+   659→  );
+   660→
+   661→  const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
+   662→    const f = e.target.files?.[0];
+   663→    if (f) handleFile(f);
+   664→    e.target.value = '';
+   665→  };
+   666→
+   667→  const onDrop = (e: React.DragEvent) => {
+   668→    e.preventDefault();
+   669→    const f = e.dataTransfer.files?.[0];
+   670→    if (f) handleFile(f);
+   671→  };
+   672→
+   673→  const apply = () => {
+   674→    if (preview) {
+   675→      setAccentColor(preview.hex);
+   676→    }
+   677→  };
+   678→
+   679→  const reset = () => {
+   680→    setAccentColor(null);
+   681→    setPreview(null);
+   682→    setThumb(null);
+   683→    setError(null);
+   684→  };
+   685→
+   686→  return (
+   687→    <div className="space-y-5">
+   688→      <SectionLabel title="配色" hint="从图片提取主题色" />
+   689→
+   690→      <div
+   691→        onDragOver={e => e.preventDefault()}
+   692→        onDrop={onDrop}
+   693→        onMouseEnter={() => setHovered('palette-upload')}
+   694→        onMouseLeave={() => setHovered(null)}
+   695→        className="relative overflow-hidden rounded-xl border border-dashed border-neutral-300 bg-neutral-50 px-4 py-6 text-center transition-colors hover:border-neutral-400 hover:bg-neutral-100/60 dark:border-neutral-700 dark:bg-neutral-800/40 dark:hover:border-neutral-600 dark:hover:bg-neutral-800/60"
+   696→      >
+   697→        {thumb ? (
+   698→          <div className="flex items-center justify-center gap-3">
+   699→            <img
+   700→              src={thumb}
+   701→              alt="所选图片"
+   702→              className="h-12 w-12 rounded-lg object-cover ring-1 ring-neutral-200 dark:ring-neutral-700"
+   703→            />
+   704→            <div className="text-left">
+   705→              <p className="text-[12.5px] font-medium text-neutral-700 dark:text-neutral-200">
+   706→                {extracting ? '正在分析像素…' : '已选取图片'}
+   707→              </p>
+   708→              <p className="text-[11px] text-neutral-400 dark:text-neutral-500">
+   709→                点击重新选择 · 或拖入新图片
+   710→              </p>
+   711→            </div>
+   712→          </div>
+   713→        ) : (
+   714→          <>
+   715→            <Upload className="mx-auto mb-2 h-5 w-5 text-neutral-400" />
+   716→            <p className="text-[12.5px] text-neutral-600 dark:text-neutral-300">
+   717→              拖入图片，或
+   718→              <button
+   719→                type="button"
+   720→                onClick={() => fileRef.current?.click()}
+   721→                className="ml-1 font-medium text-neutral-900 underline-offset-2 hover:underline dark:text-neutral-100"
+   722→              >
+   723→                点击选择
+   724→              </button>
+   725→            </p>
+   726→            <p className="mt-1 text-[11px] text-neutral-400 dark:text-neutral-500">
+   727→              智能算法提取主色调，应用到界面品牌元素
+   728→            </p>
+   729→          </>
+   730→        )}
+   731→        <input
+   732→          ref={fileRef}
+   733→          type="file"
+   734→          accept="image/*"
+   735→          onChange={onPick}
+   736→          className="hidden"
+   737→        />
+   738→      </div>
+   739→
+   740→      {/* Extracted swatch */}
+   741→      <AnimatePresence>
+   742→        {preview && (
+   743→          <motion.div
+   744→            initial={{ opacity: 0, y: 6 }}
+   745→            animate={{ opacity: 1, y: 0, transition: MOTION.enter }}
+   746→            exit={{ opacity: 0, y: 6, transition: MOTION.enter }}
+   747→            className="flex items-center gap-3 rounded-xl border border-neutral-200 px-4 py-3 dark:border-neutral-800"
+   748→          >
+   749→            <div
+   750→              className="h-10 w-10 shrink-0 rounded-lg shadow-inner"
+   751→              style={{ backgroundColor: preview.hex }}
+   752→            />
+   753→            <div className="min-w-0 flex-1">
+   754→              <p className="text-[12.5px] font-medium text-neutral-700 dark:text-neutral-200">
+   755→                提取到的主色
+   756→              </p>
+   757→              <p className="text-[11px] uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+   758→                {preview.hex}
+   759→              </p>
+   760→            </div>
+   761→            <button
+   762→              type="button"
+   763→              onClick={apply}
+   764→              className="flex items-center gap-1 rounded-lg bg-neutral-900 px-3 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200"
+   765→            >
+   766→              <Check className="h-3.5 w-3.5" />
+   767→              应用
+   768→            </button>
+   769→          </motion.div>
+   770→        )}
+   771→      </AnimatePresence>
+   772→
+   773→      {error && (
+   774→        <p className="text-[11.5px] text-red-500 dark:text-red-400">{error}</p>
+   775→      )}
+   776→
+   777→      {/* Current accent + reset */}
+   778→      <div
+   779→        onMouseEnter={() => hasAccent && setHovered('palette-reset')}
+   780→        onMouseLeave={() => setHovered(null)}
+   781→        className="flex items-center justify-between rounded-xl border border-neutral-200 px-4 py-3 transition-colors hover:border-neutral-300 dark:border-neutral-800 dark:hover:border-neutral-700"
+   782→      >
+   783→        <div className="flex items-center gap-2.5">
+   784→          <div
+   785→            className="h-6 w-6 rounded-md ring-1 ring-neutral-200 dark:ring-neutral-700"
+   786→            style={{ backgroundColor: accentColor ?? 'var(--brand)' }}
+   787→          />
+   788→          <div>
+   789→            <p className="text-[12.5px] font-medium text-neutral-700 dark:text-neutral-200">
+   790→              {hasAccent ? '当前主题色' : '默认中性配色'}
+   791→            </p>
+   792→            <p className="text-[11px] text-neutral-400 dark:text-neutral-500">
+   793→              {hasAccent ? accentColor : '未自定义 · 点击应用提取色'}
+   794→            </p>
+   795→          </div>
+   796→        </div>
+   797→        {hasAccent && (
+   798→          <button
+   799→            type="button"
+   800→            onClick={reset}
+   801→            className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[12px] text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+   802→          >
+   803→            <RotateCcw className="h-3.5 w-3.5" />
+   804→            重置
+   805→          </button>
+   806→        )}
+   807→      </div>
+   808→    </div>
+   809→  );
+   810→}
+   811→
+   812→// ─── About Tab ─────────────────────────────────────────────────────────────
+   813→
+   814→function AboutTab() {
+   815→  const { setHovered } = useHint();
+   816→  const rows: { k: string; v: string; hint: string }[] = [
+   817→    { k: '版本', v: 'v1.2.0', hint: 'about-version' },
+   818→    { k: '框架', v: 'Next.js 16 · TypeScript', hint: 'about-stack' },
+   819→    { k: '主题色', v: '可自定义 · 见「配色」', hint: 'about-accent' },
+   820→  ];
+   821→  return (
+   822→    <div className="space-y-5">
+   823→      <SectionLabel title="关于" hint="MindGuide" />
+   824→      <div className="rounded-xl border border-neutral-200 px-4 py-4 dark:border-neutral-800">
+   825→        <div className="flex items-center gap-2.5">
+   826→          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--brand)] text-[var(--brand-foreground)]">
+   827→            <GraduationCap className="h-5 w-5" strokeWidth={1.6} />
+   828→          </div>
+   829→          <div>
+   830→            <p className="font-serif text-[15px] font-medium tracking-tight text-neutral-900 dark:text-neutral-100">
+   831→              MindGuide
+   832→            </p>
+   833→            <p className="text-[11px] text-neutral-400 dark:text-neutral-500">AI 对话式学习平台</p>
+   834→          </div>
+   835→        </div>
+   836→        <p className="mt-3 text-[12px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+   837→          输入学习主题，AI 以苏格拉底式追问引导你主动建构知识；自动生成结构化课程、知识图谱与间隔重复卡片。
+   838→        </p>
+   839→      </div>
+   840→      <div className="space-y-1.5">
+   841→        {rows.map(r => (
+   842→          <div
+   843→            key={r.k}
+   844→            onMouseEnter={() => setHovered(r.hint)}
+   845→            onMouseLeave={() => setHovered(null)}
+   846→            className="flex items-center justify-between rounded-lg px-3 py-2 text-[12px] text-neutral-500 transition-colors hover:bg-neutral-50 dark:text-neutral-400 dark:hover:bg-neutral-800/50"
+   847→          >
+   848→            <span>{r.k}</span>
+   849→            <span className="text-neutral-700 dark:text-neutral-300">{r.v}</span>
+   850→          </div>
+   851→        ))}
+   852→      </div>
+   853→    </div>
+   854→  );
+   855→}
+   856→
+   857→// ─── Right Preview Pane ────────────────────────────────────────────────────
+   858→// The creative core. Two layers of retargeting:
+   859→//   1. active tab → a default hint for that tab (shown when nothing hovered)
+   860→//   2. hovered sub-item → that item's hint, cross-faded in
+   861→// The hint content follows the portfolio-card reference structure: a kicker, a
+   862→// serif title, a "Currently" bullet list, an optional note, plus a small demo
+   863→// widget that reflects the hint's domain (theme swatch / motion pulse / layout
+   864→// mock / palette flow). A brand mark stays pinned ~1/4 from the top-right.
+   865→
+   866→function SettingsPreview({ activeTab }: { activeTab: TabKey }) {
+   867→  const { hovered } = useHint();
+   868→  const { accentColor } = usePreferences();
+   869→  const { resolvedTheme } = useTheme();
+   870→  const mounted = useSyncExternalStore(emptySubscribe, getTrue, getFalse);
+   871→  const isDark = mounted && resolvedTheme === 'dark';
+   872→
+   873→  // Hovered wins; fall back to the active tab's default hint.
+   874→  const fallbackId = `tab-${activeTab}` as const;
+   875→  const activeId = hovered ?? fallbackId;
+   876→  const hint = hintMap[activeId] ?? hintMap[fallbackId];
+   877→  const DemoIcon = hint.icon ?? GraduationCap;
+   878→
+   879→  return (
+   880→    <div className="relative flex w-[42%] flex-col bg-neutral-50 dark:bg-neutral-950/40">
+   881→      {/* Demo mark — pinned ~1/4 from the top, right-aligned. Its bg is the
+   882→          live brand accent, so 配色 changes are visible here instantly. The
+   883→          icon swaps to match the current hint (Sun/Moon/Zap/…). */}
+   884→      <div className="flex justify-end px-6 pt-12">
+   885→        <motion.div
+   886→          layout
+   887→          className="flex h-14 w-14 items-center justify-center rounded-2xl shadow-sm ring-1 ring-black/5"
+   888→          style={{ backgroundColor: 'var(--brand)', color: 'var(--brand-foreground)' }}
+   889→        >
+   890→          <AnimatePresence mode="wait">
+   891→            <motion.span
+   892→              key={(hint.icon as { displayName?: string } | undefined)?.displayName ?? 'default'}
+   893→              initial={{ opacity: 0, scale: 0.8 }}
+   894→              animate={{ opacity: 1, scale: 1, transition: MOTION.enterSnappy }}
+   895→              exit={{ opacity: 0, scale: 0.8, transition: MOTION.enterSnappy }}
+   896→            >
+   897→              <DemoIcon className="h-7 w-7" strokeWidth={1.6} />
+   898→            </motion.span>
+   899→          </AnimatePresence>
+   900→        </motion.div>
+   901→      </div>
+   902→
+   903→      {/* Structured hint content — cross-fades when the hovered item changes. */}
+   904→      <div className="custom-scrollbar flex-1 overflow-y-auto px-6 pt-6 pb-4">
+   905→        <AnimatePresence mode="wait">
+   906→          <motion.div
+   907→            key={activeId}
+   908→            variants={hintVariants}
+   909→            initial="hidden"
+   910→            animate="visible"
+   911→            exit="exit"
+   912→          >
+   913→            <p className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-neutral-400 dark:text-neutral-600">
+   914→              {hint.kicker}
+   915→            </p>
+   916→            <h3 className="mt-1.5 font-serif text-[20px] font-medium tracking-tight text-neutral-800 dark:text-neutral-100">
+   917→              {hint.title}
+   918→            </h3>
+   919→            <p className="mt-1 text-[12px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+   920→              {hint.subtitle}
+   921→            </p>
+   922→
+   923→            {/* Currently — the reference image's signature bulleted list. */}
+   924→            <div className="mt-5">
+   925→              <p className="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-neutral-400 dark:text-neutral-600">
+   926→                Currently
+   927→              </p>
+   928→              <ul className="space-y-1.5">
+   929→                {hint.currently.map((c, i) => (
+   930→                  <motion.li
+   931→                    key={c}
+   932→                    initial={{ opacity: 0, x: -6 }}
+   933→                    animate={{ opacity: 1, x: 0 }}
+   934→                    transition={{ delay: 0.05 + i * 0.05, duration: 0.2 }}
+   935→                    className="flex items-start gap-2 text-[12px] leading-relaxed text-neutral-600 dark:text-neutral-300"
+   936→                  >
+   937→                    <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-[var(--brand)]" />
+   938→                    <span>{c}</span>
+   939→                  </motion.li>
+   940→                ))}
+   941→              </ul>
+   942→            </div>
+   943→
+   944→            {/* Note — the "previously" paragraph. */}
+   945→            {hint.note && (
+   946→              <div className="mt-5">
+   947→                <p className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-neutral-400 dark:text-neutral-600">
+   948→                  Note
+   949→                </p>
+   950→                <p className="text-[11.5px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+   951→                  {hint.note}
+   952→                </p>
+   953→              </div>
+   954→            )}
+   955→          </motion.div>
+   956→        </AnimatePresence>
+   957→      </div>
+   958→
+   959→      {/* Mini demo widget — domain-specific, reflects the hint's demo kind. */}
+   960→      <div className="px-6 pb-6">
+   961→        <HintDemo kind={hint.demo} accent={accentColor} isDark={isDark} />
+   962→      </div>
+   963→
+   964→      {/* Watermark icon — a faint Palette mark in the bottom-left for visual
+   965→          balance with the top-right demo mark. */}
+   966→      <Palette className="pointer-events-none absolute bottom-5 left-5 h-4 w-4 text-neutral-200 dark:text-neutral-800" />
+   967→    </div>
+   968→  );
+   969→}
+   970→
+   971→// ─── Hint demo widgets ─────────────────────────────────────────────────────
+   972→// A small, domain-specific visualization that anchors the abstract hint text.
+   973→// Each kind renders a different tiny scene so the right pane feels alive and
+   974→// relevant to whatever the user is hovering.
+   975→
+   976→function HintDemo({
+   977→  kind,
+   978→  accent,
+   979→  isDark,
+   980→}: {
+   981→  kind: DemoKind;
+   982→  accent: string | null;
+   983→  isDark: boolean;
+   984→}) {
+   985→  return (
+   986→    <div className="rounded-xl border border-neutral-200 bg-white p-3.5 dark:border-neutral-800 dark:bg-neutral-900">
+   987→      <AnimatePresence mode="wait">
+   988→        <motion.div
+   989→          key={kind}
+   990→          initial={{ opacity: 0, y: 6 }}
+   991→          animate={{ opacity: 1, y: 0, transition: MOTION.enterSnappy }}
+   992→          exit={{ opacity: 0, y: 6, transition: MOTION.enterSnappy }}
+   993→        >
+   994→          {kind === 'theme-swatch' && <ThemeSwatchDemo isDark={isDark} />}
+   995→          {kind === 'motion' && <MotionDemo />}
+   996→          {kind === 'layout-mock' && <LayoutMockDemo />}
+   997→          {kind === 'palette-flow' && <PaletteFlowDemo accent={accent} />}
+   998→          {kind === 'about-card' && <AboutCardDemo />}
+   999→        </motion.div>
+  1000→      </AnimatePresence>
+  1001→    </div>
+  1002→  );
+  1003→}
+  1004→
+  1005→function ThemeSwatchDemo({ isDark }: { isDark: boolean }) {
+  1006→  // Three tiles: light / dark / the active one — shows the contrast the user
+  1007→  // is choosing between.
+  1008→  const tiles = [
+  1009→    { label: '浅色', bg: '#ffffff', fg: '#0a0a0a', active: !isDark },
+  1010→    { label: '深色', bg: '#171717', fg: '#fafafa', active: isDark },
+  1011→  ];
+  1012→  return (
+  1013→    <div>
+  1014→      <p className="mb-2 text-[10px] uppercase tracking-[0.14em] text-neutral-400 dark:text-neutral-600">
+  1015→        对比
+  1016→      </p>
+  1017→      <div className="grid grid-cols-2 gap-2">
+  1018→        {tiles.map(t => (
+  1019→          <div
+  1020→            key={t.label}
+  1021→            className={`flex h-12 items-center justify-between rounded-lg px-2.5 ring-1 transition-all ${
+  1022→              t.active ? 'ring-neutral-900 dark:ring-neutral-200' : 'ring-neutral-200 dark:ring-neutral-800'
+  1023→            }`}
+  1024→            style={{ backgroundColor: t.bg, color: t.fg }}
+  1025→          >
+  1026→            <span className="text-[10px] font-medium">{t.label}</span>
+  1027→            <span className="h-1.5 w-6 rounded-full" style={{ backgroundColor: t.fg, opacity: 0.5 }} />
+  1028→          </div>
+  1029→        ))}
+  1030→      </div>
+  1031→    </div>
+  1032→  );
+  1033→}
+  1034→
+  1035→function MotionDemo() {
+  1036→  // Two rows: "动画" shows a traveling dot that loops; "静态" shows a fixed
+  1037→  // dot. Makes the on/off difference tangible.
+  1038→  return (
+  1039→    <div>
+  1040→      <p className="mb-2 text-[10px] uppercase tracking-[0.14em] text-neutral-400 dark:text-neutral-600">
+  1041→        动效示意
+  1042→      </p>
+  1043→      <div className="space-y-2">
+  1044→        <div className="flex items-center gap-2">
+  1045→          <span className="w-10 text-[10px] text-neutral-400">动画</span>
+  1046→          <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
+  1047→            <motion.div
+  1048→              className="absolute top-0 h-2 w-2 rounded-full bg-[var(--brand)]"
+  1049→              animate={{ left: ['0%', 'calc(100% - 8px)', '0%'] }}
+  1050→              transition={{ repeat: Infinity, duration: 2.4, ease: 'easeInOut' }}
+  1051→            />
+  1052→          </div>
+  1053→        </div>
+  1054→        <div className="flex items-center gap-2">
+  1055→          <span className="w-10 text-[10px] text-neutral-400">静态</span>
+  1056→          <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
+  1057→            <div className="absolute top-0 left-0 h-2 w-2 rounded-full bg-neutral-400 dark:bg-neutral-600" />
+  1058→          </div>
+  1059→        </div>
+  1060→      </div>
+  1061→    </div>
+  1062→  );
+  1063→}
+  1064→
+  1065→function LayoutMockDemo() {
+  1066→  // Three tiny wireframes: side / half / full, drawn with divs. The active
+  1067→  // one (inferred from store) gets a brand ring — but to keep this widget
+  1068→  // self-contained we just show all three as static illustrations.
+  1069→  const mocks = [
+  1070→    { label: '侧栏', els: [<aside key="s" className="mr-1 h-full w-1/4 rounded bg-neutral-200 dark:bg-neutral-700" />, <div key="c" className="h-full flex-1 rounded bg-neutral-100 dark:bg-neutral-800" />] },
+  1071→    { label: '分屏', els: [<aside key="h" className="mr-1 h-full w-1/3 rounded bg-neutral-200 dark:bg-neutral-700" />, <div key="c" className="h-full flex-1 rounded bg-neutral-100 dark:bg-neutral-800" />] },
+  1072→    { label: '全屏', els: [<div key="f" className="h-full w-full rounded bg-neutral-100 dark:bg-neutral-800" />] },
+  1073→  ];
+  1074→  return (
+  1075→    <div>
+  1076→      <p className="mb-2 text-[10px] uppercase tracking-[0.14em] text-neutral-400 dark:text-neutral-600">
+  1077→        布局示意
+  1078→      </p>
+  1079→      <div className="grid grid-cols-3 gap-2">
+  1080→        {mocks.map(m => (
+  1081→          <div key={m.label}>
+  1082→            <div className="flex h-10 rounded-md border border-neutral-200 p-1 dark:border-neutral-700">
+  1083→              {m.els}
+  1084→            </div>
+  1085→            <p className="mt-1 text-center text-[9.5px] text-neutral-400 dark:text-neutral-600">{m.label}</p>
+  1086→          </div>
+  1087→        ))}
+  1088→      </div>
+  1089→    </div>
+  1090→  );
+  1091→}
+  1092→
+  1093→function PaletteFlowDemo({ accent }: { accent: string | null }) {
+  1094→  // A 3-step flow: 图片 → 提取 → 应用, with the accent tile showing the live
+  1095→  // chosen color (or "—" for the neutral default).
+  1096→  return (
+  1097→    <div>
+  1098→      <p className="mb-2 text-[10px] uppercase tracking-[0.14em] text-neutral-400 dark:text-neutral-600">
+  1099→        取色流程
+  1100→      </p>
+  1101→      <div className="flex items-center gap-1.5">
+  1102→        <div className="flex flex-1 flex-col items-center gap-1">
+  1103→          <div className="flex h-9 w-full items-center justify-center rounded-md border border-neutral-200 dark:border-neutral-700">
+  1104→            <ImageIcon className="h-4 w-4 text-neutral-400" />
+  1105→          </div>
+  1106→          <span className="text-[9.5px] text-neutral-400">图片</span>
+  1107→        </div>
+  1108→        <span className="text-neutral-300 dark:text-neutral-700">→</span>
+  1109→        <div className="flex flex-1 flex-col items-center gap-1">
+  1110→          <div className="flex h-9 w-full items-center justify-center rounded-md border border-neutral-200 dark:border-neutral-700">
+  1111→            <Sparkles className="h-4 w-4 text-neutral-400" />
+  1112→          </div>
+  1113→          <span className="text-[9.5px] text-neutral-400">提取</span>
+  1114→        </div>
+  1115→        <span className="text-neutral-300 dark:text-neutral-700">→</span>
+  1116→        <div className="flex flex-1 flex-col items-center gap-1">
+  1117→          <div
+  1118→            className="flex h-9 w-full items-center justify-center rounded-md ring-1 ring-neutral-200 dark:ring-neutral-700"
+  1119→            style={{ backgroundColor: accent ?? 'var(--brand)' }}
+  1120→          >
+  1121→            <span className="text-[9px] font-medium" style={{ color: 'var(--brand-foreground)' }}>
+  1122→              {accent ? '✓' : '—'}
+  1123→            </span>
+  1124→          </div>
+  1125→          <span className="text-[9.5px] text-neutral-400">应用</span>
+  1126→        </div>
+  1127→      </div>
+  1128→    </div>
+  1129→  );
+  1130→}
+  1131→
+  1132→function AboutCardDemo() {
+  1133→  return (
+  1134→    <div>
+  1135→      <p className="mb-2 text-[10px] uppercase tracking-[0.14em] text-neutral-400 dark:text-neutral-600">
+  1136→        技术栈
+  1137→      </p>
+  1138→      <div className="flex flex-wrap gap-1.5">
+  1139→        {['Next.js 16', 'TypeScript', 'Tailwind 4', 'Prisma', 'Tiptap', 'z-ai-sdk'].map(t => (
+  1140→          <span
+  1141→            key={t}
+  1142→            className="rounded-md border border-neutral-200 bg-neutral-50 px-2 py-0.5 text-[10px] text-neutral-500 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-400"
+  1143→          >
+  1144→            {t}
+  1145→          </span>
+  1146→        ))}
+  1147→      </div>
+  1148→    </div>
+  1149→  );
+  1150→}
+  1151→
+  1152→// ─── Shared bits ───────────────────────────────────────────────────────────
+  1153→
+  1154→function SectionLabel({ title, hint }: { title: string; hint: string }) {
+  1155→  return (
+  1156→    <div className="mb-2.5 flex items-center gap-1.5">
+  1157→      <span className="text-[13px] font-medium text-neutral-700 dark:text-neutral-200">{title}</span>
+  1158→      <span className="text-[11px] text-neutral-400 dark:text-neutral-500">· {hint}</span>
+  1159→    </div>
+  1160→  );
+  1161→}
+  1162→
+  1163→function Toggle({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) {
+  1164→  return (
+  1165→    <button
+  1166→      type="button"
+  1167→      role="switch"
+  1168→      aria-checked={checked}
+  1169→      aria-label={label}
+  1170→      onClick={onChange}
+  1171→      className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${
+  1172→        checked ? 'bg-neutral-900 dark:bg-neutral-100' : 'bg-neutral-200 dark:bg-neutral-700'
+  1173→      }`}
+  1174→    >
+  1175→      <span
+  1176→        className={`absolute top-0.5 h-4 w-4 rounded-full shadow-sm transition-transform duration-200 ${
+  1177→          checked ? 'translate-x-4 bg-white dark:bg-neutral-900' : 'translate-x-0.5 bg-white dark:bg-neutral-300'
+  1178→        }`}
+  1179→      />
+  1180→    </button>
+  1181→  );
+  1182→}
+  1183→

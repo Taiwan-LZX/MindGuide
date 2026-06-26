@@ -1,0 +1,930 @@
+     1→'use client';
+     2→
+     3→import React, { useState, useRef, useEffect, useCallback } from 'react';
+     4→import { motion, AnimatePresence } from 'framer-motion';
+     5→import { MoreVertical, BookOpen, GraduationCap, ArrowDown, Copy, Check, RefreshCw, Compass, Dumbbell, RotateCw, AlertCircle, X } from 'lucide-react';
+     6→import { MOTION } from '@/lib/motion-tokens';
+     7→import { useLearningStore } from '@/store/learning-store';
+     8→import { KnowledgeInline } from '@/components/learning/knowledge-inline';
+     9→import { MarkdownRenderer } from '@/components/learning/markdown-renderer';
+    10→import { MouseFollowTooltip } from '@/components/learning/mouse-follow-tooltip';
+    11→import { ChatComposer } from '@/components/learning/chat-composer';
+    12→
+    13→// ─── Helpers ──────────────────────────────────────────────────────────────────
+    14→
+    15→function fmtDate(d: string) {
+    16→  const now = new Date();
+    17→  const date = new Date(d);
+    18→  if (date.toDateString() === now.toDateString()) return '今天';
+    19→  const y = new Date(now); y.setDate(y.getDate() - 1);
+    20→  if (date.toDateString() === y.toDateString()) return '昨天';
+    21→  return date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' });
+    22→}
+    23→
+    24→// ─── Empty-state example questions (P10) ────────────────────────────────────
+    25→//
+    26→// Each example is tagged with the teaching mode it exercises, so the chip's
+    27→// icon doubles as a mode-teaching affordance — the user learns "引导模式 =
+    28→// Compass icon" by seeing it on a question they understand. The questions
+    29→// are deliberately short and concrete (not "Ask me anything!") so the user
+    30→// can imagine answering them.
+    31→const EXAMPLE_QUESTIONS: Array<{ text: string; mode: 'guide' | 'explain' | 'practice' | 'review' }> = [
+    32→  { text: '引导我理解贝叶斯定理', mode: 'guide' },
+    33→  { text: '讲解一下梯度下降', mode: 'explain' },
+    34→  { text: '出三道链表练习题', mode: 'practice' },
+    35→  { text: '复习昨天学的概念', mode: 'review' },
+    36→];
+    37→
+    38→// ─── Animation Variants ─────────────────────────────────────────────────────
+    39→//
+    40→// Tactile ("手感") tuning:
+    41→//  - Message bubbles enter with a soft spring (stiffness 320, damping 30,
+    42→//    mass 0.7) so they "settle" into place — feels physical, not snapped.
+    43→//  - Date separators use a tiny spring scale-in for a quieter, more
+    44→//    deliberate beat between message groups.
+    45→//  - Streaming bubble + empty state + knowledge panel all switch from
+    46→//    linear duration easing to spring physics so the whole chat surface
+    47→//    shares one physical metaphor.
+    48→//  - Welcome cascade uses longer springs (mass 0.9, damping 26) for a
+    49→//    ceremonial, unhurried entrance.
+    50→
+    51→const msgVariants = {
+    52→  hidden: { opacity: 0, y: 10 },
+    53→  visible: {
+    54→    opacity: 1,
+    55→    y: 0,
+    56→    transition: { type: 'spring' as const, stiffness: 320, damping: 30, mass: 0.7 },
+    57→  },
+    58→};
+    59→
+    60→const dateSepVariants = {
+    61→  hidden: { opacity: 0, scale: 0.92 },
+    62→  visible: {
+    63→    opacity: 1,
+    64→    scale: 1,
+    65→    transition: { type: 'spring' as const, stiffness: 380, damping: 28, mass: 0.6 },
+    66→  },
+    67→};
+    68→
+    69→const streamingBubbleVariants = {
+    70→  hidden: { opacity: 0, y: 8 },
+    71→  visible: {
+    72→    opacity: 1,
+    73→    y: 0,
+    74→    transition: { type: 'spring' as const, stiffness: 320, damping: 28, mass: 0.7 },
+    75→  },
+    76→  // EXIT = ENTER reversed: same target (hidden) + same spring. Symmetric.
+    77→  exit: {
+    78→    opacity: 0,
+    79→    y: 10,
+    80→    transition: MOTION.enter,
+    81→  },
+    82→};
+    83→
+    84→const emptyStateVariants = {
+    85→  hidden: { opacity: 0, y: 10 },
+    86→  visible: {
+    87→    opacity: 1,
+    88→    y: 0,
+    89→    transition: { delay: 0.15, type: 'spring' as const, stiffness: 260, damping: 26, mass: 0.9 },
+    90→  },
+    91→  exit: {
+    92→    opacity: 0,
+    93→    y: -8,
+    94→    transition: { duration: 0.2, ease: [0.4, 0, 0.6, 1] as const },
+    95→  },
+    96→};
+    97→
+    98→const knowledgeVariants = {
+    99→  hidden: { opacity: 0, y: 16, scale: 0.98 },
+   100→  visible: {
+   101→    opacity: 1,
+   102→    y: 0,
+   103→    scale: 1,
+   104→    transition: { type: 'spring' as const, stiffness: 240, damping: 26, mass: 0.9 },
+   105→  },
+   106→};
+   107→
+   108→// ─── Component ───────────────────────────────────────────────────────────────
+   109→
+   110→export function MainContent() {
+   111→  const {
+   112→    currentSessionId,
+   113→    sessions,
+   114→    messages,
+   115→    isLoadingMessages,
+   116→    isStreaming,
+   117→    streamingContent,
+   118→    streamingPhase,
+   119→    lastStreamError,
+   120→    knowledgeNodes,
+   121→    sendMessage,
+   122→    regenerateLastMessage,
+   123→    setCoursePanelOpen,
+   124→    coursePanelOpen,
+   125→    isCourseGenerated,
+   126→  } = useLearningStore();
+   127→  const thinkingMode = useLearningStore(s => s.thinkingMode);
+   128→
+   129→  const [input, setInput] = useState('');
+   130→  const [showScrollBottom, setShowScrollBottom] = useState(false);
+   131→  const [composerVisible, setComposerVisible] = useState(true);
+   132→  const bottomRef = useRef<HTMLDivElement>(null);
+   133→  const scrollContainerRef = useRef<HTMLDivElement>(null);
+   134→  const lastScrollTopRef = useRef(0);
+   135→
+   136→  const session = sessions.find(s => s.id === currentSessionId);
+   137→
+   138→  // Scroll to bottom
+   139→  useEffect(() => {
+   140→    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+   141→  }, [messages, streamingContent]);
+   142→
+   143→  // Scroll-driven composer visibility — the composer floats above the thread
+   144→  // and auto-hides (slides down + fades) while the user scrolls DOWN to read
+   145→  // older messages, then pops back up the instant they scroll UP. Near the
+   146→  // bottom it stays pinned open so the user can always reply without fighting
+   147→  // the UI. Streaming + unsent draft text also pin it open.
+   148→  const handleScroll = useCallback(() => {
+   149→    const el = scrollContainerRef.current;
+   150→    if (!el) return;
+   151→    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+   152→    const delta = el.scrollTop - lastScrollTopRef.current;
+   153→
+   154→    if (distFromBottom < 72) {
+   155→      setComposerVisible(true);
+   156→    } else if (delta > 6) {
+   157→      setComposerVisible(false);
+   158→    } else if (delta < -6) {
+   159→      setComposerVisible(true);
+   160→    }
+   161→
+   162→    lastScrollTopRef.current = el.scrollTop;
+   163→    setShowScrollBottom(distFromBottom > 200);
+   164→  }, []);
+   165→
+   166→  // The composer is also force-pinned open while the model is streaming or
+   167→  // there's unsent draft text — we don't want to hide the input the user is
+   168→  // actively using. This is derived at render time (no effect) so it can't
+   169→  // trigger cascading renders.
+   170→  const composerPinnedOpen = isStreaming || input.trim().length > 0;
+   171→  const showComposer = composerVisible || composerPinnedOpen;
+   172→
+   173→  // ── P10: Dynamic empty-state subtitle + placeholder ──
+   174→  //
+   175→  // When the session has unmastered knowledge nodes, the empty-state subtitle
+   176→  // and the placeholder both nudge the user toward one of them — the learner
+   177→  // is closest to mastering something they've already started. Otherwise fall
+   178→  // back to a generic prompt. This makes the placeholder feel alive rather
+   179→  // than boilerplate.
+   180→  const unmasteredNode = knowledgeNodes.find(n => !n.mastered);
+   181→  const emptyStateSubtitle = unmasteredNode
+   182→    ? `试试问「${unmasteredNode.title}」— 你上次还没掌握`
+   183→    : '在下方输入框输入你的问题，聊聊你想学什么';
+   184→  const dynamicPlaceholder = unmasteredNode
+   185→    ? `问我「${unmasteredNode.title}」，或任何学习上的问题…`
+   186→    : '问我任何学习上的问题…';
+   187→
+   188→  // ── P7: Stream-error toast ──
+   189→  //
+   190→  // When lastStreamError transitions from null → string, show a toast for
+   191→  // 3.5s then clear it (so the same error doesn't re-show on re-render).
+   192→  // Uses a ref to track the "last shown" error so a repeat of the same
+   193→  // message after dismissal still re-triggers.
+   194→  const [errorToast, setErrorToast] = useState<string | null>(null);
+   195→  const lastShownError = useRef<string | null>(null);
+   196→  useEffect(() => {
+   197→    if (lastStreamError && lastStreamError !== lastShownError.current) {
+   198→      lastShownError.current = lastStreamError;
+   199→      // Deferred to a microtask so we don't call setState synchronously inside
+   200→      // this effect (react-hooks/set-state-in-effect rule).
+   201→      queueMicrotask(() => setErrorToast(lastStreamError));
+   202→      const t = setTimeout(() => {
+   203→        queueMicrotask(() => setErrorToast(null));
+   204→        // Clear the store flag too so re-sending doesn't re-trigger.
+   205→        useLearningStore.setState({ lastStreamError: null });
+   206→      }, 3500);
+   207→      return () => clearTimeout(t);
+   208→    }
+   209→  }, [lastStreamError]);
+   210→
+   211→  const scrollToBottom = useCallback(() => {
+   212→    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+   213→  }, []);
+   214→
+   215→  const handleSend = useCallback(async (overrideText?: string) => {
+   216→    const t = (overrideText ?? input).trim();
+   217→    if (!t || isStreaming) return;
+   218→    setInput('');
+   219→    await sendMessage(t);
+   220→  }, [input, isStreaming, sendMessage]);
+   221→
+   222→  const handleStop = useCallback(() => {
+   223→    useLearningStore.setState({
+   224→      isStreaming: false,
+   225→      streamingContent: '',
+   226→      streamingThinking: '',
+   227→      streamingPhase: null,
+   228→    });
+   229→  }, []);
+   230→
+   231→  // ── No session selected: welcome screen ──
+   232→  if (!currentSessionId) {
+   233→    return <WelcomeView />;
+   234→  }
+   235→
+   236→  // ── Loading ──
+   237→  if (isLoadingMessages) {
+   238→    return (
+   239→      <div className="flex h-full items-center justify-center">
+   240→        <motion.div
+   241→          className="h-5 w-5 rounded-full border-2 border-neutral-300 border-t-neutral-900 dark:border-neutral-600 dark:border-t-neutral-200"
+   242→          animate={{ rotate: 360 }}
+   243→          transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}
+   244→        />
+   245→      </div>
+   246→    );
+   247→  }
+   248→
+   249→  const userMsgCount = messages.filter(m => m.role === 'user').length;
+   250→  const lastMsgRole = messages[messages.length - 1]?.role;
+   251→
+   252→  // ── Chat view ──
+   253→  return (
+   254→    <div className="relative flex h-full flex-1 flex-col">
+   255→      {/* ── P7: Stream-error toast — fixed at top-center of the chat area ── */}
+   256→      <AnimatePresence>
+   257→        {errorToast && (
+   258→          <motion.div
+   259→            initial={{ opacity: 0, y: -8, scale: 0.97 }}
+   260→            animate={{ opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 28 } }}
+   261→            exit={{ opacity: 0, y: -8, scale: 0.97, transition: { duration: 0.16 } }}
+   262→            className="absolute left-1/2 top-2 z-[60] flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-neutral-300 bg-white px-3 py-1.5 text-[12px] text-neutral-700 shadow-lg dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-200"
+   263→            role="alert"
+   264→            aria-live="assertive"
+   265→          >
+   266→            <AlertCircle className="h-3.5 w-3.5 text-neutral-500 dark:text-neutral-400" />
+   267→            {errorToast}
+   268→            <button
+   269→              type="button"
+   270→              onClick={() => setErrorToast(null)}
+   271→              className="ml-1 text-neutral-400 transition-colors hover:text-neutral-700 dark:hover:text-neutral-200"
+   272→              aria-label="关闭"
+   273→            >
+   274→              <X className="h-3 w-3" />
+   275→            </button>
+   276→          </motion.div>
+   277→        )}
+   278→      </AnimatePresence>
+   279→
+   280→      {/* Chat header — the inner row is constrained to the same max-width as
+   281→          the message thread + input bar, so the title's left edge aligns
+   282→          perfectly with the first message bubble below it (no stair-step). */}
+   283→      <div className="relative z-[41] flex h-14 shrink-0 items-center border-b border-neutral-200 dark:border-neutral-800">
+   284→        <div className="mx-auto flex w-full max-w-[720px] items-center justify-between px-6">
+   285→          <div className="flex min-w-0 flex-col justify-center leading-tight">
+   286→            <h1 className="truncate text-[15px] font-medium text-neutral-900 dark:text-neutral-100">
+   287→              {session?.title || '学习中'}
+   288→            </h1>
+   289→            <p className="text-[11.5px] text-neutral-400 dark:text-neutral-500">{userMsgCount} 条对话</p>
+   290→          </div>
+   291→          <div className="flex items-center gap-1">
+   292→          <AnimatePresence mode="wait">
+   293→            {isStreaming && (
+   294→              <motion.div
+   295→                key="streaming-indicator"
+   296→                initial={{ opacity: 0, x: 8 }}
+   297→                animate={{ opacity: 1, x: 0 }}
+   298→                exit={{ opacity: 0, x: 8 }}
+   299→                className="flex items-center gap-1.5 px-2 text-[12px] text-neutral-400"
+   300→              >
+   301→                {streamingContent ? (
+   302→                  <>
+   303→                    <motion.div
+   304→                      className="h-1.5 w-1.5 rounded-full bg-neutral-500"
+   305→                      animate={{ opacity: [1, 0.3, 1] }}
+   306→                      transition={{ repeat: Infinity, duration: 0.9 }}
+   307→                    />
+   308→                    回复中
+   309→                  </>
+   310→                ) : (
+   311→                  <>
+   312→                    <motion.div
+   313→                      className="h-1.5 w-1.5 rounded-full bg-neutral-400"
+   314→                      animate={{ scale: [1, 1.3, 1], opacity: [1, 0.5, 1] }}
+   315→                      transition={{ repeat: Infinity, duration: 1.2 }}
+   316→                    />
+   317→                    思考中
+   318→                  </>
+   319→                )}
+   320→              </motion.div>
+   321→            )}
+   322→          </AnimatePresence>
+   323→
+   324→          {/* Course trigger — opens the course panel. Shows a tiny dot when a
+   325→              course has been generated for this session, so the user knows
+   326→              there's content to review. */}
+   327→          <MouseFollowTooltip
+   328→            content={isCourseGenerated ? '查看本主题的结构化课程' : '生成结构化课程'}
+   329→          >
+   330→            <motion.button
+   331→              whileHover={{
+   332→                scale: 1.06,
+   333→                transition: { type: 'spring', stiffness: 400, damping: 22 },
+   334→              }}
+   335→              whileTap={{
+   336→                scale: 0.94,
+   337→                transition: { type: 'spring', stiffness: 600, damping: 25 },
+   338→              }}
+   339→              onClick={() => setCoursePanelOpen(!coursePanelOpen)}
+   340→              className={`relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+   341→                coursePanelOpen
+   342→                  ? 'bg-neutral-100 text-neutral-800 dark:bg-neutral-800 dark:text-neutral-100'
+   343→                  : 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300'
+   344→              }`}
+   345→              aria-label="课程"
+   346→            >
+   347→              <BookOpen className="h-4 w-4" />
+   348→              {isCourseGenerated && !coursePanelOpen && (
+   349→                <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-neutral-700 dark:bg-neutral-300" />
+   350→              )}
+   351→            </motion.button>
+   352→          </MouseFollowTooltip>
+   353→
+   354→          <MouseFollowTooltip content="显示选项 · 主题与动态效果">
+   355→            <motion.button
+   356→              whileHover={{
+   357→                scale: 1.06,
+   358→                transition: { type: 'spring', stiffness: 400, damping: 22 },
+   359→              }}
+   360→              whileTap={{
+   361→                scale: 0.94,
+   362→                transition: { type: 'spring', stiffness: 600, damping: 25 },
+   363→              }}
+   364→              onClick={() => useLearningStore.getState().setSettingsPanelOpen(!useLearningStore.getState().settingsPanelOpen)}
+   365→              className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+   366→              aria-label="显示选项"
+   367→            >
+   368→              <MoreVertical className="h-4 w-4" />
+   369→            </motion.button>
+   370→          </MouseFollowTooltip>
+   371→        </div>
+   372→        </div>
+   373→      </div>
+   374→
+   375→      {/* Messages — extra bottom padding (pb-44) reserves room for the
+   376→          floating composer so the last bubble can scroll clear of it. */}
+   377→      <div
+   378→        ref={scrollContainerRef}
+   379→        onScroll={handleScroll}
+   380→        className="flex-1 overflow-y-auto custom-scrollbar"
+   381→      >
+   382→        <div className="mx-auto max-w-[720px] space-y-5 px-6 py-5 pb-44">
+   383→          <AnimatePresence>
+   384→            {messages.length === 0 && !isStreaming && (
+   385→              <motion.div
+   386→                key="empty-state"
+   387→                variants={emptyStateVariants}
+   388→                initial="hidden"
+   389→                animate="visible"
+   390→                exit="exit"
+   391→                className="flex flex-col items-center py-24 text-center"
+   392→              >
+   393→                <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-100 ring-1 ring-neutral-200/60 dark:bg-neutral-800 dark:ring-neutral-700/60">
+   394→                  <GraduationCap className="h-6 w-6 text-neutral-400 dark:text-neutral-500" strokeWidth={1.5} />
+   395→                </div>
+   396→                <p className="text-[15px] font-medium text-neutral-600 dark:text-neutral-300">
+   397→                  开始和 AI 交流
+   398→                </p>
+   399→                <p className="mt-1.5 text-[13px] text-neutral-400 dark:text-neutral-500">
+   400→                  {emptyStateSubtitle}
+   401→                </p>
+   402→                {/* Example question chips — scaffold the first turn by offering
+   403→                    3-4 example questions, each mapped to a teaching mode so the user
+   404→                    also learns what each mode is FOR. */}
+   405→                <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+   406→                  {EXAMPLE_QUESTIONS.map(q => (
+   407→                    <motion.button
+   408→                      key={q.text}
+   409→                      type="button"
+   410→                      onClick={() => handleSend(q.text)}
+   411→                      whileHover={{ scale: 1.03, transition: { type: 'spring', stiffness: 400, damping: 20 } }}
+   412→                      whileTap={{ scale: 0.97 }}
+   413→                      className="group flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-[12px] text-neutral-600 transition-colors hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+   414→                    >
+   415→                      <span className="text-neutral-400 transition-colors group-hover:text-neutral-600 dark:text-neutral-500 dark:group-hover:text-neutral-300">
+   416→                        {q.mode === 'guide' ? <Compass className="h-3 w-3" /> : q.mode === 'explain' ? <GraduationCap className="h-3 w-3" /> : q.mode === 'practice' ? <Dumbbell className="h-3 w-3" /> : <RotateCw className="h-3 w-3" />}
+   417→                      </span>
+   418→                      {q.text}
+   419→                    </motion.button>
+   420→                  ))}
+   421→                </div>
+   422→              </motion.div>
+   423→            )}
+   424→          </AnimatePresence>
+   425→
+   426→          <AnimatePresence initial={false}>
+   427→            {messages.map((msg, idx) => {
+   428→              const showDate = idx === 0 || !(
+   429→                new Date(msg.createdAt).toDateString() === new Date(messages[idx - 1].createdAt).toDateString()
+   430→              );
+   431→              const isLast = idx === messages.length - 1;
+   432→              const isLastAssistant = isLast && msg.role === 'assistant' && !isStreaming;
+   433→              return (
+   434→                <React.Fragment key={msg.id}>
+   435→                  {showDate && (
+   436→                    <motion.div
+   437→                      variants={dateSepVariants}
+   438→                      initial="hidden"
+   439→                      animate="visible"
+   440→                      className="my-6 flex items-center gap-3"
+   441→                    >
+   442→                      <div className="flex-1 border-t border-neutral-100 dark:border-neutral-800" />
+   443→                      <span className="text-[11px] text-neutral-400">{fmtDate(msg.createdAt)}</span>
+   444→                      <div className="flex-1 border-t border-neutral-100 dark:border-neutral-800" />
+   445→                    </motion.div>
+   446→                  )}
+   447→                  <motion.div variants={msgVariants} initial="hidden" animate="visible">
+   448→                    <MsgBubble
+   449→                      msg={msg}
+   450→                      isLastAssistant={isLastAssistant}
+   451→                      onRegenerate={regenerateLastMessage}
+   452→                    />
+   453→                  </motion.div>
+   454→                </React.Fragment>
+   455→              );
+   456→            })}
+   457→          </AnimatePresence>
+   458→
+   459→          {/* Thinking bubble — shown while the model is in its reasoning phase
+   460→              (streamingPhase === 'thinking') OR during the pre-first-token gap
+   461→              (streamingPhase === null && no content yet). The phase signal is
+   462→              AUTHORITATIVE — it stays 'thinking' for the whole reasoning trace,
+   463→              so the animation persists correctly instead of flashing off the
+   464→              instant the first reasoning token arrives. */}
+   465→          <AnimatePresence>
+   466→            {isStreaming && (streamingPhase === 'thinking' || (!streamingContent && !streamingPhase)) && lastMsgRole !== 'assistant' && (
+   467→              <motion.div
+   468→                variants={streamingBubbleVariants}
+   469→                initial="hidden"
+   470→                animate="visible"
+   471→                exit="exit"
+   472→                className="my-1 flex flex-col gap-2"
+   473→              >
+   474→                <div className="flex items-center gap-1.5">
+   475→                  <span className="flex h-5 w-5 items-center justify-center rounded-md bg-neutral-100 text-neutral-600 ring-1 ring-neutral-200/60 dark:bg-neutral-800 dark:text-neutral-300 dark:ring-neutral-700/60">
+   476→                    <GraduationCap className="h-3 w-3" strokeWidth={2} />
+   477→                  </span>
+   478→                  <span className="text-[11.5px] font-medium text-neutral-500 dark:text-neutral-400">MindGuide</span>
+   479→                  {streamingPhase === 'thinking' && (
+   480→                    <span className="ml-1 rounded-full border border-neutral-200 px-1.5 py-px text-[9.5px] text-neutral-400 dark:border-neutral-700 dark:text-neutral-500">
+   481→                      推理中
+   482→                    </span>
+   483→                  )}
+   484→                </div>
+   485→                <ThreadThinkingAnim mode={thinkingMode} />
+   486→              </motion.div>
+   487→            )}
+   488→          </AnimatePresence>
+   489→
+   490→          {/* Streaming response — no bubble, flowing markdown with a block caret
+   491→              at the live edge. Reads like the agent is typing into the thread. */}
+   492→          <AnimatePresence>
+   493→            {isStreaming && lastMsgRole !== 'assistant' && streamingContent && (
+   494→              <motion.div
+   495→                variants={streamingBubbleVariants}
+   496→                initial="hidden"
+   497→                animate="visible"
+   498→                exit="exit"
+   499→                className="my-1 flex flex-col gap-2"
+   500→              >
+   501→                <div className="flex items-center gap-1.5">
+   502→                  <span className="flex h-5 w-5 items-center justify-center rounded-md bg-neutral-100 text-neutral-600 ring-1 ring-neutral-200/60 dark:bg-neutral-800 dark:text-neutral-300 dark:ring-neutral-700/60">
+   503→                    <GraduationCap className="h-3 w-3" strokeWidth={2} />
+   504→                  </span>
+   505→                  <span className="text-[11.5px] font-medium text-neutral-500 dark:text-neutral-400">MindGuide</span>
+   506→                </div>
+   507→                <div className="min-w-0 text-[13.5px] leading-[1.7] text-neutral-800 dark:text-neutral-200">
+   508→                  <MarkdownRenderer content={streamingContent} streaming />
+   509→                  <motion.span
+   510→                    className="ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[0.15em] rounded-[1px] bg-neutral-500 align-text-bottom dark:bg-neutral-300"
+   511→                    animate={{ opacity: [1, 0, 1] }}
+   512→                    transition={{ repeat: Infinity, duration: 1, ease: 'easeInOut' }}
+   513→                  />
+   514→                </div>
+   515→              </motion.div>
+   516→            )}
+   517→          </AnimatePresence>
+   518→
+   519→          {/* Knowledge nodes inline */}
+   520→          <AnimatePresence>
+   521→            {knowledgeNodes.length > 0 && !isStreaming && messages.length > 0 && (
+   522→              <motion.div
+   523→                key="knowledge-panel"
+   524→                variants={knowledgeVariants}
+   525→                initial="hidden"
+   526→                animate="visible"
+   527→                className="my-8"
+   528→              >
+   529→                <KnowledgeInline nodes={knowledgeNodes} />
+   530→              </motion.div>
+   531→            )}
+   532→          </AnimatePresence>
+   533→
+   534→          <div ref={bottomRef} />
+   535→        </div>
+   536→      </div>
+   537→
+   538→      {/* Scroll-to-bottom button — appears when the user has scrolled up. Its
+   539→          vertical position tracks the composer: it hovers just above the
+   540→          composer when it's visible, and drops to the bottom edge when the
+   541→          composer has slid away, so it never collides with the input. */}
+   542→      <AnimatePresence>
+   543→        {showScrollBottom && (
+   544→          <motion.button
+   545→            initial={{ opacity: 0, y: 8, scale: 0.9 }}
+   546→            animate={{ opacity: 1, y: 0, scale: 1, x: '-50%' }}
+   547→            exit={{ opacity: 0, y: 8, scale: 0.9 }}
+   548→            transition={{ type: 'spring', stiffness: 380, damping: 28, mass: 0.7 }}
+   549→            onClick={scrollToBottom}
+   550→            whileHover={{
+   551→              scale: 1.08,
+   552→              transition: { type: 'spring', stiffness: 400, damping: 22 },
+   553→            }}
+   554→            whileTap={{
+   555→              scale: 0.92,
+   556→              transition: { type: 'spring', stiffness: 600, damping: 25 },
+   557→            }}
+   558→            style={{ bottom: showComposer ? 124 : 24 }}
+   559→            className="absolute left-1/2 z-30 flex h-8 w-8 items-center justify-center rounded-full border border-neutral-200 bg-white/95 text-neutral-500 shadow-sm backdrop-blur-sm transition-[bottom] duration-300 ease-out hover:text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/95 dark:text-neutral-300 dark:hover:text-neutral-100"
+   560→            aria-label="滚动到最新消息"
+   561→          >
+   562→            <ArrowDown className="h-4 w-4" />
+   563→          </motion.button>
+   564→        )}
+   565→      </AnimatePresence>
+   566→
+   567→      {/* Chat Composer — floats above the thread and slides out of view (down +
+   568→          fade) when the user scrolls down to read, so the reading surface stays
+   569→          unobstructed. A soft gradient backdrop lets bubbles fade out
+   570→          gracefully under it. */}
+   571→      <motion.div
+   572→        animate={{
+   573→          y: showComposer ? 0 : '115%',
+   574→          opacity: showComposer ? 1 : 0,
+   575→        }}
+   576→        transition={{ type: 'spring', stiffness: 320, damping: 34, mass: 0.8 }}
+   577→        className="pointer-events-none absolute inset-x-0 bottom-0 z-40"
+   578→      >
+   579→        <div className="pointer-events-auto bg-gradient-to-t from-white via-white/95 to-transparent pb-5 pt-10 dark:from-neutral-950 dark:via-neutral-950/95 dark:to-transparent">
+   580→          <div className="mx-auto max-w-[720px] px-6">
+   581→            <ChatComposer
+   582→              value={input}
+   583→              onChange={setInput}
+   584→              onSend={handleSend}
+   585→              onStop={handleStop}
+   586→              isStreaming={isStreaming}
+   587→              isThinking={isStreaming && (streamingPhase === 'thinking' || (!streamingContent && !streamingPhase))}
+   588→              placeholder={dynamicPlaceholder}
+   589→            />
+   590→          </div>
+   591→        </div>
+   592→      </motion.div>
+   593→    </div>
+   594→  );
+   595→}
+   596→
+   597→
+   598→// ─── Message Bubble ──────────────────────────────────────────────────────────
+   599→//
+   600→// Display follows the ZCode (zcode.z.ai) message surface:
+   601→//
+   602→//   • User messages are right-aligned, bordered surface chips with an
+   603→//     asymmetric top-right corner (rounded-tr-xs = the chat "tail"). No
+   604→//     avatar — right-alignment + the tail is enough identity. (ZCode uses
+   605→//     max-w-xl; we use max-w-[85%] to stay readable on narrow threads.)
+   606→//
+   607→//   • Assistant messages have NO bubble — the markdown flows directly in a
+   608→//     space-y-4 column, like an IDE agent's prose. A tiny inline header
+   609→//     (GraduationCap + "MindGuide") marks the teacher identity without
+   610→//     adding visual weight. This is the "programming-IDE base, teaching skin"
+   611→//     the user asked for: code-agent layout, learning content.
+   612→//
+   613→//   • Base font is 13.5px (ZCode uses 13px; we nudge up half a point for
+   614→//     Chinese legibility). Code blocks & tables keep their own sizes.
+   615→//
+   616→//   • Hover reveals a footer action row: timestamp (always) + copy (always) +
+   617→//     regenerate (only on the last assistant turn). Actions use a soft spring
+   618→//     so the toolbar emerges rather than pops.
+   619→
+   620→function timeFmt(d: string) {
+   621→  const date = new Date(d);
+   622→  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+   623→}
+   624→
+   625→function ActionButton({
+   626→  onClick,
+   627→  label,
+   628→  children,
+   629→}: {
+   630→  onClick: () => void;
+   631→  label: string;
+   632→  children: React.ReactNode;
+   633→}) {
+   634→  return (
+   635→    <MouseFollowTooltip content={label}>
+   636→      <motion.button
+   637→        whileHover={{ scale: 1.08, transition: { type: 'spring', stiffness: 400, damping: 20 } }}
+   638→        whileTap={{ scale: 0.9, transition: { type: 'spring', stiffness: 600, damping: 25 } }}
+   639→        onClick={onClick}
+   640→        aria-label={label}
+   641→        className="flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-neutral-200/60 hover:text-neutral-700 dark:text-neutral-500 dark:hover:bg-neutral-700/60 dark:hover:text-neutral-200"
+   642→      >
+   643→        {children}
+   644→      </motion.button>
+   645→    </MouseFollowTooltip>
+   646→  );
+   647→}
+   648→
+   649→function MsgBubble({
+   650→  msg,
+   651→  isLastAssistant = false,
+   652→  onRegenerate,
+   653→}: {
+   654→  msg: { role: string; content: string; createdAt: string };
+   655→  isLastAssistant?: boolean;
+   656→  onRegenerate?: () => void;
+   657→}) {
+   658→  const isUser = msg.role === 'user';
+   659→  const [copied, setCopied] = useState(false);
+   660→  const [regenerating, setRegenerating] = useState(false);
+   661→
+   662→  const handleCopy = useCallback(() => {
+   663→    navigator.clipboard?.writeText(msg.content).then(() => {
+   664→      setCopied(true);
+   665→      setTimeout(() => setCopied(false), 1400);
+   666→    }).catch(() => {});
+   667→  }, [msg.content]);
+   668→
+   669→  const handleRegenerate = useCallback(() => {
+   670→    if (!onRegenerate || regenerating) return;
+   671→    setRegenerating(true);
+   672→    onRegenerate();
+   673→  }, [onRegenerate, regenerating]);
+   674→
+   675→  // ── User message: right-aligned bordered surface chip ──
+   676→  if (isUser) {
+   677→    return (
+   678→      <div className="group/msg flex w-full flex-col items-end gap-1.5">
+   679→        <div className="max-w-[85%] rounded-xl rounded-tr-xs border border-neutral-200 bg-neutral-50 px-4 py-2.5 text-[13.5px] leading-[1.65] text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-100">
+   680→          <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+   681→        </div>
+   682→        {/* Footer — timestamp + copy, hover-revealed */}
+   683→        <div className="mr-1 flex items-center gap-1 px-1 opacity-0 transition-opacity duration-200 group-hover/msg:opacity-100">
+   684→          <span className="font-sans text-[10px] tabular-nums text-neutral-400 dark:text-neutral-500">
+   685→            {timeFmt(msg.createdAt)}
+   686→          </span>
+   687→          <button
+   688→            onClick={handleCopy}
+   689→            className="flex h-5 items-center gap-1 rounded px-1 font-sans text-[10px] text-neutral-400 transition-colors hover:text-neutral-700 dark:text-neutral-500 dark:hover:text-neutral-200"
+   690→            aria-label="复制消息"
+   691→          >
+   692→            {copied ? <Check className="h-3 w-3 text-neutral-900 dark:text-neutral-100" /> : <Copy className="h-3 w-3" />}
+   693→          </button>
+   694→        </div>
+   695→      </div>
+   696→    );
+   697→  }
+   698→
+   699→  // ── Assistant message: no bubble, flowing markdown + inline teacher header ──
+   700→  return (
+   701→    <div className="group/msg flex flex-col gap-2">
+   702→      {/* Inline teacher identity — small, sits above the prose like an IDE
+   703→          agent's "model" label, but with the GraduationCap to mark this is a
+   704→          teaching response, not a code edit. */}
+   705→      <div className="flex items-center gap-1.5">
+   706→        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-neutral-100 text-neutral-600 ring-1 ring-neutral-200/60 dark:bg-neutral-800 dark:text-neutral-300 dark:ring-neutral-700/60">
+   707→          <GraduationCap className="h-3 w-3" strokeWidth={2} />
+   708→        </span>
+   709→        <span className="text-[11.5px] font-medium text-neutral-500 dark:text-neutral-400">MindGuide</span>
+   710→      </div>
+   711→
+   712→      {/* Flowing markdown — no bubble background, just prose. space-y-* is
+   713→          handled inside MarkdownRenderer's element styles. */}
+   714→      <div className="min-w-0 text-[13.5px] leading-[1.7] text-neutral-800 dark:text-neutral-200">
+   715→        <MarkdownRenderer content={msg.content} />
+   716→      </div>
+   717→
+   718→      {/* Footer action row — timestamp + copy + regenerate (last only) */}
+   719→      <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover/msg:opacity-100">
+   720→        <span className="mr-1 font-sans text-[10px] tabular-nums text-neutral-400 dark:text-neutral-500">
+   721→          {timeFmt(msg.createdAt)}
+   722→        </span>
+   723→        <ActionButton onClick={handleCopy} label={copied ? '已复制' : '复制'}>
+   724→          {copied ? <Check className="h-3.5 w-3.5 text-neutral-900 dark:text-neutral-100" /> : <Copy className="h-3.5 w-3.5" />}
+   725→        </ActionButton>
+   726→        {isLastAssistant && onRegenerate && (
+   727→          <ActionButton onClick={handleRegenerate} label="重新生成">
+   728→            <RefreshCw className={`h-3.5 w-3.5 ${regenerating ? 'animate-spin' : ''}`} />
+   729→          </ActionButton>
+   730→        )}
+   731→      </div>
+   732→    </div>
+   733→  );
+   734→}
+   735→
+   736→// ─── Welcome View ─────────────────────────────────────────────────────────────
+   737→//
+   738→// A focus-first landing surface, modeled on ZCode's empty-conversation state:
+   739→// no brand mark, no title, no subtitle, no quick-start topic chips, no
+   740→// scholarly footnote. Just the same ChatComposer used inside a conversation,
+   741→// centered in the viewport, so the only thing vying for the user's attention
+   742→// is the act of asking. The app identity already lives in the sidebar; the
+   743→// quick-start topics will be relocated there in a later pass.
+   744→
+   745→function WelcomeView() {
+   746→  const { createSession, sendMessage } = useLearningStore();
+   747→  const setSettingsPanelOpen = useLearningStore(s => s.setSettingsPanelOpen);
+   748→  const [input, setInput] = useState('');
+   749→
+   750→  // Sending from the welcome composer creates a new session from the draft
+   751→  // text and immediately fires it as the first user message, so the user
+   752→  // lands inside a live teaching conversation instead of an empty "0 条对话"
+   753→  // thread.
+   754→  const handleSubmit = useCallback(async () => {
+   755→    const t = input.trim();
+   756→    if (!t) return;
+   757→    setInput('');
+   758→    const session = await createSession(t);
+   759→    if (session) {
+   760→      await sendMessage(t);
+   761→    }
+   762→  }, [input, createSession, sendMessage]);
+   763→
+   764→  return (
+   765→    <div className="relative flex h-full flex-1 flex-col overflow-hidden">
+   766→      {/* Top bar — utility only (display-options entry), right-aligned so it
+   767→          sits in the same spot as the in-conversation header. No brand chrome. */}
+   768→      <div className="flex h-14 shrink-0 items-center justify-end px-6">
+   769→        <MouseFollowTooltip content="显示选项 · 主题与动态效果">
+   770→          <motion.button
+   771→            whileHover={{
+   772→              scale: 1.06,
+   773→              transition: { type: 'spring', stiffness: 400, damping: 22 },
+   774→            }}
+   775→            whileTap={{
+   776→              scale: 0.94,
+   777→              transition: { type: 'spring', stiffness: 600, damping: 25 },
+   778→            }}
+   779→            onClick={() => setSettingsPanelOpen(true)}
+   780→            className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+   781→            aria-label="显示选项"
+   782→          >
+   783→            <MoreVertical className="h-4 w-4" />
+   784→          </motion.button>
+   785→        </MouseFollowTooltip>
+   786→      </div>
+   787→
+   788→      {/* Composer surface — a single, centered ChatComposer. Reusing the same
+   789→          component as the in-conversation input keeps the interaction contract
+   790→          (attach / mode / model / send) identical across both surfaces, so the
+   791→          user never has to learn a second input affordance. */}
+   792→      <div className="flex flex-1 flex-col items-center justify-center px-6 pb-24">
+   793→        <motion.div
+   794→          initial={{ opacity: 0, y: 12 }}
+   795→          animate={{ opacity: 1, y: 0 }}
+   796→          transition={{ type: 'spring', stiffness: 240, damping: 26, mass: 0.9, delay: 0.05 }}
+   797→          className="w-full max-w-[720px]"
+   798→        >
+   799→          <ChatComposer
+   800→            value={input}
+   801→            onChange={setInput}
+   802→            onSend={handleSubmit}
+   803→            onStop={() => {}}
+   804→            isStreaming={false}
+   805→            placeholder="输入你想学的主题，开始学习…"
+   806→          />
+   807→        </motion.div>
+   808→      </div>
+   809→    </div>
+   810→  );
+   811→}
+   812→
+   813→// ─── Thread thinking animation ───────────────────────────────────────────────
+   814→//
+   815→// Rendered inside the message thread's thinking bubble. Mirrors the
+   816→// StatusBackCard animations in chat-composer but sized for inline prose flow:
+   817→//   • off / standard — three-dot wave + "正在思考"
+   818→//   • deep           — orbiting electron around a solid neutral core + "深度推理中"
+   819→//   • structured     — three cascading tier chips (链式→批判→收敛) + "结构化推理中"
+   820→// Keeping a separate component here (rather than importing from chat-composer)
+   821→// avoids pulling composer-only dependencies into the thread render path.
+   822→
+   823→type ThinkingMode = 'off' | 'standard' | 'deep' | 'structured';
+   824→
+   825→function ThreadThinkingAnim({ mode }: { mode: ThinkingMode }) {
+   826→  if (mode === 'deep') return <ThreadDeepAnim />;
+   827→  if (mode === 'structured') return <ThreadStructuredAnim />;
+   828→  return <ThreadStandardAnim />;
+   829→}
+   830→
+   831→function ThreadStandardAnim() {
+   832→  return (
+   833→    <div className="flex items-center gap-1.5 py-1">
+   834→      {[0, 1, 2].map((dot) => (
+   835→        <motion.span
+   836→          key={dot}
+   837→          className="h-1.5 w-1.5 rounded-full bg-neutral-400 dark:bg-neutral-500"
+   838→          animate={{
+   839→            y: [0, -4, 0],
+   840→            opacity: [0.35, 1, 0.35],
+   841→            scale: [0.85, 1.1, 0.85],
+   842→          }}
+   843→          transition={{
+   844→            repeat: Infinity,
+   845→            duration: 1.1,
+   846→            delay: dot * 0.16,
+   847→            ease: 'easeInOut',
+   848→          }}
+   849→        />
+   850→      ))}
+   851→      <span className="ml-1.5 font-sans text-[10.5px] text-neutral-400 dark:text-neutral-500">
+   852→        正在思考
+   853→      </span>
+   854→    </div>
+   855→  );
+   856→}
+   857→
+   858→function ThreadDeepAnim() {
+   859→  return (
+   860→    <div className="flex items-center gap-2 py-1">
+   861→      <span className="relative flex h-4 w-4 items-center justify-center">
+   862→        <motion.span
+   863→          className="absolute h-1.5 w-1.5 rounded-full bg-neutral-800 dark:bg-neutral-200"
+   864→          animate={{ scale: [1, 1.25, 1], opacity: [0.7, 1, 0.7] }}
+   865→          transition={{ repeat: Infinity, duration: 1.6, ease: 'easeInOut' }}
+   866→        />
+   867→        <motion.span
+   868→          className="absolute h-4 w-4 rounded-full border border-neutral-400/60 dark:border-neutral-500/60"
+   869→          style={{ transform: 'rotateX(65deg)' }}
+   870→          animate={{ rotate: 360 }}
+   871→          transition={{ repeat: Infinity, duration: 2.4, ease: 'linear' }}
+   872→        />
+   873→        <motion.span
+   874→          className="absolute h-4 w-4 rounded-full border border-neutral-400/40 dark:border-neutral-500/40"
+   875→          style={{ transform: 'rotateY(65deg)' }}
+   876→          animate={{ rotate: -360 }}
+   877→          transition={{ repeat: Infinity, duration: 3, ease: 'linear' }}
+   878→        />
+   879→        <motion.span
+   880→          className="absolute h-1 w-1 rounded-full bg-neutral-700 dark:bg-neutral-300"
+   881→          animate={{ rotate: 360 }}
+   882→          transition={{ repeat: Infinity, duration: 1.8, ease: 'linear' }}
+   883→          style={{ transformOrigin: '0px 8px' }}
+   884→        />
+   885→      </span>
+   886→      <span className="font-sans text-[10.5px] text-neutral-500 dark:text-neutral-400">
+   887→        深度推理中
+   888→        <span className="ml-1 text-neutral-400 dark:text-neutral-500">· 多角度 · 反例检验</span>
+   889→      </span>
+   890→    </div>
+   891→  );
+   892→}
+   893→
+   894→function ThreadStructuredAnim() {
+   895→  const tiers = ['链式', '批判', '收敛'];
+   896→  return (
+   897→    <div className="flex items-center gap-2 py-1">
+   898→      <span className="flex items-center gap-1">
+   899→        {tiers.map((t, i) => (
+   900→          <motion.span
+   901→            key={t}
+   902→            className="flex h-4 items-center gap-0.5 rounded-full border border-neutral-300/70 bg-white px-1 text-[8.5px] font-medium text-neutral-500 dark:border-neutral-600/70 dark:bg-neutral-800 dark:text-neutral-400"
+   903→            animate={{
+   904→              opacity: [0.35, 1, 0.35],
+   905→              scale: [0.92, 1.04, 0.92],
+   906→              borderColor: [
+   907→                'rgba(168,162,158,0.5)',
+   908→                'rgba(23,23,23,0.7)',
+   909→                'rgba(168,162,158,0.5)',
+   910→              ],
+   911→            }}
+   912→            transition={{
+   913→              repeat: Infinity,
+   914→              duration: 2.1,
+   915→              delay: i * 0.4,
+   916→              ease: 'easeInOut',
+   917→            }}
+   918→          >
+   919→            <span className="h-1 w-1 rounded-full bg-neutral-400 dark:bg-neutral-500" />
+   920→            {t}
+   921→          </motion.span>
+   922→        ))}
+   923→      </span>
+   924→      <span className="font-sans text-[10.5px] text-neutral-500 dark:text-neutral-400">
+   925→        结构化推理中
+   926→      </span>
+   927→    </div>
+   928→  );
+   929→}
+   930→

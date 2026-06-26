@@ -1,0 +1,722 @@
+     1→'use client';
+     2→
+     3→import React, { useState, useMemo, useCallback } from 'react';
+     4→import { motion, AnimatePresence } from 'framer-motion';
+     5→import { MOTION, EASE } from '@/lib/motion-tokens';
+     6→import {
+     7→  Search,
+     8→  MessagesSquare,
+     9→  BookOpen,
+    10→  Plus,
+    11→  Trash2,
+    12→  Pencil,
+    13→  Check,
+    14→  X,
+    15→  Grid2X2,
+    16→  User,
+    17→} from 'lucide-react';
+    18→import { useLearningStore, type LearningSession } from '@/store/learning-store';
+    19→import { UnifiedSearch } from './unified-search';
+    20→import { MouseFollowTooltip } from './mouse-follow-tooltip';
+    21→
+    22→// ─── Helpers ──────────────────────────────────────────────────────────────────
+    23→
+    24→function formatTime(dateStr: string): string {
+    25→  const diff = Date.now() - new Date(dateStr).getTime();
+    26→  const mins = Math.floor(diff / 60000);
+    27→  if (mins < 1) return '刚刚';
+    28→  if (mins < 60) return `${mins}分钟前`;
+    29→  const hrs = Math.floor(mins / 60);
+    30→  if (hrs < 24) return `${hrs}小时前`;
+    31→  const days = Math.floor(hrs / 24);
+    32→  if (days === 1) return '昨天';
+    33→  if (days < 7) return `${days}天前`;
+    34→  return new Date(dateStr).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+    35→}
+    36→
+    37→// ─── Animation Variants ─────────────────────────────────────────────────────
+    38→
+    39→const containerVariants = {
+    40→  hidden: { opacity: 0 },
+    41→  visible: {
+    42→    opacity: 1,
+    43→    transition: { staggerChildren: 0.06, delayChildren: 0.05 },
+    44→  },
+    45→};
+    46→
+    47→const childVariants = {
+    48→  hidden: { opacity: 0, y: 8 },
+    49→  visible: {
+    50→    opacity: 1,
+    51→    y: 0,
+    52→    transition: { type: 'spring' as const, stiffness: 320, damping: 28, mass: 0.7 },
+    53→  },
+    54→};
+    55→
+    56→const sessionVariants = {
+    57→  hidden: { opacity: 0, y: 6, scale: 0.98 },
+    58→  visible: (i: number) => ({
+    59→    opacity: 1,
+    60→    y: 0,
+    61→    scale: 1,
+    62→    transition: {
+    63→      delay: i * 0.035,
+    64→      type: 'spring' as const,
+    65→      stiffness: 380,
+    66→      damping: 30,
+    67→      mass: 0.7,
+    68→    },
+    69→  }),
+    70→  // EXIT = ENTER reversed for opacity/scale; x:-20 adds "slide out left"
+    71→  // semantic for deleted sessions. Same spring physics as enter.
+    72→  exit: {
+    73→    opacity: 0,
+    74→    x: -20,
+    75→    scale: 0.95,
+    76→    transition: MOTION.enter,
+    77→  },
+    78→};
+    79→
+    80→const createFormVariants = {
+    81→  hidden: { opacity: 0, height: 0, marginBottom: 0 },
+    82→  visible: { opacity: 1, height: 'auto', marginBottom: 8, transition: { duration: 0.26, ease: EASE.INOUT } },
+    83→  // EXIT = ENTER reversed: same target (hidden) + same tween.
+    84→  exit: { opacity: 0, height: 0, marginBottom: 0, transition: { duration: 0.26, ease: EASE.INOUT } },
+    85→};
+    86→
+    87→const sectionHeaderVariants = {
+    88→  hidden: { opacity: 0, x: -4 },
+    89→  visible: {
+    90→    opacity: 1,
+    91→    x: 0,
+    92→    transition: { type: 'spring' as const, stiffness: 380, damping: 28, mass: 0.6 },
+    93→  },
+    94→};
+    95→
+    96→// ─── Collapsed Icon Strip ─────────────────────────────────────────────────
+    97→
+    98→const iconStripVariants = {
+    99→  hidden: { opacity: 0, x: -8 },
+   100→  visible: (i: number) => ({
+   101→    opacity: 1,
+   102→    x: 0,
+   103→    transition: {
+   104→      delay: i * 0.06,
+   105→      type: 'spring' as const,
+   106→      stiffness: 380,
+   107→      damping: 28,
+   108→      mass: 0.7,
+   109→    },
+   110→  }),
+   111→};
+   112→
+   113→function CollapsedSidebar() {
+   114→  const { setCoursePanelOpen, coursePanelOpen, setCreateNewPanelOpen } = useLearningStore();
+   115→
+   116→  return (
+   117→    <aside className="flex h-full w-[56px] shrink-0 flex-col items-center bg-neutral-100 py-4 dark:bg-neutral-900">
+   118→      {/* Logo */}
+   119→      <motion.div
+   120→        custom={0}
+   121→        variants={iconStripVariants}
+   122→        initial="hidden"
+   123→        animate="visible"
+   124→        className="mb-6 flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--brand)] text-[var(--brand-foreground)]"
+   125→      >
+   126→        <MessagesSquare className="h-4 w-4" />
+   127→      </motion.div>
+   128→
+   129→      {/* Icon buttons */}
+   130→      <MouseFollowTooltip content="课程">
+   131→        <motion.button
+   132→          custom={1}
+   133→          variants={iconStripVariants}
+   134→          initial="hidden"
+   135→          animate="visible"
+   136→          whileHover={{
+   137→            scale: 1.06,
+   138→            transition: { type: 'spring', stiffness: 400, damping: 22 },
+   139→          }}
+   140→          whileTap={{
+   141→            scale: 0.94,
+   142→            transition: { type: 'spring', stiffness: 600, damping: 25 },
+   143→          }}
+   144→          onClick={() => setCoursePanelOpen(!coursePanelOpen)}
+   145→          className={`mb-1.5 flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+   146→            coursePanelOpen
+   147→              ? 'bg-white text-neutral-800 shadow-sm dark:bg-neutral-700 dark:text-neutral-100'
+   148→              : 'text-neutral-500 hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300'
+   149→          }`}
+   150→        >
+   151→          <BookOpen className="h-4 w-4" />
+   152→        </motion.button>
+   153→      </MouseFollowTooltip>
+   154→
+   155→      <MouseFollowTooltip content="更多功能">
+   156→        <motion.button
+   157→          custom={2}
+   158→          variants={iconStripVariants}
+   159→          initial="hidden"
+   160→          animate="visible"
+   161→          whileHover={{
+   162→            scale: 1.06,
+   163→            transition: { type: 'spring', stiffness: 400, damping: 22 },
+   164→          }}
+   165→          whileTap={{
+   166→            scale: 0.94,
+   167→            transition: { type: 'spring', stiffness: 600, damping: 25 },
+   168→          }}
+   169→          onClick={() => setCreateNewPanelOpen(true)}
+   170→          className="mb-1.5 flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
+   171→        >
+   172→          <Grid2X2 className="h-4 w-4" />
+   173→        </motion.button>
+   174→      </MouseFollowTooltip>
+   175→
+   176→      <MouseFollowTooltip content="搜索">
+   177→        <motion.button
+   178→          custom={3}
+   179→          variants={iconStripVariants}
+   180→          initial="hidden"
+   181→          animate="visible"
+   182→          whileHover={{
+   183→            scale: 1.06,
+   184→            transition: { type: 'spring', stiffness: 400, damping: 22 },
+   185→          }}
+   186→          whileTap={{
+   187→            scale: 0.94,
+   188→            transition: { type: 'spring', stiffness: 600, damping: 25 },
+   189→          }}
+   190→          className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
+   191→        >
+   192→          <Search className="h-4 w-4" />
+   193→        </motion.button>
+   194→      </MouseFollowTooltip>
+   195→
+   196→      {/* Account — pushed to the bottom; appearance settings now live in the
+   197→          three-dot menu so the sidebar footer no longer duplicates them. */}
+   198→      <motion.div
+   199→        custom={4}
+   200→        variants={iconStripVariants}
+   201→        initial="hidden"
+   202→        animate="visible"
+   203→        className="mt-auto"
+   204→      >
+   205→        <MouseFollowTooltip content="账号">
+   206→          <motion.button
+   207→            whileHover={{
+   208→              scale: 1.06,
+   209→              transition: { type: 'spring', stiffness: 400, damping: 22 },
+   210→            }}
+   211→            whileTap={{
+   212→              scale: 0.94,
+   213→              transition: { type: 'spring', stiffness: 600, damping: 25 },
+   214→            }}
+   215→            className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-white/60 hover:text-neutral-700 dark:hover:bg-neutral-800/50 dark:hover:text-neutral-300"
+   216→            aria-label="账号"
+   217→          >
+   218→            <User className="h-4 w-4" />
+   219→          </motion.button>
+   220→        </MouseFollowTooltip>
+   221→      </motion.div>
+   222→    </aside>
+   223→  );
+   224→}
+   225→
+   226→// ─── Full Sidebar ─────────────────────────────────────────────────────────
+   227→
+   228→export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
+   229→  if (collapsed) return <CollapsedSidebar />;
+   230→  return <FullSidebar />;
+   231→}
+   232→
+   233→// ─── Full Sidebar ─────────────────────────────────────────────────────────
+   234→
+   235→function FullSidebar() {
+   236→  const {
+   237→    sessions,
+   238→    currentSessionId,
+   239→    createSession,
+   240→    selectSession,
+   241→    deleteSession,
+   242→    updateSessionTitle,
+   243→    setCreateNewPanelOpen,
+   244→  } = useLearningStore();
+   245→
+   246→  const [search, setSearch] = useState('');
+   247→  const [activeTab, setActiveTab] = useState<'mine' | 'shared'>('mine');
+   248→  const [isCreating, setIsCreating] = useState(false);
+   249→  const [newTitle, setNewTitle] = useState('');
+   250→  const [editingId, setEditingId] = useState<string | null>(null);
+   251→  const [editTitle, setEditTitle] = useState('');
+   252→
+   253→  const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
+   254→  const activeSessions = useMemo(() => sessions.filter(s => s.status === 'active'), [sessions]);
+   255→  const completedSessions = useMemo(() => sessions.filter(s => s.status === 'completed'), [sessions]);
+   256→
+   257→  const filteredActive = useMemo(() => {
+   258→    if (!search.trim()) return activeSessions;
+   259→    const q = search.toLowerCase();
+   260→    return activeSessions.filter(s => s.title.toLowerCase().includes(q) || (s.topic || '').toLowerCase().includes(q));
+   261→  }, [activeSessions, search]);
+   262→
+   263→  const filteredCompleted = useMemo(() => {
+   264→    if (!search.trim()) return completedSessions;
+   265→    const q = search.toLowerCase();
+   266→    return completedSessions.filter(s => s.title.toLowerCase().includes(q) || (s.topic || '').toLowerCase().includes(q));
+   267→  }, [completedSessions, search]);
+   268→
+   269→  const handleCreate = useCallback(async () => {
+   270→    if (!newTitle.trim()) return;
+   271→    await createSession(newTitle.trim());
+   272→    setNewTitle('');
+   273→    setIsCreating(false);
+   274→  }, [newTitle, createSession]);
+   275→
+   276→  const handleSaveEdit = useCallback(async (id: string) => {
+   277→    if (editTitle.trim()) await updateSessionTitle(id, editTitle.trim());
+   278→    setEditingId(null);
+   279→  }, [editTitle, updateSessionTitle]);
+   280→
+   281→  return (
+   282→    <aside className="flex h-full w-[260px] shrink-0 flex-col bg-neutral-100 dark:bg-neutral-900">
+   283→      {/* ── Top: Brand + Tabs ── */}
+   284→      <motion.div
+   285→        className="space-y-3 px-3 pt-4 pb-2"
+   286→        variants={containerVariants}
+   287→        initial="hidden"
+   288→        animate="visible"
+   289→      >
+   290→        {/* Brand */}
+   291→        <motion.div className="flex items-center gap-2.5 px-1" variants={childVariants}>
+   292→          <div className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral-200 text-neutral-700 dark:border-neutral-700 dark:text-neutral-300">
+   293→            <MessagesSquare className="h-3.5 w-3.5" strokeWidth={1.6} />
+   294→          </div>
+   295→          <span className="font-serif text-[15px] font-medium tracking-tight text-neutral-800 dark:text-neutral-100">MindGuide</span>
+   296→        </motion.div>
+   297→
+   298→        {/* Tab Navigation */}
+   299→        <motion.div className="flex gap-1 rounded-lg bg-neutral-200/70 p-0.5 dark:bg-neutral-800/70" variants={childVariants}>
+   300→          <button
+   301→            onClick={() => setActiveTab('mine')}
+   302→            className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-[6px] text-[12.5px] font-medium transition-all duration-200 ${
+   303→              activeTab === 'mine'
+   304→                ? 'bg-white text-neutral-800 shadow-sm dark:bg-neutral-700 dark:text-neutral-100'
+   305→                : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200'
+   306→            }`}
+   307→          >
+   308→            <BookOpen className="h-3.5 w-3.5" />
+   309→            我的学习
+   310→          </button>
+   311→          <button
+   312→            onClick={() => setActiveTab('shared')}
+   313→            className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-[6px] text-[12.5px] font-medium transition-all duration-200 ${
+   314→              activeTab === 'shared'
+   315→                ? 'bg-white text-neutral-800 shadow-sm dark:bg-neutral-700 dark:text-neutral-100'
+   316→                : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200'
+   317→            }`}
+   318→          >
+   319→            <User className="h-3.5 w-3.5" />
+   320→            分享的
+   321→          </button>
+   322→        </motion.div>
+   323→      </motion.div>
+   324→
+   325→      {/* ── Unified Search ── */}
+   326→      <motion.div
+   327→        className="px-3 pb-2"
+   328→        initial={{ opacity: 0, y: -4 }}
+   329→        animate={{ opacity: 1, y: 0 }}
+   330→        transition={{ duration: 0.3, delay: 0.15 }}
+   331→      >
+   332→        <UnifiedSearch
+   333→          value={search}
+   334→          onChange={setSearch}
+   335→          sessionId={currentSessionId ?? undefined}
+   336→          onResultClick={(result) => {
+   337→            if (result.sessionId && result.sessionId !== currentSessionId) {
+   338→              selectSession(result.sessionId);
+   339→            }
+   340→          }}
+   341→        />
+   342→      </motion.div>
+   343→
+   344→      {/* ── Create Topic (inline expand) ── */}
+   345→      <div className="px-3 pb-1">
+   346→        <AnimatePresence>
+   347→          {isCreating && (
+   348→            <motion.div
+   349→              className="mb-2 overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-neutral-800"
+   350→              variants={createFormVariants}
+   351→              initial="hidden"
+   352→              animate="visible"
+   353→              exit="exit"
+   354→            >
+   355→              <div className="p-2.5">
+   356→                <input
+   357→                  type="text"
+   358→                  placeholder="输入学习主题..."
+   359→                  value={newTitle}
+   360→                  onChange={e => setNewTitle(e.target.value)}
+   361→                  onKeyDown={e => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') setIsCreating(false); }}
+   362→                  autoFocus
+   363→                  className="mb-2 h-9 w-full rounded-md border border-neutral-200 bg-neutral-50 px-2.5 text-[13px] transition-colors duration-150 focus:border-neutral-300 focus:outline-none focus:shadow-[0_0_0_3px_rgba(0,0,0,0.04)] dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-200 dark:focus:shadow-[0_0_0_3px_rgba(255,255,255,0.04)]"
+   364→                />
+   365→                <div className="flex justify-end gap-1.5">
+   366→                  <motion.button
+   367→                    whileTap={{
+   368→                      scale: 0.95,
+   369→                      transition: { type: 'spring', stiffness: 600, damping: 22 },
+   370→                    }}
+   371→                    onClick={() => setIsCreating(false)}
+   372→                    className="rounded-md px-2.5 py-1 text-[12px] text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-700"
+   373→                  >
+   374→                    取消
+   375→                  </motion.button>
+   376→                  <motion.button
+   377→                    whileTap={{
+   378→                      scale: 0.95,
+   379→                      transition: { type: 'spring', stiffness: 600, damping: 22 },
+   380→                    }}
+   381→                    onClick={handleCreate}
+   382→                    className="rounded-md bg-neutral-900 px-2.5 py-1 text-[12px] font-medium text-white dark:bg-white dark:text-neutral-900"
+   383→                  >
+   384→                    创建
+   385→                  </motion.button>
+   386→                </div>
+   387→              </div>
+   388→            </motion.div>
+   389→          )}
+   390→        </AnimatePresence>
+   391→      </div>
+   392→
+   393→      {/* ── Session List ── */}
+   394→      <div className="flex-1 overflow-y-auto custom-scrollbar px-2">
+   395→        {activeTab === 'mine' && (
+   396→          <>
+   397→            {/* Active Sessions */}
+   398→            {filteredActive.length > 0 && (
+   399→              <div className="mb-1">
+   400→                <motion.div
+   401→                  className="flex items-center justify-between px-2 py-1.5"
+   402→                  variants={sectionHeaderVariants}
+   403→                  initial="hidden"
+   404→                  animate="visible"
+   405→                >
+   406→                  <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+   407→                    进行中
+   408→                  </span>
+   409→                  <span className="text-[11px] text-neutral-400 dark:text-neutral-500">{filteredActive.length}</span>
+   410→                </motion.div>
+   411→                <AnimatePresence mode="popLayout" initial={false}>
+   412→                  {filteredActive.map((session, i) => (
+   413→                    <motion.div
+   414→                      key={session.id}
+   415→                      custom={i}
+   416→                      variants={sessionVariants}
+   417→                      initial="hidden"
+   418→                      animate="visible"
+   419→                      exit="exit"
+   420→                      layout
+   421→                    >
+   422→                      <SessionRow
+   423→                        session={session}
+   424→                        isActive={session.id === currentSessionId}
+   425→                        isLoading={loadingSessionId === session.id}
+   426→                        isEditing={editingId === session.id}
+   427→                        editTitle={editTitle}
+   428→                        onSelect={() => {
+   429→                          setLoadingSessionId(session.id);
+   430→                          selectSession(session.id).finally(() => setLoadingSessionId(null));
+   431→                        }}
+   432→                        onStartEdit={() => { setEditingId(session.id); setEditTitle(session.title); }}
+   433→                        onEditTitleChange={setEditTitle}
+   434→                        onSaveEdit={() => handleSaveEdit(session.id)}
+   435→                        onCancelEdit={() => setEditingId(null)}
+   436→                        onDelete={() => deleteSession(session.id)}
+   437→                      />
+   438→                    </motion.div>
+   439→                  ))}
+   440→                </AnimatePresence>
+   441→              </div>
+   442→            )}
+   443→
+   444→            {/* Completed Sessions */}
+   445→            {filteredCompleted.length > 0 && (
+   446→              <div className="mb-1">
+   447→                <motion.div
+   448→                  className="flex items-center justify-between px-2 py-1.5"
+   449→                  variants={sectionHeaderVariants}
+   450→                  initial="hidden"
+   451→                  animate="visible"
+   452→                >
+   453→                  <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+   454→                    已完成
+   455→                  </span>
+   456→                  <span className="text-[11px] text-neutral-400 dark:text-neutral-500">{filteredCompleted.length}</span>
+   457→                </motion.div>
+   458→                <AnimatePresence mode="popLayout" initial={false}>
+   459→                  {filteredCompleted.map((session, i) => (
+   460→                    <motion.div
+   461→                      key={session.id}
+   462→                      custom={i}
+   463→                      variants={sessionVariants}
+   464→                      initial="hidden"
+   465→                      animate="visible"
+   466→                      exit="exit"
+   467→                      layout
+   468→                    >
+   469→                      <SessionRow
+   470→                        session={session}
+   471→                        isActive={session.id === currentSessionId}
+   472→                        isLoading={loadingSessionId === session.id}
+   473→                        isEditing={editingId === session.id}
+   474→                        editTitle={editTitle}
+   475→                        onSelect={() => {
+   476→                          setLoadingSessionId(session.id);
+   477→                          selectSession(session.id).finally(() => setLoadingSessionId(null));
+   478→                        }}
+   479→                        onStartEdit={() => { setEditingId(session.id); setEditTitle(session.title); }}
+   480→                        onEditTitleChange={setEditTitle}
+   481→                        onSaveEdit={() => handleSaveEdit(session.id)}
+   482→                        onCancelEdit={() => setEditingId(null)}
+   483→                        onDelete={() => deleteSession(session.id)}
+   484→                      />
+   485→                    </motion.div>
+   486→                  ))}
+   487→                </AnimatePresence>
+   488→              </div>
+   489→            )}
+   490→
+   491→            {/* Empty state */}
+   492→            {filteredActive.length === 0 && filteredCompleted.length === 0 && (
+   493→              <motion.div
+   494→                initial={{ opacity: 0 }}
+   495→                animate={{ opacity: 1 }}
+   496→                className="py-12 text-center"
+   497→              >
+   498→                <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-200/80 dark:bg-neutral-800">
+   499→                  <BookOpen className="h-4.5 w-4.5 text-neutral-400 dark:text-neutral-500" />
+   500→                </div>
+   501→                <p className="text-[12.5px] text-neutral-400 dark:text-neutral-500">
+   502→                  {search ? '没有匹配的主题' : '暂无学习主题'}
+   503→                </p>
+   504→                {!search && (
+   505→                  <p className="mt-1 text-[11px] text-neutral-400/70 dark:text-neutral-600">
+   506→                    点击下方按钮开始学习
+   507→                  </p>
+   508→                )}
+   509→              </motion.div>
+   510→            )}
+   511→          </>
+   512→        )}
+   513→
+   514→        {activeTab === 'shared' && (
+   515→          <motion.div
+   516→            initial={{ opacity: 0 }}
+   517→            animate={{ opacity: 1 }}
+   518→            className="py-12 text-center"
+   519→          >
+   520→            <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-200/80 dark:bg-neutral-800">
+   521→              <User className="h-4.5 w-4.5 text-neutral-400 dark:text-neutral-500" />
+   522→            </div>
+   523→            <p className="text-[12.5px] text-neutral-400 dark:text-neutral-500">
+   524→              暂无分享内容
+   525→            </p>
+   526→            <p className="mt-1 text-[11px] text-neutral-400/70 dark:text-neutral-600">
+   527→              分享的学习主题会显示在这里
+   528→            </p>
+   529→          </motion.div>
+   530→        )}
+   531→      </div>
+   532→
+   533→      {/* ── Bottom Actions ── */}
+   534→      <motion.div
+   535→        className="space-y-1.5 border-t border-neutral-200/80 px-3 pt-2.5 pb-3 dark:border-neutral-800/80"
+   536→        initial={{ opacity: 0, y: 8 }}
+   537→        animate={{ opacity: 1, y: 0 }}
+   538→        transition={{ delay: 0.25, duration: 0.3 }}
+   539→      >
+   540→        {/* Create New Topic - Primary Action */}
+   541→        <motion.button
+   542→          whileHover={{ scale: 1.015, transition: { type: 'spring', stiffness: 400, damping: 22 } }}
+   543→          whileTap={{ scale: 0.975, transition: { type: 'spring', stiffness: 600, damping: 25 } }}
+   544→          onClick={() => setIsCreating(true)}
+   545→          className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-[var(--brand)] text-[13px] font-medium text-[var(--brand-foreground)] transition-opacity duration-200 hover:opacity-90"
+   546→        >
+   547→          <Plus className="h-4 w-4" />
+   548→          创建新主题
+   549→        </motion.button>
+   550→
+   551→        {/* More Features - Secondary Action */}
+   552→        <MouseFollowTooltip
+   553→          maxWidth={260}
+   554→          content={
+   555→            <span>
+   556→              展开功能面板 · 任务规划 / 学习卡片 / 成就 / 统计 / 知识图谱 / 笔记
+   557→            </span>
+   558→          }
+   559→        >
+   560→          <motion.button
+   561→            data-more-features-trigger
+   562→            onClick={(e) => {
+   563→              e.preventDefault();
+   564→              setCreateNewPanelOpen(true);
+   565→            }}
+   566→            whileHover={{
+   567→              scale: 1.015,
+   568→              transition: { type: 'spring', stiffness: 400, damping: 22 },
+   569→            }}
+   570→            whileTap={{
+   571→              scale: 0.975,
+   572→              transition: { type: 'spring', stiffness: 600, damping: 25 },
+   573→            }}
+   574→            className="flex h-9 w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-neutral-200 bg-transparent text-[13px] text-neutral-500 transition-colors duration-200 hover:bg-neutral-50 hover:text-neutral-700 dark:border-neutral-700 dark:text-neutral-400 dark:hover:border-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+   575→          >
+   576→            <Grid2X2 className="h-3.5 w-3.5" />
+   577→            更多功能
+   578→          </motion.button>
+   579→        </MouseFollowTooltip>
+   580→      </motion.div>
+   581→    </aside>
+   582→  );
+   583→}
+   584→
+   585→// ─── Session Row ────────────────────────────────────────────────────────────────
+   586→
+   587→function SessionRow({
+   588→  session,
+   589→  isActive,
+   590→  isLoading,
+   591→  isEditing,
+   592→  editTitle,
+   593→  onSelect,
+   594→  onStartEdit,
+   595→  onEditTitleChange,
+   596→  onSaveEdit,
+   597→  onCancelEdit,
+   598→  onDelete,
+   599→}: {
+   600→  session: LearningSession;
+   601→  isActive: boolean;
+   602→  isLoading: boolean;
+   603→  isEditing: boolean;
+   604→  editTitle: string;
+   605→  onSelect: () => void;
+   606→  onStartEdit: () => void;
+   607→  onEditTitleChange: (v: string) => void;
+   608→  onSaveEdit: () => void;
+   609→  onCancelEdit: () => void;
+   610→  onDelete: () => void;
+   611→}) {
+   612→  const isCompleted = session.status === 'completed';
+   613→
+   614→  return (
+   615→    <motion.div
+   616→      onClick={onSelect}
+   617→      whileTap={{
+   618→        scale: 0.99,
+   619→        transition: { type: 'spring', stiffness: 600, damping: 25 },
+   620→      }}
+   621→      className={`group relative mb-0.5 flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2.5 transition-colors duration-150 ${
+   622→        isActive
+   623→          ? 'bg-white shadow-sm dark:bg-neutral-800 dark:shadow-none'
+   624→          : 'hover:bg-white/60 dark:hover:bg-neutral-800/50'
+   625→      }`}
+   626→    >
+   627→      {/* Session icon / thumbnail — show inline spinner when loading */}
+   628→      <div className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${
+   629→        isActive
+   630→          ? 'bg-[var(--brand)] text-[var(--brand-foreground)]'
+   631→          : isCompleted
+   632→          ? 'bg-neutral-200/80 dark:bg-neutral-800 dark:text-neutral-500'
+   633→          : 'bg-neutral-200/60 text-neutral-500 dark:bg-neutral-800/60 dark:text-neutral-400'
+   634→      }`}>
+   635→        {isLoading ? (
+   636→          <div className="h-4 w-4 rounded-full border-[1.5px] border-neutral-300 border-t-neutral-900 animate-spin dark:border-neutral-600 dark:border-t-white" />
+   637→        ) : (
+   638→          <BookOpen className="h-3.5 w-3.5" />
+   639→        )}
+   640→      </div>
+   641→
+   642→      {/* Title + time */}
+   643→      <div className="min-w-0 flex-1">
+   644→        {isEditing ? (
+   645→          <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+   646→            <input
+   647→              type="text"
+   648→              value={editTitle}
+   649→              onChange={e => onEditTitleChange(e.target.value)}
+   650→              onKeyDown={e => { if (e.key === 'Enter') onSaveEdit(); if (e.key === 'Escape') onCancelEdit(); }}
+   651→              autoFocus
+   652→              className="h-7 flex-1 rounded-md border border-neutral-300 bg-white px-2 text-[13px] transition-colors duration-150 focus:outline-none focus:shadow-[0_0_0_3px_rgba(0,0,0,0.04)] dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-200 dark:focus:shadow-[0_0_0_3px_rgba(255,255,255,0.04)]"
+   653→            />
+   654→            <motion.button
+   655→              whileTap={{
+   656→                scale: 0.85,
+   657→                transition: { type: 'spring', stiffness: 600, damping: 18 },
+   658→              }}
+   659→              onClick={onSaveEdit}
+   660→            >
+   661→              <Check className="h-3.5 w-3.5 text-neutral-500" />
+   662→            </motion.button>
+   663→            <motion.button
+   664→              whileTap={{
+   665→                scale: 0.85,
+   666→                transition: { type: 'spring', stiffness: 600, damping: 18 },
+   667→              }}
+   668→              onClick={onCancelEdit}
+   669→            >
+   670→              <X className="h-3.5 w-3.5 text-neutral-500" />
+   671→            </motion.button>
+   672→          </div>
+   673→        ) : (
+   674→          <>
+   675→            <p className={`truncate text-[13px] leading-tight font-medium ${
+   676→              isActive
+   677→                ? 'text-neutral-800 dark:text-neutral-100'
+   678→                : isCompleted
+   679→                ? 'text-neutral-500 dark:text-neutral-500'
+   680→                : 'text-neutral-700 dark:text-neutral-300'
+   681→            }`}>
+   682→              {session.title}
+   683→            </p>
+   684→            <p className="mt-0.5 text-[11px] leading-tight text-neutral-400 dark:text-neutral-600">
+   685→              {formatTime(session.updatedAt)}
+   686→            </p>
+   687→          </>
+   688→        )}
+   689→      </div>
+   690→
+   691→      {/* Hover actions */}
+   692→      {!isEditing && (
+   693→        <motion.div
+   694→          className="absolute right-1.5 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-0 group-hover:opacity-100"
+   695→          initial={{ opacity: 0 }}
+   696→          whileHover={{ opacity: 1 }}
+   697→        >
+   698→          <motion.button
+   699→            whileTap={{
+   700→              scale: 0.85,
+   701→              transition: { type: 'spring', stiffness: 600, damping: 18 },
+   702→            }}
+   703→            onClick={e => { e.stopPropagation(); onStartEdit(); }}
+   704→            className="flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 hover:bg-neutral-200/80 hover:text-neutral-600 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
+   705→          >
+   706→            <Pencil className="h-3 w-3" />
+   707→          </motion.button>
+   708→          <motion.button
+   709→            whileTap={{
+   710→              scale: 0.85,
+   711→              transition: { type: 'spring', stiffness: 600, damping: 18 },
+   712→            }}
+   713→            onClick={e => { e.stopPropagation(); onDelete(); }}
+   714→            className="flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+   715→          >
+   716→            <Trash2 className="h-3 w-3" />
+   717→          </motion.button>
+   718→        </motion.div>
+   719→      )}
+   720→    </motion.div>
+   721→  );
+   722→}

@@ -255,7 +255,7 @@ export async function buildSemanticIndex(
     chunks: chunkMap,
     summary,
     tree,
-    tokensUsed: 0, // TODO: accumulate from completions if we need telemetry
+    tokensUsed: 0, // not tracked yet; wire to completion telemetry if needed
     latencyMs: Date.now() - start,
   };
 }

@@ -30,8 +30,7 @@ import { MouseFollowTooltip } from '@/components/learning/mouse-follow-tooltip';
 // and presented overlapping metrics (streak appears in both; card mastery
 // ring appears in stats while achievements track it as a threshold). Splitting
 // them forced the learner to switch views to see related information. The
-// merged view keeps achievements on top (the motivational layer) and stats
-// below (the analytical layer) — one cognitive context, one scroll.
+// merged view keeps achievements on top and stats below in one scroll.
 //
 // §6 "文件导入" is new — the learner's knowledge base entry point. Imported
 // materials (text, markdown, code, notes) feed into both /api/chat (Socratic

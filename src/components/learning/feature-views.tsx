@@ -5,11 +5,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MOTION } from '@/lib/motion-tokens';
 
 // ─── Page-level entry/exit variants ─────────────────────────────────────────
-// OWNED BY page.tsx — this is the animation boundary for the welcome ↔ feature
-// transition. (Previously lived inside FeatureView, but page.tsx's
-// `{activeFeatureView ? <FeatureView /> : <MainContent />}` synchronously
-// unmounted FeatureView before AnimatePresence could fire exit — see
-// /home/z/my-project/worklog.md "anim-refine-003" for the full diagnosis.)
+// OWNED BY page.tsx — animation boundary for the welcome ↔ feature transition.
+// Moved here from FeatureView because page.tsx's conditional render
+// synchronously unmounted FeatureView before AnimatePresence could fire exit.
 //
 // Direction semantics:
 //   dir = +1  → forward (welcome → feature, or feature → different feature)
@@ -748,8 +746,7 @@ function LearningCardsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivEl
 //   · Metrics overlapped (streak, card mastery appeared in both)
 //   · Learners had to switch views to see related info
 // The merged view stacks: [achievements summary + list] then [stats grid +
-// review progress + weekly activity] — motivational layer on top, analytical
-// layer below. One cognitive context, one scroll.
+// review progress + weekly activity].
 
 const achievementIcons: Record<string, React.ElementType> = {
   message: MessageSquare,

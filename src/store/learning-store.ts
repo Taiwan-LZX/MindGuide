@@ -611,11 +611,8 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
     // immediately and hold it for a minimum duration (900ms) OR until real
     // reasoning tokens arrive (whichever is longer). If content arrives
     // before the minimum elapses, we buffer it and flush on phase transition.
-    //
-    // Cognitive rationale: the thinking animation communicates "the model is
-    // reasoning carefully" — if it flashes for 200ms the user reads it as a
-    // glitch, not deliberation. A sub-second minimum makes the deliberation
-    // legible without adding noticeable latency.
+    // A sub-second minimum keeps the thinking animation legible (avoids a
+    // sub-200ms flash that reads as a glitch).
     const thinkingEnabled = get().thinkingMode !== 'off';
     const MIN_THINK_MS = 900;
     let thinkHoldUntil = 0;

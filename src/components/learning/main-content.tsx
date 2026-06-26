@@ -173,10 +173,10 @@ export function MainContent() {
   // ── P10: Dynamic empty-state subtitle + placeholder ──
   //
   // When the session has unmastered knowledge nodes, the empty-state subtitle
-  // and the placeholder both nudge the user toward one of them — exploiting
-  // the ZPD (the learner is closest to mastering something they've already
-  // started). Otherwise fall back to a generic prompt. This makes the
-  // placeholder feel alive rather than boilerplate.
+  // and the placeholder both nudge the user toward one of them — the learner
+  // is closest to mastering something they've already started. Otherwise fall
+  // back to a generic prompt. This makes the placeholder feel alive rather
+  // than boilerplate.
   const unmasteredNode = knowledgeNodes.find(n => !n.mastered);
   const emptyStateSubtitle = unmasteredNode
     ? `试试问「${unmasteredNode.title}」— 你上次还没掌握`
@@ -399,12 +399,9 @@ export function MainContent() {
                 <p className="mt-1.5 text-[13px] text-neutral-400 dark:text-neutral-500">
                   {emptyStateSubtitle}
                 </p>
-                {/* Example question chips — cognitive-developmental rationale:
-                    Vygotsky's ZPD suggests learners often can't articulate what
-                    they want to know until they see a concrete option. These
-                    chips scaffold the first turn by offering 3-4 example
-                    questions, each mapped to a teaching mode so the user also
-                    learns what each mode is FOR. */}
+                {/* Example question chips — scaffold the first turn by offering
+                    3-4 example questions, each mapped to a teaching mode so the user
+                    also learns what each mode is FOR. */}
                 <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
                   {EXAMPLE_QUESTIONS.map(q => (
                     <motion.button

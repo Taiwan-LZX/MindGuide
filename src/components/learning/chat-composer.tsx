@@ -730,7 +730,7 @@ export function ChatComposer({
           <div className="flex-1" />
 
           {/* Right cluster — raised action island: think + send.
-              Oval (rounded-xl) silhouette, lifted 2px above the flat toolbar
+              Oval (rounded-xl) shape, lifted 2px above the flat toolbar
               baseline. Border + shadow respond to focus / streaming state. */}
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="relative shrink-0">
@@ -1497,10 +1497,9 @@ function UsageMeter({
     if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
     return `${n}`;
   };
-  // Semantic label — gives the user a PLAIN-LANGUAGE reading of the number
-  // ("还很轻松" / "余量充足" / "接近上限" / "建议新建会话"). Cognitive-
-  // psychology rationale: raw numbers like "8k/200k" are meaningless to most
-  // users; a qualitative label maps the number to an action.
+  // Semantic label — plain-language reading of the token count
+  // ("还很轻松" / "余量充足" / "接近上限" / "建议新建会话"). Raw numbers like
+  // "8k/200k" are hard to act on; a qualitative label maps the number to an action.
   let semantic: string;
   if (fraction < 0.25) semantic = '还很轻松';
   else if (fraction < 0.6) semantic = '余量充足';

@@ -13,7 +13,7 @@ export async function GET(
       orderBy: { createdAt: 'asc' },
     });
     return NextResponse.json({ messages });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: 'Failed to fetch messages' }, { status: 500 });
   }
 }
@@ -27,7 +27,7 @@ export async function DELETE(
     const { id } = await params;
     await db.learningMessage.deleteMany({ where: { sessionId: id } });
     return NextResponse.json({ success: true });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: 'Failed to delete messages' }, { status: 500 });
   }
 }
@@ -57,7 +57,7 @@ export async function POST(
     });
 
     return NextResponse.json({ message });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: 'Failed to create message' }, { status: 500 });
   }
 }

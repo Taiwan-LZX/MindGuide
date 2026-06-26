@@ -131,6 +131,12 @@ model Task {
 // code, etc.). The extracted text content is stored alongside metadata so the
 // course generator / AI dialogue can use it as a knowledge base without
 // re-parsing the file each time.
+//
+// Pipeline: upload → parseFile() → chunkDocument() → embed() → persist
+//   • content   = full extracted plain text (≤ 200k chars)
+//   • outline   = JSON array of {title, charStart, charEnd, level}
+//   • chunks    = DocumentChunk[] (one row per retrieval unit, with embedding)
+//   • chunkCount = denormalised count for fast list rendering
 model LearningMaterial {
   id          String   @id @default(cuid())
   sessionId   String
@@ -138,13 +144,71 @@ model LearningMaterial {
   fileType    String   @default("text/plain") // MIME type
   size        Int      @default(0)            // bytes
   title       String?                          // learner-editable display title (defaults to filename)
-  content     String   @default("")           // extracted plain text (truncated to ~50k chars)
+  content     String   @default("")           // extracted plain text (truncated to ~200k chars)
   charCount   Int      @default(0)            // length of extracted content
   status      String   @default("ready")      // uploading | ready | error
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // Parser provenance + structural metadata (added in v1.1 RAG upgrade)
+  parser      String?                          // 'unpdf' | 'mammoth' | 'xlsx' | 'pptx' | 'html' | 'text' | 'failed'
+  pageCount   Int?                             // PDF page count (null for non-PDF)
+  language    String?                          // 'zh' | 'en' | 'mixed'
+  outline     String?                          // JSON: [{title, charStart, charEnd, level}]
+  chunkCount  Int      @default(0)            // denormalised DocumentChunk count
+
+  chunks      DocumentChunk[]
+
   session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// Retrieval unit for RAG. HybridChunker output: struct-aware + token-aware
+// chunk (max ~512 tokens by default) with pre-computed BM25-style embedding
+// (1024-dim, L2-normalised, base64). The embedding is computed once at upload
+// time and reused for every retrieval call — see src/lib/text-embedding.ts.
+//
+// v2 fields (P1 upgrade, synthesised from Docling HybridChunker + Marker
+// block-types + GROBID section taxonomy):
+//   • blockType   — what kind of block this chunk primarily is. One of:
+//                   'text' | 'title' | 'table' | 'figure' | 'formula' | 'list'
+//                   | 'code' | 'caption' | 'reference' | 'header' | 'footer'
+//                   (Docling DocItemLabel enum, trimmed to the 11 we actually use).
+//   • sectionPath — slash-delimited breadcrumb of enclosing section titles,
+//                   e.g. "3 Methods / 3.2 Training Procedure".
+//                   Replaces the flat `section` field for tree-walk retrieval.
+//   • page        — 1-based PDF page (null for non-PDF).
+//   • bbox        — JSON: [startX, startY, w, h] normalised [0,1].
+//                   Null when not applicable (text blocks). Lets the UI crop
+//                   figures or highlight table regions on the page image.
+//   • sectionRole — GROBID section taxonomy role for academic papers:
+//                   'abstract' | 'introduction' | 'methods' | 'results'
+//                   | 'discussion' | 'conclusion' | 'references' | 'appendix'
+//                   | null for non-academic. Enables role-aware retrieval boost.
+model DocumentChunk {
+  id           String   @id @default(cuid())
+  materialId   String
+  content      String                            // chunk text (≤ ~1500 chars, cleaned)
+  section      String   @default("")             // enclosing section title (legacy/v1, kept for back-compat)
+  chunkIndex   Int                                // ordinal within material
+  charStart    Int                                // offset in material.content
+  charEnd      Int
+  tokens       Int      @default(0)              // approximate token count
+  embedding    String   @default("")             // base64-encoded 1024×Float32 (L2-normalised)
+  metadata     String?                           // JSON: { level, isTitle, sectionStart?, keywords?, summary? }
+  // ── v2 fields (P1) ────────────────────────────────────────────────────────
+  blockType    String   @default("text")          // text|title|table|figure|formula|list|code|caption|reference|header|footer
+  sectionPath  String   @default("")              // slash-delimited breadcrumb of enclosing sections
+  page         Int?                               // 1-based PDF page (null for non-PDF)
+  bbox         String?                           // JSON: [startX, startY, w, h] normalised [0,1]
+  sectionRole  String?                           // GROBID role: abstract|introduction|methods|results|discussion|conclusion|references|appendix
+  createdAt    DateTime @default(now())
+
+  material LearningMaterial @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([materialId])
+  @@index([chunkIndex])
+  @@index([blockType])
+  @@index([sectionRole])
 }
 
 // Per-session flashcard. Persisted for spaced-repetition review.

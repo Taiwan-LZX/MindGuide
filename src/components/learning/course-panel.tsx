@@ -13,7 +13,7 @@ import {
   Brain,
 } from 'lucide-react';
 import { useLearningStore, type CourseModule, type CourseLesson } from '@/store/learning-store';
-import { InlineSpinner, LoadingSkeleton, LoadingOverlay } from '@/components/learning/loading-utils';
+import { InlineSpinner, LoadingOverlay } from '@/components/learning/loading-utils';
 
 // ─── Shared Spring Config ────────────────────────────────────────────────────
 
@@ -40,7 +40,7 @@ const panelVariants = {
     opacity: 1,
     scale: 1,
     x: 0,
-    transition: { type: 'spring', stiffness: 300, damping: 28, mass: 0.85 },
+    transition: { type: 'spring' as const, stiffness: 300, damping: 28, mass: 0.85 },
   },
   // Exit slides back toward the right edge (where the drawer came from).
   // transformOrigin: 'right' set inline on the panel so scale-down also
@@ -55,9 +55,9 @@ const panelVariants = {
     scale: 0.96,
     x: 24,
     transition: {
-      opacity: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
-      scale: { duration: 0.22, ease: [0.4, 0, 1, 1] },
-      x: { duration: 0.24, ease: [0.4, 0, 1, 1] },
+      opacity: { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const },
+      scale: { duration: 0.22, ease: [0.4, 0, 1, 1] as const },
+      x: { duration: 0.24, ease: [0.4, 0, 1, 1] as const },
     },
   },
 };
@@ -75,7 +75,7 @@ const moduleVariants = {
   visible: {
     opacity: 1,
     y: 0,
-    transition: { type: 'spring', stiffness: 300, damping: 28, mass: 0.8 },
+    transition: { type: 'spring' as const, stiffness: 300, damping: 28, mass: 0.8 },
   },
 };
 
@@ -92,7 +92,7 @@ const lessonVariants = {
   visible: {
     opacity: 1,
     x: 0,
-    transition: { type: 'spring', stiffness: 380, damping: 30, mass: 0.6 },
+    transition: { type: 'spring' as const, stiffness: 380, damping: 30, mass: 0.6 },
   },
 };
 
@@ -108,8 +108,8 @@ const collapsibleVariants = {
     height: 0,
     opacity: 0,
     transition: {
-      height: { duration: 0.22, ease: [0.4, 0, 1, 1] },
-      opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] },
+      height: { duration: 0.22, ease: [0.4, 0, 1, 1] as const },
+      opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] as const },
     },
   },
 };
@@ -119,7 +119,7 @@ const promptVariants = {
   visible: {
     opacity: 1,
     y: 0,
-    transition: { delay: 0.12, type: 'spring', stiffness: 280, damping: 26, mass: 0.9 },
+    transition: { delay: 0.12, type: 'spring' as const, stiffness: 280, damping: 26, mass: 0.9 },
   },
 };
 
@@ -129,7 +129,7 @@ const dotVariants = {
   visible: (i: number) => ({
     opacity: 1,
     scale: 1,
-    transition: { delay: i * 0.1, type: 'spring', stiffness: 500, damping: 22, mass: 0.6 },
+    transition: { delay: i * 0.1, type: 'spring' as const, stiffness: 500, damping: 22, mass: 0.6 },
   }),
 };
 

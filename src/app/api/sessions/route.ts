@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { parseBody, createSessionSchema } from '@/lib/api-validator';
 
 // GET /api/sessions - List all sessions
 export async function GET() {
@@ -8,7 +9,7 @@ export async function GET() {
       orderBy: { updatedAt: 'desc' },
     });
     return NextResponse.json({ sessions });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: 'Failed to fetch sessions' }, { status: 500 });
   }
 }
@@ -16,21 +17,20 @@ export async function GET() {
 // POST /api/sessions - Create a new session
 export async function POST(req: NextRequest) {
   try {
-    const { title, topic, description } = await req.json();
-    if (!title) {
-      return NextResponse.json({ error: 'Title is required' }, { status: 400 });
-    }
+    const parsed = await parseBody(req, createSessionSchema);
+    if (!parsed.ok) return parsed.response;
+    const { title, topic, description } = parsed.data;
 
     const session = await db.learningSession.create({
       data: {
-        title: title.slice(0, 100),
-        topic: topic || null,
-        description: description || null,
+        title,
+        topic: topic ?? null,
+        description: description ?? null,
       },
     });
 
     return NextResponse.json({ session });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: 'Failed to create session' }, { status: 500 });
   }
 }

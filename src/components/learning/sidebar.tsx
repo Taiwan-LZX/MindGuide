@@ -48,7 +48,7 @@ const childVariants = {
   visible: {
     opacity: 1,
     y: 0,
-    transition: { type: 'spring', stiffness: 320, damping: 28, mass: 0.7 },
+    transition: { type: 'spring' as const, stiffness: 320, damping: 28, mass: 0.7 },
   },
 };
 
@@ -60,7 +60,7 @@ const sessionVariants = {
     scale: 1,
     transition: {
       delay: i * 0.035,
-      type: 'spring',
+      type: 'spring' as const,
       stiffness: 380,
       damping: 30,
       mass: 0.7,
@@ -74,16 +74,16 @@ const sessionVariants = {
     // session row visibly fades from frame 1; x + scale keep ease-in for the
     // "sliding out to the left" metaphor.
     transition: {
-      opacity: { duration: 0.16, ease: [0.16, 1, 0.3, 1] },
-      x: { duration: 0.20, ease: [0.4, 0, 1, 1] },
-      scale: { duration: 0.18, ease: [0.4, 0, 1, 1] },
+      opacity: { duration: 0.16, ease: [0.16, 1, 0.3, 1] as const },
+      x: { duration: 0.20, ease: [0.4, 0, 1, 1] as const },
+      scale: { duration: 0.18, ease: [0.4, 0, 1, 1] as const },
     },
   },
 };
 
 const createFormVariants = {
   hidden: { opacity: 0, height: 0, marginBottom: 0 },
-  visible: { opacity: 1, height: 'auto', marginBottom: 8, transition: { type: 'spring', stiffness: 350, damping: 28 } },
+  visible: { opacity: 1, height: 'auto', marginBottom: 8, transition: { type: 'spring' as const, stiffness: 350, damping: 28 } },
   exit: { opacity: 0, height: 0, marginBottom: 0, transition: { duration: 0.15 } },
 };
 
@@ -92,7 +92,7 @@ const sectionHeaderVariants = {
   visible: {
     opacity: 1,
     x: 0,
-    transition: { type: 'spring', stiffness: 380, damping: 28, mass: 0.6 },
+    transition: { type: 'spring' as const, stiffness: 380, damping: 28, mass: 0.6 },
   },
 };
 
@@ -105,7 +105,7 @@ const iconStripVariants = {
     x: 0,
     transition: {
       delay: i * 0.06,
-      type: 'spring',
+      type: 'spring' as const,
       stiffness: 380,
       damping: 28,
       mass: 0.7,
@@ -335,8 +335,9 @@ function FullSidebar() {
         <UnifiedSearch
           value={search}
           onChange={setSearch}
+          sessionId={currentSessionId ?? undefined}
           onResultClick={(result) => {
-            if (result.sessionId) {
+            if (result.sessionId && result.sessionId !== currentSessionId) {
               selectSession(result.sessionId);
             }
           }}

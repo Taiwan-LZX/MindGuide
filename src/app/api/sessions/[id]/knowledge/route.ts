@@ -13,7 +13,7 @@ export async function GET(
       orderBy: { createdAt: 'desc' },
     });
     return NextResponse.json({ nodes });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: 'Failed to fetch knowledge nodes' }, { status: 500 });
   }
 }
@@ -47,7 +47,7 @@ export async function POST(
     );
 
     return NextResponse.json({ nodes: created });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: 'Failed to create knowledge nodes' }, { status: 500 });
   }
 }

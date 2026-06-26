@@ -13,7 +13,7 @@ export async function GET(
       orderBy: { createdAt: 'desc' },
     });
     return NextResponse.json({ references });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: 'Failed to fetch references' }, { status: 500 });
   }
 }
@@ -46,7 +46,7 @@ export async function POST(
     );
 
     return NextResponse.json({ references: created });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: 'Failed to create references' }, { status: 500 });
   }
 }

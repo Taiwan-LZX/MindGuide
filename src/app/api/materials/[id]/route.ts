@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
-// GET /api/materials/[id] — fetch a single material (including content)
-// Used by the course generator / AI dialogue to read the knowledge base.
+// GET /api/materials/[id] — fetch a single material (including content + outline)
 
 export async function GET(
   _req: NextRequest,
@@ -10,7 +9,15 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const material = await db.learningMaterial.findUnique({ where: { id } });
+    const material = await db.learningMaterial.findUnique({
+      where: { id },
+      select: {
+        id: true, sessionId: true, filename: true, fileType: true,
+        size: true, title: true, content: true, charCount: true, status: true,
+        parser: true, pageCount: true, language: true, outline: true,
+        chunkCount: true, createdAt: true, updatedAt: true,
+      },
+    });
     if (!material) {
       return NextResponse.json({ error: 'Material not found' }, { status: 404 });
     }
@@ -38,6 +45,7 @@ export async function PATCH(
       select: {
         id: true, sessionId: true, filename: true, fileType: true,
         size: true, title: true, charCount: true, status: true,
+        parser: true, pageCount: true, language: true, chunkCount: true,
         createdAt: true, updatedAt: true,
       },
     });
@@ -48,7 +56,7 @@ export async function PATCH(
   }
 }
 
-// DELETE /api/materials/[id] — delete a single material
+// DELETE /api/materials/[id] — delete a single material (cascades to chunks)
 
 export async function DELETE(
   _req: NextRequest,

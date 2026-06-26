@@ -31,7 +31,7 @@ export const metadata: Metadata = {
   description: "不是问答机器人，是你的学习伙伴。AI 理解你的认知水平，通过对话引导你真正理解知识。",
   keywords: ["AI学习", "对话式教学", "智能学习", "MindGuide"],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/logo.svg",
   },
 };
 

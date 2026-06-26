@@ -60,7 +60,7 @@ function tidy(s: string): string {
 
 export function stripEmoji(input: string): string {
   if (!input) return input;
-  let out = input
+  const out = input
     .replace(EMOJI_RE, '')
     .replace(DECORATIVE_SYMBOL_RE, '');
   return tidy(out);

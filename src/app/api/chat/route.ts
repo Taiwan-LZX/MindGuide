@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server';
 import ZAI from 'z-ai-web-dev-sdk';
 import { db } from '@/lib/db';
 import { stripEmoji } from '@/lib/emoji-sanitize';
+import { retrievePassages, buildKnowledgeBaseContext } from '@/lib/retrieval';
+import { parseBody, chatSchema } from '@/lib/api-validator';
 
 // The core AI teaching system prompt
 const TEACHING_SYSTEM_PROMPT = `你是一位资深的教育者和学习导师，你的核心使命是通过对话式教学帮助学习者真正理解知识。
@@ -64,7 +66,7 @@ const TEACHING_SYSTEM_PROMPT = `你是一位资深的教育者和学习导师，
 function buildMessageContext(
   userMessages: Array<{ role: string; content: string; type?: string }>,
   knowledgeNodes: Array<{ title: string; content: string; category?: string; mastered: boolean }>,
-  materials: Array<{ title: string; filename: string; content: string }> = []
+  kbContext: string
 ) {
   const contextParts: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
 
@@ -99,25 +101,16 @@ function buildMessageContext(
     });
   }
 
-  // ─── Knowledge base: learner-imported materials ──────────────────────────
+  // ─── Knowledge base: RAG-retrieved passages ──────────────────────────────
   //
-  // Inject imported study materials as additional system context so the
-  // Socratic tutor can reference them. Budget-capped to 20k chars (smaller
-  // than the course generator's 30k — dialogue needs room for history).
-  if (materials.length > 0) {
-    const KB_BUDGET = 20_000;
-    let used = 0;
-    const snippets: string[] = [];
-    for (const m of materials) {
-      if (used >= KB_BUDGET) break;
-      const remaining = KB_BUDGET - used;
-      const slice = m.content.slice(0, remaining);
-      snippets.push(`### ${m.title || m.filename}\n${slice}`);
-      used += slice.length;
-    }
+  // Instead of brute-force injecting the first 20k chars of all materials,
+  // we retrieve the top-K passages most relevant to the learner's latest
+  // message. This gives the model focused, cited context (Lost in the Middle
+  // mitigation — Liu et al. 2023).
+  if (kbContext) {
     contextParts.push({
       role: 'system',
-      content: `## 学习者导入的学习资料\n\n学习者已导入以下学习资料。在对话中，如果问题涉及这些资料覆盖的内容，应基于资料中的具体概念、术语、定义来引导，而不是泛泛讲解。\n\n${snippets.join('\n\n---\n\n')}`,
+      content: kbContext,
     });
   }
 
@@ -172,14 +165,9 @@ function parseUpstreamSse(
 
 export async function POST(req: NextRequest) {
   try {
-    const { sessionId, message, messages: historyMessages, knowledgeNodes } = await req.json();
-
-    if (!sessionId || !message) {
-      return new Response(JSON.stringify({ error: 'sessionId and message are required' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
+    const parsed = await parseBody(req, chatSchema);
+    if (!parsed.ok) return parsed.response;
+    const { sessionId, message, messages: historyMessages, knowledgeNodes } = parsed.data;
 
     // Save user message to database
     await db.learningMessage.create({
@@ -200,14 +188,20 @@ export async function POST(req: NextRequest) {
     // Prepare messages for AI
     const zai = await ZAI.create();
 
-    // Fetch learner-imported materials for this session (knowledge base)
-    const materials = await db.learningMaterial.findMany({
-      where: { sessionId, status: 'ready', charCount: { gt: 0 } },
-      select: { title: true, filename: true, content: true },
-      orderBy: { createdAt: 'asc' },
-    });
+    // ─── RAG retrieval: find passages most relevant to the learner's message ─
+    //
+    // We retrieve from the session's knowledge base (all uploaded materials
+    // that have been parsed + chunked + embedded). This replaces the old
+    // brute-force "inject first 20k chars of every material" approach.
+    //
+    // The learner's latest message is the natural query — it's what they're
+    // asking about right now. We pass it through retrievePassages() which
+    // embeds it, scans all chunk embeddings, and returns the top-K with
+    // parent-section text attached.
+    const passages = await retrievePassages(sessionId, message, 6);
+    const kbContext = buildKnowledgeBaseContext(passages, 18_000);
 
-    const messageHistory = buildMessageContext(historyMessages || [], knowledgeNodes || [], materials);
+    const messageHistory = buildMessageContext(historyMessages || [], knowledgeNodes || [], kbContext);
 
     // Real streaming: SDK returns the upstream ReadableStream when stream:true
     const upstream = (await zai.chat.completions.create({

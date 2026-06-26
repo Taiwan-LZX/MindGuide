@@ -13,7 +13,7 @@ const nodeVariants = {
     x: 0,
     transition: {
       delay: 0.06 + 0.035 * i,
-      type: 'spring',
+      type: 'spring' as const,
       stiffness: 380,
       damping: 28,
       mass: 0.7,

@@ -15,7 +15,7 @@ export async function GET(
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
     return NextResponse.json({ session });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: 'Failed to fetch session' }, { status: 500 });
   }
 }
@@ -54,7 +54,7 @@ export async function PATCH(
       data: updateData,
     });
     return NextResponse.json({ session });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: 'Failed to update session' }, { status: 500 });
   }
 }

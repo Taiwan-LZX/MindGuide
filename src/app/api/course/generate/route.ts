@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import ZAI from 'z-ai-web-dev-sdk';
 import { db } from '@/lib/db';
+import { retrievePassages, buildKnowledgeBaseContext } from '@/lib/retrieval';
 
 const COURSE_GENERATION_PROMPT = `你是一位资深的教育课程设计师。根据学习者的对话记录、已有知识点，以及学习者导入的学习资料，分析学习者的理解程度和知识盲区，然后生成一套结构化的学习课程。
 
@@ -8,7 +9,7 @@ const COURSE_GENERATION_PROMPT = `你是一位资深的教育课程设计师。�
 
 1. 分析学习者在对话中展现出的知识水平
 2. 识别学习者的知识盲区和薄弱环节
-3. 如果学习者导入的学习资料（见下方"导入的学习资料"小节）覆盖了相关知识点，课程应基于这些资料定制 —— 课时内容应引用资料中的具体概念、术语、章节结构
+3. 如果"导入的学习资料"小节包含相关片段（标注了 [来源：...]），课程应基于这些资料定制 —— 课时内容应引用资料中的具体概念、术语、章节结构
 4. 生成 3-4 个学习模块，每个模块包含 4-6 个课时
 5. 每个课时需包含理论、练习或测验内容
 6. 根据难度合理设置预计时长
@@ -79,34 +80,82 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ─── Knowledge base: learner-imported materials ────────────────────────
+    // ─── Knowledge base: RAG retrieval over the learner's imported materials ─
     //
-    // If the learner has uploaded study materials (PDFs, notes, code, etc.),
-    // include their extracted text content as a "knowledge base" section in
-    // the AI context. The course prompt (above) instructs the model to base
-    // course content on these materials when relevant.
+    // Instead of brute-force injecting the first 30k chars of every material,
+    // we build a composite query from:
+    //   1. The session topic (highest weight — the course is about this)
+    //   2. Unmastered knowledge node titles (the learner's known gaps)
+    //   3. Recent dialogue content (what the learner has been struggling with)
     //
-    // We cap the total context at ~30k chars across all materials (after the
-    // 50k per-file cap applied at upload time) to stay within model context
-    // limits while still giving the model substantial reference material.
+    // Then retrieve top-K passages and format them as a cited context block.
+    // This gives the model focused, relevant material instead of a wall of
+    // text where relevant bits are buried (Lost in the Middle, Liu et al. 2023).
     if (sessionId) {
-      const materials = await db.learningMaterial.findMany({
-        where: { sessionId, status: 'ready', charCount: { gt: 0 } },
-        select: { title: true, filename: true, content: true, charCount: true },
-        orderBy: { createdAt: 'asc' },
+      const session = await db.learningSession.findUnique({
+        where: { id: sessionId },
+        select: { topic: true, title: true },
       });
-      if (materials.length > 0) {
-        const KB_BUDGET = 30_000;
-        let used = 0;
-        const snippets: string[] = [];
-        for (const m of materials) {
-          if (used >= KB_BUDGET) break;
-          const remaining = KB_BUDGET - used;
-          const slice = m.content.slice(0, remaining);
-          snippets.push(`### ${m.title || m.filename}\n\n${slice}`);
-          used += slice.length;
+      const gapTitles = (knowledgeNodes || [])
+        .filter((n: any) => !n.mastered)
+        .map((n: any) => n.title)
+        .slice(0, 8);
+      const recentUserMsgs = (messages || [])
+        .filter((m: any) => m.role === 'user')
+        .slice(-3)
+        .map((m: any) => m.content)
+        .join(' ');
+
+      const ragQuery = [
+        session?.topic || session?.title || '',
+        gapTitles.join(' / '),
+        recentUserMsgs,
+      ].filter(Boolean).join('\n\n');
+
+      if (ragQuery.trim()) {
+        const passages = await retrievePassages(sessionId, ragQuery, 8);
+        if (passages.length > 0) {
+          // v2: also fetch the document summary trees (stored in material.outline)
+          // so the model sees the big-picture structure of imported materials
+          // before the fine-grained retrieved chunks. This emulates the
+          // "outline-aware RAG" pattern — the summary primes the model to
+          // interpret the chunks in their proper section context.
+          const materials = await db.learningMaterial.findMany({
+            where: { sessionId, status: 'ready' },
+            select: { title: true, filename: true, outline: true, parser: true },
+          });
+          const overviews: string[] = [];
+          for (const m of materials) {
+            if (!m.outline) continue;
+            try {
+              const tree = JSON.parse(m.outline);
+              if (Array.isArray(tree) && tree.length > 0) {
+                // Render the summary tree as a compact indented list.
+                const render = (nodes: any[], depth: number): string =>
+                  nodes.map((n: any) => {
+                    const indent = '  '.repeat(depth);
+                    let line = `${indent}- ${n.title || ''}`;
+                    if (n.summary) line += `：${n.summary}`;
+                    line += '\n';
+                    if (Array.isArray(n.children) && n.children.length > 0) {
+                      line += render(n.children, depth + 1);
+                    }
+                    return line;
+                  }).join('');
+                const rendered = render(tree, 0);
+                if (rendered.trim()) {
+                  overviews.push(`### ${m.title || m.filename}\n${rendered}`);
+                }
+              }
+            } catch {
+              // outline may be the older OutlineNode format — skip silently.
+            }
+          }
+          if (overviews.length > 0) {
+            context += '\n\n## 导入资料的结构概览\n\n以下是学习者导入资料的高层结构摘要，用于在阅读检索片段前建立整体认知。\n\n' + overviews.join('\n\n') + '\n';
+          }
+          context += '\n\n' + buildKnowledgeBaseContext(passages, 24_000);
         }
-        context += `\n## 导入的学习资料\n\n学习者已导入以下学习资料，课程内容应基于这些资料定制（引用其中的具体概念、术语、章节）。\n\n${snippets.join('\n\n---\n\n')}\n`;
       }
     }
 

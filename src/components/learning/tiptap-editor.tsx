@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -321,7 +320,8 @@ export default function TiptapEditor() {
     }
     const currentHtml = editor.getHTML();
     if ((notesContent || '') !== currentHtml) {
-      editor.commands.setContent(notesContent || '', false);
+      // Tiptap v3: setContent takes an options object (was `(html, emitUpdate, parseOptions)` in v2).
+      editor.commands.setContent(notesContent || '', { emitUpdate: false });
     }
   }, [notesContent, currentSessionId, editor]);
 

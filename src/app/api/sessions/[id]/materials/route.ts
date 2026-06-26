@@ -1,63 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { parseFile } from '@/lib/file-parser';
+import type { PrecisionLevel } from '@/lib/file-parser/pdf-tiered';
+import { chunkDocument, buildOutline } from '@/lib/document-chunker';
+import { embed, encodeEmbedding } from '@/lib/text-embedding';
+import { buildSemanticIndex, mdToTree } from '@/lib/semantic-index';
+import type { DocumentSummaryNode, SemanticTreeNode } from '@/lib/semantic-index';
 
-// ─── Text extraction ───────────────────────────────────────────────────────
+// ─── Upload pipeline (v2 — high-precision tiered parsing) ──────────────────
 //
-// We extract plain text from uploaded files in-process. For text-like formats
-// (txt, md, markdown, csv, json, code, log) we decode the bytes directly. For
-// everything else (PDF, docx, images, binaries) we store metadata only and
-// mark content as empty — a future iteration can add server-side parsing
-// (pdf-parse, mammoth, tesseract) but for v1 we keep the dependency surface
-// minimal and let the learner paste text or import text files.
+// For each uploaded file:
+//   1. parseFile({ precision })   — tiered parse:
+//        fast   → unpdf/mammoth/xlsx (instant)
+//        medium → + MuPDF structured text fallback for sparse PDFs
+//        high   → + VLM page rendering for scanned/complex PDFs
+//   2. chunkDocument()            — split into ~800-char retrieval units
+//   3. buildSemanticIndex()       — (precision='high' only) LLM per-chunk
+//        keywords + document summary tree, folded into chunk metadata
+//   4. embed() + persist          — BM25 embedding + DB rows
+//
+// Size guard: 25 MB per file. 200k char cap on extracted text. 600 chunk cap.
 
-const TEXT_EXTENSIONS = new Set([
-  'txt', 'md', 'markdown', 'csv', 'json', 'log', 'rtf',
-  'html', 'htm', 'xml', 'yaml', 'yml', 'toml', 'ini',
-  'js', 'jsx', 'ts', 'tsx', 'py', 'rb', 'go', 'rs', 'java',
-  'c', 'cpp', 'h', 'hpp', 'cs', 'php', 'swift', 'kt', 'scala',
-  'sh', 'bash', 'zsh', 'ps1', 'sql', 'graphql', 'proto',
-]);
-
-const TEXT_MIME_PREFIXES = ['text/', 'application/json', 'application/xml', 'application/javascript', 'application/x-yaml'];
-
-const MAX_CONTENT_CHARS = 50_000; // ~50k chars cap to keep DB rows + LLM context manageable
-
-function getExtension(filename: string): string {
-  const dot = filename.lastIndexOf('.');
-  if (dot < 0 || dot === filename.length - 1) return '';
-  return filename.slice(dot + 1).toLowerCase();
-}
-
-function isTextLike(filename: string, mimeType: string): boolean {
-  if (TEXT_EXTENSIONS.has(getExtension(filename))) return true;
-  return TEXT_MIME_PREFIXES.some(p => mimeType.startsWith(p));
-}
-
-function extractText(bytes: ArrayBuffer, filename: string, mimeType: string): string {
-  if (!isTextLike(filename, mimeType)) return '';
-  try {
-    const raw = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-    // Strip HTML tags if it looks like HTML — gives the LLM clean prose
-    if (getExtension(filename) === 'html' || mimeType.includes('html')) {
-      return raw
-        .replace(/<script[\s\S]*?<\/script>/gi, '')
-        .replace(/<style[\s\S]*?<\/style>/gi, '')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, MAX_CONTENT_CHARS);
-    }
-    return raw.slice(0, MAX_CONTENT_CHARS);
-  } catch {
-    // Decode failed (malformed UTF-8 in a text-labelled file) — return empty
-    // rather than crashing the upload. The file is still stored as metadata.
-    return '';
-  }
-}
+const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB
+const MAX_CONTENT_CHARS = 200_000;       // hard cap on extracted text
+const MAX_CHUNKS_PER_FILE = 600;         // safety cap
 
 // ─── GET — list materials for a session ────────────────────────────────────
 
@@ -79,11 +45,14 @@ export async function GET(
         title: true,
         charCount: true,
         status: true,
+        parser: true,
+        pageCount: true,
+        language: true,
+        chunkCount: true,
         createdAt: true,
         updatedAt: true,
-        // NOTE: `content` deliberately omitted — list view doesn't need the
-        // (potentially large) extracted text. The course generator fetches
-        // content separately via the [matId] GET route.
+        // NOTE: `content` and `outline` deliberately omitted — list view
+        // doesn't need them. The chunk viewer fetches them on demand.
       },
     });
     return NextResponse.json({ materials });
@@ -95,14 +64,12 @@ export async function GET(
 
 // ─── POST — upload one or more files (multipart/form-data) ─────────────────
 //
-// Accepts multipart/form-data with a `files` field (one or more File entries).
-// Each file is read into memory, text-extracted, and persisted as a
-// LearningMaterial row. Returns the created materials (without content).
-//
-// Size guard: 5 MB per file (generous for text notes; prevents memory pressure
-// from large PDFs that we can't parse anyway).
-
-const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
+// Optional form fields:
+//   - precision: 'fast' | 'medium' | 'high'  (default 'fast')
+//       Applies to PDF files only. Non-PDF files ignore this.
+//   - enrich: 'true' | 'false'  (default 'false' unless precision='high')
+//       When true, runs LLM semantic enrichment (per-chunk keywords + doc summary).
+//       Auto-enabled when precision='high'.
 
 export async function POST(
   req: NextRequest,
@@ -111,7 +78,7 @@ export async function POST(
   try {
     const { id } = await params;
 
-    // Verify session exists (returns 404 cleanly if not)
+    // Verify session exists.
     const session = await db.learningSession.findUnique({ where: { id }, select: { id: true } });
     if (!session) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
@@ -119,30 +86,102 @@ export async function POST(
 
     const formData = await req.formData();
     const files = formData.getAll('files');
+    const precision = (formData.get('precision') as PrecisionLevel | null) ?? 'fast';
+    const enrichFlag = formData.get('enrich') as string | null;
+    // Auto-enable enrichment for high precision; otherwise respect explicit flag.
+    const doEnrich = precision === 'high' ? enrichFlag !== 'false' : enrichFlag === 'true';
 
     if (files.length === 0) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 });
     }
 
-    const created = [];
+    const created: Array<Record<string, unknown>> = [];
     for (const entry of files) {
       if (!(entry instanceof File)) continue;
 
       if (entry.size > MAX_FILE_BYTES) {
-        // Skip oversized files rather than failing the whole batch — the
-        // learner gets feedback via the returned status field.
         created.push({
           id: null,
           filename: entry.name,
           status: 'error',
-          error: `File exceeds ${MAX_FILE_BYTES / 1024 / 1024}MB limit`,
+          error: `文件超过 ${MAX_FILE_BYTES / 1024 / 1024}MB 上限`,
         });
         continue;
       }
 
       const bytes = await entry.arrayBuffer();
-      const content = extractText(bytes, entry.name, entry.type);
 
+      // 1. Parse (with precision routing for PDFs).
+      const parsed = await parseFile(bytes, entry.name, entry.type, {
+        maxChars: MAX_CONTENT_CHARS,
+        precision,
+      });
+
+      // 2. Chunk (only if parsing produced text).
+      const chunks = parsed.text.trim().length > 0
+        ? chunkDocument(parsed).slice(0, MAX_CHUNKS_PER_FILE)
+        : [];
+
+      // 3. Semantic enrichment (optional — LLM call, slow but boosts recall).
+      //    Run before embedding so we can fold keywords into chunk metadata.
+      //
+      //    P2 fix: ALWAYS build the base semantic tree (mdToTree — pure
+      //    structure, no LLM) so tree-walk retrieval works even when enrich
+      //    is disabled. When enrich=true, additionally run LLM enrichment
+      //    (per-chunk keywords + doc summary + tree summaries) and prefer the
+      //    enriched tree (has summaries) over the base tree.
+      let semanticMap: Map<number, { keywords: string[]; summary: string }> = new Map();
+      let docSummary: DocumentSummaryNode[] = [];
+      let semanticTree: SemanticTreeNode[] =
+        parsed.parser !== 'failed' ? mdToTree(parsed) : [];
+      if (doEnrich && chunks.length > 0 && parsed.parser !== 'failed') {
+        try {
+          const sem = await buildSemanticIndex(parsed, chunks);
+          semanticMap = sem.chunks;
+          docSummary = sem.summary;
+          // Prefer the enriched tree (has LLM summaries) over the base tree.
+          if (sem.tree.length > 0) semanticTree = sem.tree;
+        } catch (err) {
+          console.error('[materials] semantic enrichment failed:', err);
+          // Non-fatal — continue with the base tree (no summaries).
+        }
+      }
+
+      // 4. Embed each chunk + fold in semantic keywords/summary to metadata.
+      //    v2: also persist blockType / sectionPath / page / bbox / sectionRole.
+      const embeddedChunks = chunks.map((c) => {
+        const sem = semanticMap.get(c.chunkIndex);
+        const metaWithSem = {
+          ...c.metadata,
+          keywords: sem?.keywords ?? [],
+          summary: sem?.summary ?? '',
+        };
+        return {
+          content: c.content,
+          section: c.section,
+          chunkIndex: c.chunkIndex,
+          charStart: c.charStart,
+          charEnd: c.charEnd,
+          tokens: c.tokens,
+          embedding: encodeEmbedding(embed(c.content)),
+          metadata: JSON.stringify(metaWithSem),
+          // v2 fields:
+          blockType: c.blockType,
+          sectionPath: c.sectionPath,
+          page: c.page ?? null,
+          bbox: c.bbox ? JSON.stringify(c.bbox) : null,
+          sectionRole: c.sectionRole ?? null,
+        };
+      });
+
+      // 5. Persist material + chunks atomically.
+      const status = parsed.parser === 'failed' ? 'error' : 'ready';
+      // Outline storage priority: semantic tree (P2, richest) > doc summary > flat outline.
+      const outline = semanticTree.length > 0
+        ? semanticTree
+        : docSummary.length > 0
+          ? docSummary
+          : buildOutline(parsed.sections);
       const material = await db.learningMaterial.create({
         data: {
           sessionId: id,
@@ -150,17 +189,31 @@ export async function POST(
           fileType: entry.type || 'application/octet-stream',
           size: entry.size,
           title: entry.name.replace(/\.[^.]+$/, '').slice(0, 200) || entry.name.slice(0, 200),
-          content,
-          charCount: content.length,
-          status: 'ready',
+          content: parsed.text,
+          charCount: parsed.text.length,
+          status,
+          parser: parsed.parser,
+          pageCount: parsed.metadata.pageCount ?? null,
+          language: parsed.metadata.language ?? null,
+          outline: outline.length > 0 ? JSON.stringify(outline) : null,
+          chunkCount: embeddedChunks.length,
+          chunks: {
+            create: embeddedChunks,
+          },
         },
         select: {
           id: true, sessionId: true, filename: true, fileType: true,
           size: true, title: true, charCount: true, status: true,
+          parser: true, pageCount: true, language: true, chunkCount: true,
           createdAt: true, updatedAt: true,
         },
       });
-      created.push(material);
+
+      created.push({
+        ...material,
+        warnings: parsed.warnings,
+        semanticEnriched: semanticMap.size > 0,
+      });
     }
 
     return NextResponse.json({ materials: created });
@@ -178,6 +231,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+    // DocumentChunk rows cascade-delete with their parent material.
     await db.learningMaterial.deleteMany({ where: { sessionId: id } });
     return NextResponse.json({ ok: true });
   } catch (error) {

@@ -110,6 +110,11 @@ export interface LearningMaterial {
   status: string;
   createdAt: string;
   updatedAt: string;
+  // RAG pipeline metadata (v1.1+)
+  parser?: string | null;
+  pageCount?: number | null;
+  language?: string | null;
+  chunkCount?: number;
 }
 
 // ─── Store Interface ────────────────────────────────────────────────────────
@@ -211,6 +216,8 @@ interface LearningStore {
   materials: LearningMaterial[];
   isLoadingMaterials: boolean;
   isUploadingMaterials: boolean;
+  /** ID of the material currently being re-parsed (high-precision), or null. */
+  reparsingMaterialId: string | null;
 
   // Actions - Sessions
   fetchSessions: () => Promise<void>;
@@ -246,7 +253,8 @@ interface LearningStore {
 
   // Actions - Materials (file import / knowledge base)
   fetchMaterials: (sessionId: string) => Promise<void>;
-  uploadMaterials: (sessionId: string, files: File[]) => Promise<void>;
+  uploadMaterials: (sessionId: string, files: File[], opts?: { precision?: 'fast' | 'medium' | 'high'; enrich?: boolean }) => Promise<void>;
+  reparseMaterial: (materialId: string, file: File, opts?: { precision?: 'fast' | 'medium' | 'high'; enrich?: boolean }) => Promise<void>;
   deleteMaterial: (id: string) => Promise<void>;
   updateMaterialTitle: (id: string, title: string) => Promise<void>;
 
@@ -365,6 +373,7 @@ const initialState = {
   materials: [] as LearningMaterial[],
   isLoadingMaterials: false,
   isUploadingMaterials: false,
+  reparsingMaterialId: null,
 };
 
 // ─── Notes Save Debounce Tracker ────────────────────────────────────────────
@@ -962,12 +971,14 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
     }
   },
 
-  uploadMaterials: async (sessionId: string, files: File[]) => {
+  uploadMaterials: async (sessionId: string, files: File[], opts?: { precision?: 'fast' | 'medium' | 'high'; enrich?: boolean }) => {
     if (files.length === 0) return;
     set({ isUploadingMaterials: true });
     try {
       const formData = new FormData();
       for (const f of files) formData.append('files', f);
+      if (opts?.precision) formData.append('precision', opts.precision);
+      if (opts?.enrich !== undefined) formData.append('enrich', String(opts.enrich));
       const res = await fetch(`/api/sessions/${sessionId}/materials`, {
         method: 'POST',
         body: formData,
@@ -1004,13 +1015,25 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
           }
         } catch {}
       }
+      // Surface parser warnings (e.g. "PDF 无文本层，可能为扫描件") so the
+      // learner knows why a file produced 0 chars / 0 chunks.
+      const warnings: string[] = [];
+      for (const m of created) {
+        const w = (m as any).warnings;
+        if (Array.isArray(w) && w.length > 0) {
+          warnings.push(`${m.filename}: ${w.join('；')}`);
+        }
+      }
       if (created.length > 0) {
         try {
           const { toast } = await import('@/hooks/use-toast');
+          const totalChunks = created.reduce((sum: number, m: any) => sum + (m.chunkCount || 0), 0);
           toast({
-            title: `已导入 ${created.length} 个文件`,
-            description: 'AI 对话与课程生成将基于这些资料定制',
-            duration: 4000,
+            title: `已导入 ${created.length} 个文件 · 索引 ${totalChunks} 个片段`,
+            description: warnings.length > 0
+              ? warnings.join('；')
+              : 'AI 对话与课程生成将基于这些资料的相关片段进行 RAG 检索',
+            duration: 5000,
             className:
               'border-neutral-200 bg-white text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100',
           });
@@ -1037,6 +1060,57 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       console.error('Failed to delete material:', error);
       const { currentSessionId } = get();
       if (currentSessionId) await get().fetchMaterials(currentSessionId);
+    }
+  },
+
+  reparseMaterial: async (materialId: string, file: File, opts?: { precision?: 'fast' | 'medium' | 'high'; enrich?: boolean }) => {
+    set({ reparsingMaterialId: materialId });
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('precision', opts?.precision ?? 'high');
+      if (opts?.enrich !== undefined) formData.append('enrich', String(opts.enrich));
+      const res = await fetch(`/api/materials/${materialId}/reparse`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!res.ok) {
+        console.error('reparseMaterial failed:', res.status);
+        try {
+          const { toast } = await import('@/hooks/use-toast');
+          toast({
+            title: '重新解析失败',
+            description: `服务器返回 ${res.status}`,
+            variant: 'destructive',
+          });
+        } catch {}
+        return;
+      }
+      const data = await res.json();
+      const updated = data.material;
+      if (updated) {
+        // Replace the material in the list with the updated row.
+        set((s) => ({
+          materials: s.materials.map((m) => (m.id === materialId ? { ...m, ...updated } : m)),
+        }));
+        const warnings: string[] = Array.isArray(data.warnings) ? data.warnings : [];
+        try {
+          const { toast } = await import('@/hooks/use-toast');
+          toast({
+            title: `重新解析完成 · ${updated.parser ?? '未知'} · ${updated.chunkCount ?? 0} 片段`,
+            description: warnings.length > 0
+              ? warnings.join('；')
+              : (data.semanticEnriched ? '已生成语义关键词索引' : '未启用语义增强'),
+            duration: 5000,
+            className:
+              'border-neutral-200 bg-white text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100',
+          });
+        } catch {}
+      }
+    } catch (error) {
+      console.error('Failed to reparse material:', error);
+    } finally {
+      set({ reparsingMaterialId: null });
     }
   },
 

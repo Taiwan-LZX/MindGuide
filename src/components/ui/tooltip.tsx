@@ -53,7 +53,7 @@ export function Tooltip({ text, children }: TooltipProps) {
             initial={{ opacity: 0, scale: 0.92, y: 4 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 4 }}
-            transition={{ type: 'spring', stiffness: 500, damping: 30, duration: 0.2 }}
+            transition={{ type: 'spring' as const, stiffness: 500, damping: 30, duration: 0.2 }}
             className="pointer-events-none fixed z-[100] max-w-[200px] rounded-md border border-neutral-200/60 bg-white px-2.5 py-1.5 shadow-sm dark:border-neutral-700/60 dark:bg-neutral-800"
             style={{ left: pos.x, top: pos.y }}
           >
@@ -66,3 +66,4 @@ export function Tooltip({ text, children }: TooltipProps) {
     </div>
   );
 }
+

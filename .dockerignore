@@ -1,0 +1,51 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Dependencies (regenerated inside the image)
+node_modules
+bun.lock
+
+# Build artifacts
+.next
+out
+build
+dist
+
+# Dev / environment
+.env
+.env.local
+.env*.local
+dev.log
+server.log
+*.tsbuildinfo
+
+# Tooling & sandbox internals (not part of the app)
+skills
+mini-services
+examples
+tool-results
+download
+upload
+db/*.db
+db/*.db-journal
+worklog.md
+
+# Docs & meta
+docs
+README.md
+LICENSE
+.editorconfig
+.nvmrc
+Caddyfile*
+keep-server.sh
+daemonize.py
+watchdog.py
+.zscripts
+
+# Misc
+.DS_Store
+*.pem
+*.bak
+*.bak.*

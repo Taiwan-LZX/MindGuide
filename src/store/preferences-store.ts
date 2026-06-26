@@ -38,7 +38,7 @@ function persist(partial: Partial<PersistedPreferences>) {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const prev: PersistedPreferences = raw
-      ? { motionEnabled: true, accentColor: null, ...(JSON.parse(raw) as PersistedPreferences) }
+      ? { motionEnabled: true, accentColor: null, ...(JSON.parse(raw) as Partial<PersistedPreferences>) }
       : { motionEnabled: true, accentColor: null };
     const next: PersistedPreferences = { ...prev, ...partial };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));

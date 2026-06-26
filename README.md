@@ -52,6 +52,42 @@ bun run dev
 
 访问 `http://localhost:3000`
 
+## 质量闸门
+
+```bash
+bun run lint        # ESLint（0 errors / 0 warnings 才通过）
+bun run typecheck   # tsc --noEmit（0 errors 才通过）
+bun run build       # 生产构建（standalone output）
+```
+
+CI（`.github/workflows/ci.yml`）在每次 push / PR 时自动运行 lint + typecheck + build，三者全过才允许合并。
+
+## 部署
+
+### Docker（推荐）
+
+```bash
+docker build -t mindguide .
+docker run -p 3000:3000 -v mindguide-db:/app/db \
+  -e DATABASE_URL="file:/app/db/custom.db" \
+  mindguide
+```
+
+镜像基于 `oven/bun:1.1`，多阶段构建（deps → build → runner），非 root 用户运行，SQLite 数据挂载到命名卷。首次启动自动执行 `prisma db push` 初始化 schema。
+
+### 手动
+
+```bash
+bun install --frozen-lockfile
+bunx prisma generate
+bun run build
+DATABASE_URL="file:./db/custom.db" bun run start
+```
+
+## 安全须知
+
+⚠️ **MindGuide v1 不包含用户认证。** 所有 API 路由公开可访问。NextAuth.js v4 已在 `package.json` 中声明但未接线——适合本地单用户学习场景，**不建议直接暴露到公网**。如需多用户部署，请先实现 auth 层（参考 `docs/ARCHITECTURE.md` § 8 Known limitations）。
+
 ## 数据库模型
 
 ```

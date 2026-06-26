@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MoreVertical, BookOpen, GraduationCap, ArrowUp, Square, ArrowDown, Copy, Check, Download } from 'lucide-react';
+import { MoreVertical, BookOpen, GraduationCap, ArrowUp, Square, ArrowDown, Copy, Check } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 import { KnowledgeInline } from '@/components/learning/knowledge-inline';
 import { MarkdownRenderer } from '@/components/learning/markdown-renderer';
@@ -37,7 +37,7 @@ const msgVariants = {
   visible: {
     opacity: 1,
     y: 0,
-    transition: { type: 'spring', stiffness: 320, damping: 30, mass: 0.7 },
+    transition: { type: 'spring' as const, stiffness: 320, damping: 30, mass: 0.7 },
   },
 };
 
@@ -46,7 +46,7 @@ const dateSepVariants = {
   visible: {
     opacity: 1,
     scale: 1,
-    transition: { type: 'spring', stiffness: 380, damping: 28, mass: 0.6 },
+    transition: { type: 'spring' as const, stiffness: 380, damping: 28, mass: 0.6 },
   },
 };
 
@@ -55,7 +55,7 @@ const streamingBubbleVariants = {
   visible: {
     opacity: 1,
     y: 0,
-    transition: { type: 'spring', stiffness: 320, damping: 28, mass: 0.7 },
+    transition: { type: 'spring' as const, stiffness: 320, damping: 28, mass: 0.7 },
   },
   // EXIT EASING (anim-refine-003): split per-property so opacity leads with
   // ease-out — the streaming bubble visibly fades from frame 1 instead of
@@ -64,8 +64,8 @@ const streamingBubbleVariants = {
     opacity: 0,
     y: -4,
     transition: {
-      opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] },
-      y: { duration: 0.18, ease: [0.4, 0, 1, 1] },
+      opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] as const },
+      y: { duration: 0.18, ease: [0.4, 0, 1, 1] as const },
     },
   },
 };
@@ -75,7 +75,7 @@ const emptyStateVariants = {
   visible: {
     opacity: 1,
     y: 0,
-    transition: { delay: 0.15, type: 'spring', stiffness: 260, damping: 26, mass: 0.9 },
+    transition: { delay: 0.15, type: 'spring' as const, stiffness: 260, damping: 26, mass: 0.9 },
   },
 };
 
@@ -85,7 +85,7 @@ const knowledgeVariants = {
     opacity: 1,
     y: 0,
     scale: 1,
-    transition: { type: 'spring', stiffness: 240, damping: 26, mass: 0.9 },
+    transition: { type: 'spring' as const, stiffness: 240, damping: 26, mass: 0.9 },
   },
 };
 
@@ -96,7 +96,7 @@ const welcomeVariants = {
     y: 0,
     transition: {
       delay: 0.08 * i,
-      type: 'spring',
+      type: 'spring' as const,
       stiffness: 220,
       damping: 26,
       mass: 0.9,

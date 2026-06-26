@@ -14,7 +14,6 @@ import {
   ListChecks,
   CreditCard,
   Trophy,
-  BarChart3,
   Network,
   ChevronRight,
   StickyNote,
@@ -62,7 +61,7 @@ const features = [
 //    metaphor as the spring entry, but cheaper than nested motion variants.
 
 // Overshoot bezier — feels like a small spring without the runtime cost.
-const TACTILE_BEZIER = 'cubic-bezier(0.34, 1.56, 0.64, 1)';
+// TACTILE_BEZIER removed (was unused). Re-add if a spring needs the bounce curve.
 
 const popoverVariants: Variants = {
   hidden: { opacity: 0, y: 14, scale: 0.965 },

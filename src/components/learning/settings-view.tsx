@@ -300,7 +300,7 @@ const panelVariants = {
     opacity: 1,
     scale: 1,
     y: 0,
-    transition: { type: 'spring', stiffness: 200, damping: 24, mass: 1.0 },
+    transition: { type: 'spring' as const, stiffness: 200, damping: 24, mass: 1.0 },
   },
   exit: {
     opacity: 0,
@@ -310,13 +310,13 @@ const panelVariants = {
       // Opacity leads: 0.22s ease-out so the user sees the modal fading
       // immediately. SnoozeOut curve: 70% of the fade happens in the first
       // 30% of duration.
-      opacity: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
+      opacity: { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const },
       // Scale + y follow with a shorter ease-in: the panel "shrinks and
       // drops" within 0.20s, then continues fading as a translucent ghost
       // for the remaining ~20ms. This matches the physical metaphor of
       // "departing" while avoiding the "stuck then snap" perception.
-      scale: { duration: 0.20, ease: [0.4, 0, 1, 1] },
-      y: { duration: 0.22, ease: [0.4, 0, 1, 1] },
+      scale: { duration: 0.20, ease: [0.4, 0, 1, 1] as const },
+      y: { duration: 0.22, ease: [0.4, 0, 1, 1] as const },
     },
   },
 };
@@ -339,16 +339,16 @@ const contentVariants = {
     opacity: 1,
     x: 0,
     y: 0,
-    transition: { type: 'spring', stiffness: 320, damping: 30, mass: 0.7 },
+    transition: { type: 'spring' as const, stiffness: 320, damping: 30, mass: 0.7 },
   },
   exit: (dir: number) => ({
     opacity: 0,
     x: -14 * dir,
     y: -4,
     transition: {
-      opacity: { duration: 0.16, ease: [0.16, 1, 0.3, 1] },
-      x: { duration: 0.20, ease: [0.16, 1, 0.3, 1] },
-      y: { duration: 0.16, ease: [0.4, 0, 1, 1] },
+      opacity: { duration: 0.16, ease: [0.16, 1, 0.3, 1] as const },
+      x: { duration: 0.20, ease: [0.16, 1, 0.3, 1] as const },
+      y: { duration: 0.16, ease: [0.4, 0, 1, 1] as const },
     },
   }),
 };
@@ -365,16 +365,16 @@ const hintVariants = {
     opacity: 1,
     y: 0,
     scale: 1,
-    transition: { type: 'spring', stiffness: 360, damping: 28, mass: 0.6 },
+    transition: { type: 'spring' as const, stiffness: 360, damping: 28, mass: 0.6 },
   },
   exit: {
     opacity: 0,
     y: -4,
     scale: 0.99,
     transition: {
-      opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] },
-      y: { duration: 0.16, ease: [0.4, 0, 1, 1] },
-      scale: { duration: 0.14, ease: [0.4, 0, 1, 1] },
+      opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] as const },
+      y: { duration: 0.16, ease: [0.4, 0, 1, 1] as const },
+      scale: { duration: 0.14, ease: [0.4, 0, 1, 1] as const },
     },
   },
 };
@@ -955,7 +955,7 @@ function SettingsPreview({ activeTab }: { activeTab: TabKey }) {
         >
           <AnimatePresence mode="wait">
             <motion.span
-              key={hint.icon?.displayName ?? 'default'}
+              key={(hint.icon as { displayName?: string } | undefined)?.displayName ?? 'default'}
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.8 }}

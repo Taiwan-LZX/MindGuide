@@ -19,7 +19,7 @@ export async function PATCH(
     });
 
     return NextResponse.json({ node: updated });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: 'Failed to update knowledge node' }, { status: 500 });
   }
 }

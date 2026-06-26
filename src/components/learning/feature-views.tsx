@@ -51,9 +51,9 @@ export const pageVariants = {
     transition: {
       // Split per-property so opacity leads (perceptible fade from frame 1)
       // and transform follows with a slight ease-out trail.
-      opacity: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
-      x: { duration: 0.26, ease: [0.16, 1, 0.3, 1] },
-      scale: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
+      opacity: { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const },
+      x: { duration: 0.26, ease: [0.16, 1, 0.3, 1] as const },
+      scale: { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const },
     },
   }),
 };
@@ -61,7 +61,6 @@ export const pageVariants = {
 import {
   ArrowLeft,
   Plus,
-  X,
   Check,
   Trash2,
   Trophy,
@@ -86,7 +85,14 @@ import {
   Upload,
   Loader2,
   File,
-  Network,
+  ChevronDown,
+  ChevronRight,
+  Search,
+  FileSearch,
+  Quote,
+  Zap,
+  Gauge,
+  ScanLine,
 } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 // PDFImportView removed during cleanup — feature replaced with notes editor
@@ -130,7 +136,7 @@ const itemVariants = {
     y: 0,
     transition: {
       delay: 0.08 + 0.045 * i,
-      type: 'spring',
+      type: 'spring' as const,
       stiffness: 320,
       damping: 28,
       mass: 0.8,
@@ -1229,12 +1235,23 @@ function MaterialsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElemen
     fetchMaterials,
     uploadMaterials,
     deleteMaterial,
+    reparseMaterial,
+    reparsingMaterialId,
   } = useLearningStore();
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const reparseFileRef = React.useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = React.useState(false);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editValue, setEditValue] = React.useState('');
+  const [expandedId, setExpandedId] = React.useState<string | null>(null);
+  // v2: precision selector for PDF uploads.
+  //   fast   — unpdf text only (instant, free)
+  //   medium — + MuPDF structured text fallback for sparse PDFs
+  //   high   — + VLM page rendering for scanned/complex pages + semantic enrichment
+  const [precision, setPrecision] = React.useState<'fast' | 'medium' | 'high'>('fast');
+  // Track which material is queued for reparse (so the hidden file input knows).
+  const [reparseTargetId, setReparseTargetId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (currentSessionId) fetchMaterials(currentSessionId);
@@ -1243,8 +1260,24 @@ function MaterialsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElemen
   const handleFiles = React.useCallback((files: FileList | File[]) => {
     if (!currentSessionId) return;
     const arr = Array.from(files);
-    if (arr.length > 0) void uploadMaterials(currentSessionId, arr);
-  }, [currentSessionId, uploadMaterials]);
+    if (arr.length > 0) {
+      void uploadMaterials(currentSessionId, arr, {
+        precision,
+        enrich: precision === 'high',
+      });
+    }
+  }, [currentSessionId, uploadMaterials, precision]);
+
+  // Reparse flow: user clicks "升级到高精度" → we open the hidden file input
+  // → user re-selects the original PDF → we call reparseMaterial.
+  const handleReparseFileSelect = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && reparseTargetId) {
+      void reparseMaterial(reparseTargetId, file, { precision: 'high', enrich: true });
+    }
+    setReparseTargetId(null);
+    e.target.value = '';
+  }, [reparseTargetId, reparseMaterial]);
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -1268,12 +1301,30 @@ function MaterialsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElemen
   };
 
   const totalChars = materials.reduce((s, m) => s + (m.charCount || 0), 0);
+  const totalChunks = materials.reduce((s, m) => s + (m.chunkCount || 0), 0);
+
+  // Parser badge colour mapping — monochrome academic, but distinguishable.
+  // v2 adds 'mupdf-text' (medium precision) and 'vlm-merged' (high precision).
+  const parserLabel = (p?: string | null): { label: string; tone: string } => {
+    switch (p) {
+      case 'unpdf': return { label: 'PDF', tone: 'text-neutral-700 dark:text-neutral-300' };
+      case 'mammoth': return { label: 'DOCX', tone: 'text-neutral-700 dark:text-neutral-300' };
+      case 'xlsx': return { label: 'XLSX', tone: 'text-neutral-700 dark:text-neutral-300' };
+      case 'pptx': return { label: 'PPTX', tone: 'text-neutral-700 dark:text-neutral-300' };
+      case 'html': return { label: 'HTML', tone: 'text-neutral-700 dark:text-neutral-300' };
+      case 'text': return { label: 'TEXT', tone: 'text-neutral-700 dark:text-neutral-300' };
+      case 'mupdf-text': return { label: 'PDF·STRUCT', tone: 'text-emerald-700 dark:text-emerald-400' };
+      case 'vlm-merged': return { label: 'PDF·VLM', tone: 'text-emerald-700 dark:text-emerald-400' };
+      case 'failed': return { label: 'FAILED', tone: 'text-amber-600 dark:text-amber-500' };
+      default: return { label: '—', tone: 'text-neutral-400' };
+    }
+  };
 
   return (
     <>
       <FeatureHeader title="文件导入" icon={FileText} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
       <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="mx-auto max-w-[600px] px-6 py-5">
+        <div className="mx-auto max-w-[680px] px-6 py-5">
 
           {/* ─── Drop zone / upload affordance ────────────────────────────── */}
           <motion.div
@@ -1302,10 +1353,10 @@ function MaterialsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElemen
               </div>
               <div>
                 <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-200">
-                  {isUploadingMaterials ? '正在导入…' : '拖拽文件到此处，或点击选择'}
+                  {isUploadingMaterials ? '正在解析与索引…' : '拖拽文件到此处，或点击选择'}
                 </p>
                 <p className="mt-0.5 text-[11px] text-neutral-400">
-                  支持 txt / md / csv / json / 代码 / HTML 等，单文件 ≤ 5 MB
+                  支持 PDF / DOCX / XLSX / PPTX / HTML / Markdown / 代码 / 纯文本，单文件 ≤ 25 MB
                 </p>
               </div>
             </button>
@@ -1316,9 +1367,66 @@ function MaterialsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElemen
               className="hidden"
               onChange={(e) => {
                 if (e.target.files) handleFiles(e.target.files);
-                e.target.value = ''; // allow re-selecting the same file
+                e.target.value = '';
               }}
             />
+            {/* Hidden file input for reparse (single-file, PDF only) */}
+            <input
+              ref={reparseFileRef}
+              type="file"
+              accept=".pdf,application/pdf"
+              className="hidden"
+              onChange={handleReparseFileSelect}
+            />
+          </motion.div>
+
+          {/* ─── v2: Precision selector (PDF only) ─────────────────────────── */}
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0, transition: { delay: 0.04 } }}
+            className="mb-5 rounded-xl border border-neutral-100 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+          >
+            <div className="mb-2 flex items-center gap-2">
+              <Gauge className="h-3.5 w-3.5 text-neutral-500 dark:text-neutral-400" />
+              <p className="text-[12px] font-medium text-neutral-700 dark:text-neutral-200">
+                PDF 解析精度
+              </p>
+              <span className="text-[10px] text-neutral-400">
+                · 仅影响 PDF 文件，其他格式始终使用最优解析器
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {([
+                { key: 'fast', label: '快速', desc: '文本层提取 · 秒级', icon: Zap },
+                { key: 'medium', label: '结构化', desc: 'MuPDF 布局感知 · 适合多栏', icon: ScanLine },
+                { key: 'high', label: '高精度', desc: 'VLM 视觉理解 · 扫描件/表格/公式', icon: Sparkles },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setPrecision(opt.key)}
+                  className={`flex flex-col items-start gap-0.5 rounded-lg border px-2.5 py-2 text-left transition-all ${
+                    precision === opt.key
+                      ? 'border-neutral-900 bg-neutral-50 dark:border-neutral-100 dark:bg-neutral-800'
+                      : 'border-neutral-200 bg-white hover:border-neutral-300 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:border-neutral-600'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <opt.icon className={`h-3 w-3 ${precision === opt.key ? 'text-neutral-900 dark:text-neutral-100' : 'text-neutral-400'}`} />
+                    <span className={`text-[11px] font-medium ${precision === opt.key ? 'text-neutral-900 dark:text-neutral-100' : 'text-neutral-600 dark:text-neutral-300'}`}>
+                      {opt.label}
+                    </span>
+                  </div>
+                  <span className="text-[9.5px] leading-tight text-neutral-400">{opt.desc}</span>
+                </button>
+              ))}
+            </div>
+            {precision === 'high' && (
+              <p className="mt-2 flex items-start gap-1.5 text-[10px] leading-relaxed text-amber-600 dark:text-amber-500">
+                <Sparkles className="mt-px h-3 w-3 shrink-0" />
+                <span>高精度模式会调用 VLM 逐页解析（扫描件全页 / 复杂页选择性）并生成语义关键词索引，单文件耗时约 30 秒至数分钟。</span>
+              </p>
+            )}
           </motion.div>
 
           {/* ─── How this is used (info card) ────────────────────────────── */}
@@ -1329,11 +1437,12 @@ function MaterialsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElemen
           >
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
-                <FileText className="h-3.5 w-3.5" />
+                <FileSearch className="h-3.5 w-3.5" />
               </div>
               <div className="flex-1 text-[12px] leading-relaxed text-neutral-500 dark:text-neutral-400">
-                导入的学习资料会作为本会话的<span className="font-medium text-neutral-700 dark:text-neutral-300">知识库</span>：
-                AI 对话时会引用其中的概念与术语，课程生成会基于这些资料定制课时内容。
+                导入的文件会经过<span className="font-medium text-neutral-700 dark:text-neutral-300"> 解析 → 结构化切片 → 向量化 </span>三步管线，
+                形成 RAG 知识库。AI 对话与课程生成时会基于学习者当前问题<span className="font-medium text-neutral-700 dark:text-neutral-300"> 检索最相关的片段 </span>
+                作为上下文，而非整篇塞入。
               </div>
             </div>
           </motion.div>
@@ -1345,18 +1454,20 @@ function MaterialsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElemen
             <EmptyState
               icon={File}
               title="还没有导入文件"
-              description="拖拽或点击上方区域上传学习资料，AI 将基于这些内容进行定制化教学"
+              description="拖拽或点击上方区域上传学习资料，AI 将基于这些内容进行 RAG 检索"
             />
           ) : (
             <>
-              {/* Summary bar */}
+              {/* Summary bar — now shows chunk count too */}
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-[12px] font-medium text-neutral-600 dark:text-neutral-400">
                   {materials.length} 个文件 · {formatBytes(materials.reduce((s, m) => s + (m.size || 0), 0))}
                 </p>
-                <span className="text-[11px] text-neutral-400 tabular-nums">
-                  {totalChars.toLocaleString()} 字符已索引
-                </span>
+                <div className="flex items-center gap-2 text-[11px] text-neutral-400 tabular-nums">
+                  <span>{totalChars.toLocaleString()} 字符</span>
+                  <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                  <span>{totalChunks.toLocaleString()} 检索片段</span>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -1370,57 +1481,128 @@ function MaterialsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElemen
                       animate="visible"
                       exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.18 } }}
                       layout
-                      className="group flex items-center gap-3 rounded-xl border border-neutral-100 bg-white p-3.5 transition-colors hover:border-neutral-200 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700"
+                      className="group overflow-hidden rounded-xl border border-neutral-100 bg-white transition-colors hover:border-neutral-200 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700"
                     >
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
-                        <File className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        {editingId === m.id ? (
-                          <input
-                            autoFocus
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                            onBlur={commitEdit}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
-                              if (e.key === 'Escape') { setEditingId(null); setEditValue(''); }
-                            }}
-                            className="w-full rounded border border-neutral-300 bg-white px-1.5 py-0.5 text-[13px] font-medium text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
-                          />
-                        ) : (
-                          <button
-                            onClick={() => startEdit(m.id, m.title || m.filename)}
-                            className="block w-full truncate text-left text-[13px] font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-200 dark:hover:text-neutral-50"
-                            title="点击重命名"
-                          >
-                            {m.title || m.filename}
-                          </button>
-                        )}
-                        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-neutral-400">
-                          <span className="truncate">{m.filename}</span>
-                          <span className="text-neutral-300 dark:text-neutral-700">·</span>
-                          <span className="tabular-nums">{formatBytes(m.size)}</span>
-                          {m.charCount > 0 ? (
-                            <>
-                              <span className="text-neutral-300 dark:text-neutral-700">·</span>
-                              <span className="tabular-nums text-neutral-500 dark:text-neutral-400">{m.charCount.toLocaleString()} 字</span>
-                            </>
+                      {/* ── Row (click to expand) ────────────────────────── */}
+                      <div className="flex items-center gap-3 p-3.5">
+                        <button
+                          onClick={() => setExpandedId(expandedId === m.id ? null : m.id)}
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+                          aria-label={expandedId === m.id ? '折叠' : '展开'}
+                        >
+                          {expandedId === m.id ? (
+                            <ChevronDown className="h-3.5 w-3.5" />
                           ) : (
-                            <>
-                              <span className="text-neutral-300 dark:text-neutral-700">·</span>
-                              <span className="text-amber-600 dark:text-amber-500">未提取文本</span>
-                            </>
+                            <ChevronRight className="h-3.5 w-3.5" />
                           )}
+                        </button>
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                          <File className="h-4 w-4" />
                         </div>
+                        <div className="min-w-0 flex-1">
+                          {editingId === m.id ? (
+                            <input
+                              autoFocus
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              onBlur={commitEdit}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+                                if (e.key === 'Escape') { setEditingId(null); setEditValue(''); }
+                              }}
+                              className="w-full rounded border border-neutral-300 bg-white px-1.5 py-0.5 text-[13px] font-medium text-neutral-900 outline-none focus:border-neutral-500 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
+                            />
+                          ) : (
+                            <button
+                              onClick={() => startEdit(m.id, m.title || m.filename)}
+                              className="block w-full truncate text-left text-[13px] font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-200 dark:hover:text-neutral-50"
+                              title="点击重命名"
+                            >
+                              {m.title || m.filename}
+                            </button>
+                          )}
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10px] text-neutral-400">
+                            {/* Parser badge */}
+                            {m.parser && (
+                              <span className={`rounded border border-neutral-200 px-1 font-medium tracking-wide dark:border-neutral-700 ${parserLabel(m.parser).tone}`}>
+                                {parserLabel(m.parser).label}
+                              </span>
+                            )}
+                            <span className="truncate max-w-[120px]">{m.filename}</span>
+                            <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                            <span className="tabular-nums">{formatBytes(m.size)}</span>
+                            {m.pageCount ? (
+                              <>
+                                <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                                <span className="tabular-nums">{m.pageCount} 页</span>
+                              </>
+                            ) : null}
+                            {m.language ? (
+                              <>
+                                <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                                <span className="uppercase">{m.language}</span>
+                              </>
+                            ) : null}
+                            {m.chunkCount !== undefined && m.chunkCount > 0 ? (
+                              <>
+                                <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                                <span className="tabular-nums text-neutral-500 dark:text-neutral-400">{m.chunkCount} 片段</span>
+                              </>
+                            ) : null}
+                            {m.charCount > 0 ? (
+                              <>
+                                <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                                <span className="tabular-nums">{m.charCount.toLocaleString()} 字</span>
+                              </>
+                            ) : (
+                              <span className="text-amber-600 dark:text-amber-500">未提取文本</span>
+                            )}
+                          </div>
+                        </div>
+                        {/* v2: Reparse-to-high-precision button (PDFs only, not already VLM) */}
+                        {m.parser === 'unpdf' || m.parser === 'mupdf-text' || m.parser === 'failed' ? (
+                          <button
+                            onClick={() => {
+                              setReparseTargetId(m.id);
+                              reparseFileRef.current?.click();
+                            }}
+                            disabled={reparsingMaterialId === m.id}
+                            className="flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[10px] font-medium text-neutral-400 opacity-0 transition-all hover:bg-neutral-100 hover:text-neutral-700 group-hover:opacity-100 disabled:opacity-60 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                            aria-label="升级到高精度解析"
+                            title="重新用 VLM 高精度解析（需重新选择原文件）"
+                          >
+                            {reparsingMaterialId === m.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Sparkles className="h-3 w-3" />
+                            )}
+                            <span className="hidden sm:inline">
+                              {reparsingMaterialId === m.id ? '解析中' : '升级'}
+                            </span>
+                          </button>
+                        ) : null}
+                        <button
+                          onClick={() => void deleteMaterial(m.id)}
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-300 opacity-0 transition-all hover:bg-neutral-100 hover:text-neutral-600 group-hover:opacity-100 dark:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+                          aria-label="删除"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
-                      <button
-                        onClick={() => void deleteMaterial(m.id)}
-                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-neutral-300 opacity-0 transition-all hover:bg-neutral-100 hover:text-neutral-600 group-hover:opacity-100 dark:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
-                        aria-label="删除"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      {/* ── Expanded detail panel ─────────────────────────── */}
+                      <AnimatePresence initial={false}>
+                        {expandedId === m.id && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                            className="overflow-hidden border-t border-neutral-100 dark:border-neutral-800"
+                          >
+                            <MaterialDetailPanel materialId={m.id} filename={m.filename} />
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </motion.div>
                   ))}
                 </AnimatePresence>
@@ -1430,5 +1612,285 @@ function MaterialsView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElemen
         </div>
       </div>
     </>
+  );
+}
+
+// ─── Material detail panel (shown when a material row is expanded) ──────────
+//
+// Shows three things:
+//   1. Outline — the detected section hierarchy (from the parser)
+//   2. Chunks — a paginated chunk viewer (so the learner can see what the
+//      chunker produced — this is what the RAG retriever searches over)
+//   3. Retrieval test — a search box that calls /api/sessions/[id]/retrieve
+//      and shows the top-K passages for the query, so the learner can verify
+//      the RAG system finds the right content.
+
+function MaterialDetailPanel({ materialId, filename }: { materialId: string; filename: string }) {
+  const [tab, setTab] = React.useState<'outline' | 'chunks' | 'retrieval'>('outline');
+  const { currentSessionId } = useLearningStore();
+
+  return (
+    <div className="px-3.5 py-3">
+      {/* Tab switcher */}
+      <div className="mb-3 flex items-center gap-1 rounded-lg bg-neutral-100 p-0.5 dark:bg-neutral-800">
+        {(['outline', 'chunks', 'retrieval'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`flex-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+              tab === t
+                ? 'bg-white text-neutral-900 shadow-sm dark:bg-neutral-900 dark:text-neutral-100'
+                : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200'
+            }`}
+          >
+            {t === 'outline' ? '大纲' : t === 'chunks' ? '检索片段' : '检索测试'}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'outline' && <OutlinePanel materialId={materialId} />}
+      {tab === 'chunks' && <ChunksPanel materialId={materialId} />}
+      {tab === 'retrieval' && <RetrievalTestPanel sessionId={currentSessionId || ''} filename={filename} />}
+    </div>
+  );
+}
+
+function OutlinePanel({ materialId }: { materialId: string }) {
+  const [outline, setOutline] = React.useState<any[] | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/materials/${materialId}/outline`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        setOutline(d.outline || []);
+        setError(null);
+      })
+      .catch(() => {
+        if (!cancelled) setError('加载大纲失败');
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [materialId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-4 text-[11px] text-neutral-400">
+        <Loader2 className="h-3 w-3 animate-spin" /> 加载大纲…
+      </div>
+    );
+  }
+  if (error) return <div className="py-4 text-[11px] text-amber-600">{error}</div>;
+  if (!outline || outline.length === 0) {
+    return (
+      <div className="py-4 text-[11px] text-neutral-400">
+        未检测到结构化大纲。该文件可能没有标题层级（如纯文本 / 表格）。
+      </div>
+    );
+  }
+
+  const renderNodes = (nodes: any[], depth = 0): React.ReactNode => (
+    <ul className={depth === 0 ? '' : 'ml-3 border-l border-neutral-100 pl-2 dark:border-neutral-800'}>
+      {nodes.map((n, i) => (
+        <li key={i} className="py-0.5">
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-[10px] text-neutral-300 dark:text-neutral-700">H{n.level}</span>
+            <span className="text-[11.5px] text-neutral-600 dark:text-neutral-300">{n.title}</span>
+          </div>
+          {n.children && n.children.length > 0 && renderNodes(n.children, depth + 1)}
+        </li>
+      ))}
+    </ul>
+  );
+
+  return <div className="max-h-64 overflow-y-auto custom-scrollbar py-1">{renderNodes(outline)}</div>;
+}
+
+function ChunksPanel({ materialId }: { materialId: string }) {
+  const [page, setPage] = React.useState(1);
+  const [data, setData] = React.useState<any>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [search, setSearch] = React.useState('');
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const url = `/api/materials/${materialId}/chunks?page=${page}&pageSize=10${search ? `&search=${encodeURIComponent(search)}` : ''}`;
+    fetch(url)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch(() => { if (!cancelled) setData(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [materialId, page, search]);
+
+  if (loading && !data) {
+    return (
+      <div className="flex items-center gap-2 py-4 text-[11px] text-neutral-400">
+        <Loader2 className="h-3 w-3 animate-spin" /> 加载片段…
+      </div>
+    );
+  }
+  if (!data || !data.chunks || data.chunks.length === 0) {
+    return (
+      <div className="py-4 text-[11px] text-neutral-400">
+        {search ? '没有匹配的片段' : '该文件未生成检索片段（可能因为解析失败或文本为空）'}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Search box */}
+      <div className="relative mb-2">
+        <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-neutral-400" />
+        <input
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          placeholder="过滤片段内容…"
+          className="w-full rounded-md border border-neutral-200 bg-white py-1 pl-6 pr-2 text-[11px] text-neutral-700 outline-none focus:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+        />
+      </div>
+      <div className="max-h-72 space-y-2 overflow-y-auto custom-scrollbar">
+        {data.chunks.map((c: any) => (
+          <div key={c.id} className="rounded-md border border-neutral-100 bg-neutral-50/50 p-2 dark:border-neutral-800 dark:bg-neutral-800/30">
+            {c.section && (
+              <div className="mb-1 flex items-center gap-1 text-[10px] text-neutral-400">
+                <Quote className="h-2.5 w-2.5" />
+                <span className="truncate">{c.section}</span>
+                <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                <span className="tabular-nums">#{c.chunkIndex + 1}</span>
+                <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                <span className="tabular-nums">~{c.tokens} tok</span>
+              </div>
+            )}
+            {!c.section && (
+              <div className="mb-1 text-[10px] text-neutral-400 tabular-nums">
+                #{c.chunkIndex + 1} · ~{c.tokens} tok
+              </div>
+            )}
+            <p className="line-clamp-4 text-[11px] leading-relaxed text-neutral-600 dark:text-neutral-300">
+              {c.content}
+            </p>
+          </div>
+        ))}
+      </div>
+      {/* Pagination */}
+      {data.totalPages > 1 && (
+        <div className="mt-2 flex items-center justify-between text-[10px] text-neutral-400">
+          <span className="tabular-nums">第 {page} / {data.totalPages} 页 · 共 {data.total} 片段</span>
+          <div className="flex gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="rounded border border-neutral-200 px-1.5 py-0.5 disabled:opacity-30 dark:border-neutral-700"
+            >上一页</button>
+            <button
+              onClick={() => setPage((p) => Math.min(data.totalPages, p + 1))}
+              disabled={page === data.totalPages}
+              className="rounded border border-neutral-200 px-1.5 py-0.5 disabled:opacity-30 dark:border-neutral-700"
+            >下一页</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RetrievalTestPanel({ sessionId, filename }: { sessionId: string; filename: string }) {
+  const [query, setQuery] = React.useState('');
+  const [results, setResults] = React.useState<any[] | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [searched, setSearched] = React.useState(false);
+
+  const runSearch = React.useCallback(async () => {
+    if (!query.trim() || !sessionId) return;
+    setLoading(true);
+    setSearched(true);
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/retrieve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, topK: 5 }),
+      });
+      if (!res.ok) { setResults([]); return; }
+      const data = await res.json();
+      setResults(data.passages || []);
+    } catch {
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [query, sessionId]);
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-1.5">
+        <div className="relative flex-1">
+          <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-neutral-400" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void runSearch(); }}
+            placeholder="输入一个问题，测试 RAG 检索效果…"
+            className="w-full rounded-md border border-neutral-200 bg-white py-1 pl-6 pr-2 text-[11px] text-neutral-700 outline-none focus:border-neutral-400 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+          />
+        </div>
+        <button
+          onClick={() => void runSearch()}
+          disabled={!query.trim() || loading}
+          className="rounded-md border border-neutral-200 px-2 py-1 text-[11px] font-medium text-neutral-600 transition-colors hover:bg-neutral-100 disabled:opacity-40 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        >检索</button>
+      </div>
+      <p className="mb-2 text-[10px] text-neutral-400">
+        这与 AI 对话和课程生成使用的检索逻辑完全一致 — 输入学习者可能问的问题，查看哪些片段会被召回。
+      </p>
+
+      {loading && (
+        <div className="flex items-center gap-2 py-4 text-[11px] text-neutral-400">
+          <Loader2 className="h-3 w-3 animate-spin" /> 检索中…
+        </div>
+      )}
+
+      {!loading && searched && results && results.length === 0 && (
+        <div className="py-4 text-[11px] text-amber-600">
+          未检索到相关片段。可能的原因：知识库为空、查询太短、或导入的文件内容与查询无关。
+        </div>
+      )}
+
+      {!loading && results && results.length > 0 && (
+        <div className="max-h-80 space-y-2 overflow-y-auto custom-scrollbar">
+          {results.map((r, i) => (
+            <div key={i} className="rounded-md border border-neutral-100 bg-neutral-50/50 p-2 dark:border-neutral-800 dark:bg-neutral-800/30">
+              <div className="mb-1 flex items-center gap-1 text-[10px] text-neutral-400">
+                <span className="rounded bg-neutral-200 px-1 font-medium text-neutral-600 tabular-nums dark:bg-neutral-700 dark:text-neutral-300">
+                  {(r.score as number).toFixed(3)}
+                </span>
+                <span className="truncate">{r.materialTitle || filename}</span>
+                {r.section && (
+                  <>
+                    <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                    <span className="truncate">{r.section}</span>
+                  </>
+                )}
+                {r.page ? (
+                  <>
+                    <span className="text-neutral-300 dark:text-neutral-700">·</span>
+                    <span className="tabular-nums">p.{r.page}</span>
+                  </>
+                ) : null}
+              </div>
+              <p className="line-clamp-5 text-[11px] leading-relaxed text-neutral-600 dark:text-neutral-300">
+                {r.content}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

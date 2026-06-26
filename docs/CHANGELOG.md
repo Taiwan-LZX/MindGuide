@@ -4,6 +4,111 @@ All notable changes to MindGuide are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-06-26
+
+High-precision document understanding + retrieval upgrade. MindGuide now
+parses PDFs with a 3-tier strategy (unpdf → MuPDF → VLM), chunks with a
+struct-and-token-aware HybridChunker, and retrieves via LLM tree-walk +
+BM25 fusion with GROBID section-role boost and CJK short-query substring
+boost.
+
+### Added — Document parsing (3-tier PDF)
+- **Tier 1 (fast)**: `unpdf` for digital PDFs, `mammoth` for .docx,
+  `xlsx`/`pptx`/`html`/`text` for the rest. Instant.
+- **Tier 2 (medium)**: MuPDF structured-text fallback for sparse PDFs.
+- **Tier 3 (high)**: z-ai VLM (`glm-4v`) page-image rendering for
+  scanned/complex PDFs, with olmOCR-v4-style prompt (YAML front-matter,
+  `\(\)`/`\[\]` LaTeX, bbox-encoded figure filenames).
+- **Marker-style table self-correction** (`src/lib/table-correction.ts`):
+  VLM iteratively refines HTML tables against the page image, score 1–5
+  rubric, ≤175-row guard + 60-row batching, self-iterates until score=5
+  or max 3 rounds. Wired into the Tier-3 pipeline.
+
+### Added — HybridChunker (struct + token aware)
+- Token-budgeted chunking (default 512/768/64 target/max/overlap) replacing
+  the v1 char-based 800/120/1500 splitter.
+- Block-type classification (11 Docling labels: text/title/table/figure/
+  formula/list/code/caption/reference/header/footer).
+- Atomic blocks (tables, formulas, figures) are never split.
+- Tables split by row with `<thead>` repetition per batch.
+- Tiny peer chunks (< 64 tok) merged into same-section neighbours.
+- GROBID section-role detection for academic papers (abstract/introduction/
+  methods/results/discussion/conclusion/references/appendix).
+- v2 DB fields on `DocumentChunk`: `blockType`, `sectionPath` (breadcrumb),
+  `page`, `bbox`, `sectionRole`.
+
+### Added — Retrieval (tree-walk + fusion + boosts)
+- **`mdToTree`** — stack-based heading walk producing a DFS-numbered
+  semantic tree (`0`, `0.0`, `0.1.0`). Thinning threshold 500 tokens keeps
+  the tree navigable for study-material scale. Built on every upload (no
+  LLM) so tree-walk retrieval always works.
+- **Tree-walk retrieval** (`retrieveViaTreeWalk`) — LLM (`glm-4-flash`)
+  walks the flattened semantic tree (vectorless), returns ranked nodeIds,
+  matched to chunks by char range. Fused with BM25 base score.
+- **enrich=true** mode — optional LLM per-chunk keywords + doc summary +
+  tree-node summaries for richer recall. Auto-enabled at precision='high'.
+- **GROBID role-boost** (`src/lib/query-classifier.ts` +
+  `src/lib/role-boost.ts`) — classifies the query into 8 academic intents
+  (method/result/background/definition/comparison/summary/reference/general)
+  via bilingual regex, boosts chunks whose `sectionRole` matches the
+  intent. Cap +0.4 — re-rank micro-tune, never overrides BM25.
+- **CJK short-query substring boost** — for 2–12 char CJK queries, exact
+  phrase match → +0.4, partial bigram overlap → +0.1 × ratio. Fixes the
+  pre-existing BM25 weakness on short Chinese queries.
+
+### Added — DevOps & repository readiness
+- **Dockerfile** — multi-stage `oven/bun:1.1` build (deps → build →
+  runner), non-root user, SQLite volume, auto `prisma db push` on boot.
+- **`.dockerignore`** — keeps the image lean (excludes skills/examples/
+  upload/db/worklog/docs).
+- **GitHub Actions CI** (`.github/workflows/ci.yml`) — lint + typecheck +
+  build gates on every push/PR to main, with concurrency cancellation.
+- **`.editorconfig`** + **`.nvmrc`** (Node 20) for contributor consistency.
+- **`typecheck` script** — `tsc --noEmit` as a first-class quality gate.
+- **`src/types/react-syntax-highlighter.d.ts`** — type shim for the
+  untyped highlighter dependency.
+
+### Changed — Configuration honesty
+- `next.config.ts`: removed `typescript.ignoreBuildErrors: true` (was
+  masking 77 type errors) and enabled `reactStrictMode: true`.
+- `tsconfig.json`: enabled `noImplicitAny: true` to match the README's
+  "TypeScript 5 strict" claim; excluded `examples/`/`skills/`/`mini-services/`
+  from compilation (out-of-scope dirs).
+- `eslint.config.mjs`: re-enabled meaningful rules (`no-unused-vars` warn,
+  `no-debugger`/`no-unreachable`/`no-fallthrough`/`no-empty`/`no-mixed-
+  spaces-and-tabs`/`ban-ts-comment` error, `react-hooks/exhaustive-deps`
+  warn, `prefer-const` warn). The previous config disabled nearly every
+  rule, making `lint` a no-op.
+- `layout.tsx`: favicon moved from external CDN (`z-cdn.chatglm.cn`) to
+  local `/logo.svg`.
+- `.env.example`: expanded with z-ai-web-dev-sdk config notes and
+  `ALLOWED_DEV_ORIGINS` documentation.
+
+### Removed — Dead code
+- 5 unused shadcn/ui components: `dialog`, `label`, `sidebar`, `textarea`,
+  `toggle` (zero import references; `sidebar.tsx` also referenced a
+  non-existent `@/hooks/use-mobile`).
+- shadcn-style pass-through wrappers added to `tooltip.tsx` during TS-fix
+  iteration (only consumer was the deleted `sidebar.tsx`).
+
+### Fixed
+- 77 TypeScript compilation errors (now 0 in `src/`):
+  - Framer Motion `type: 'spring'` string-literal widening → `as const`
+    across 9 components.
+  - MuPDF type-definition gaps in `pdf-renderer.ts` → typed `any` casts
+    with explanatory comments.
+  - `preferences-store.ts` duplicate-key spread → `Partial<>` cast.
+  - `document-chunker.ts` `recursiveSplit` missing `minTokens` in
+    `Required<Pick<...>>`.
+  - `materials/route.ts` inline import types → proper top-level imports.
+
+### Known limitations (unchanged from 1.0.0)
+- No user authentication (NextAuth.js v4 is a dependency but not wired).
+- Cursor-follow spotlight falls back to static hover on touch devices.
+- Feature-to-feature transitions remount the view, losing scroll position.
+
+---
+
 ## [1.0.0] — 2026-06-25
 
 First public open-source release. MindGuide is a single-route Next.js 16

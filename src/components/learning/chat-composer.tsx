@@ -31,6 +31,7 @@ import {
   ArrowUp,
   Square,
   Plus,
+  ChevronDown,
   FileText,
   BookMarked,
   Image as ImageIcon,
@@ -50,7 +51,6 @@ import {
   Gauge,
   Layers,
   CircleDot,
-  Eraser,
 } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 import { MouseFollowTooltip } from '@/components/learning/mouse-follow-tooltip';
@@ -250,7 +250,7 @@ export function ChatComposer({
   // flags property access off any object that also carries a ref, so we pull
   // `open`/`setOpen`/`ref`/`menuRef` out as independent names.
   const { open: attachOpen, setOpen: setAttachOpen, ref: attachRef, menuRef: attachMenuRef, direction: attachDir } = usePopover();
-  const { open: modeOpen, setOpen: setModeOpen, ref: modeRef, menuRef: modeMenuRef } = usePopover();
+  const { open: modeOpen, setOpen: setModeOpen, ref: modeRef, menuRef: modeMenuRef, direction: modeDir } = usePopover();
   const { open: thinkOpen, setOpen: setThinkOpen, ref: thinkRef, menuRef: thinkMenuRef, direction: thinkDir } = usePopover();
   const { open: modelOpen, setOpen: setModelOpen, ref: modelRef, menuRef: modelMenuRef, direction: modelDir } = usePopover();
 
@@ -338,62 +338,11 @@ export function ChatComposer({
     }
   }, [value, expanded]);
 
-  // ── Ephemeral action chip — "清空内容" ──
-  //
-  // Cognitive-psychology rationale: when a user starts rapidly clearing text
-  // (select-all + delete, or mashing backspace), their intent is "overturn
-  // everything and start fresh". Surfacing a one-click "清空内容" chip at
-  // that exact moment closes the intent→action loop instantly — they don't
-  // have to hold backspace or reach for Cmd+A again. The chip is ephemeral:
-  // it pops in with a spring when the gesture is detected, and auto-dismisses
-  // after 5s or when the text becomes empty (mission accomplished).
-  const backspaceTimes = useRef<number[]>([]);
-  const [showClearChip, setShowClearChip] = useState(false);
-  const clearChipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Dismiss the chip once the text is fully cleared (the user completed the
-  // action the chip was offering).
-  useEffect(() => {
-    if (showClearChip && value.length === 0) {
-      queueMicrotask(() => setShowClearChip(false));
-    }
-  }, [value, showClearChip]);
-
-  useEffect(() => {
-    return () => {
-      if (clearChipTimer.current) clearTimeout(clearChipTimer.current);
-    };
-  }, []);
-
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         if (value.trim() && !isStreaming) onSend();
-        return;
-      }
-      // ── Ephemeral chip: detect clearing gestures ──
-      // Gesture 1: Cmd/Ctrl+A (select all) — user is about to clear.
-      // Gesture 2: 3+ Backspace presses within 1.5s while substantial text
-      //   remains — user is holding backspace to delete a long draft.
-      // Either surfaces the "清空内容" chip near the send area.
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a' && value.length > 0) {
-        queueMicrotask(() => setShowClearChip(true));
-        if (clearChipTimer.current) clearTimeout(clearChipTimer.current);
-        clearChipTimer.current = setTimeout(() => queueMicrotask(() => setShowClearChip(false)), 5000);
-        return;
-      }
-      if (e.key === 'Backspace' && value.length > 20) {
-        const now = Date.now();
-        backspaceTimes.current.push(now);
-        backspaceTimes.current = backspaceTimes.current.filter(t => now - t < 1500);
-        if (backspaceTimes.current.length >= 3) {
-          queueMicrotask(() => setShowClearChip(true));
-          if (clearChipTimer.current) clearTimeout(clearChipTimer.current);
-          clearChipTimer.current = setTimeout(() => queueMicrotask(() => setShowClearChip(false)), 5000);
-          // Reset so it doesn't re-fire on every subsequent backspace
-          backspaceTimes.current = [];
-        }
       }
     },
     [value, isStreaming, onSend]
@@ -401,9 +350,13 @@ export function ChatComposer({
 
   const canSend = value.trim().length > 0 && !isStreaming;
   const charCount = value.length;
-  // Visual context-used estimate — char count + a base overhead so the usage
-  // meter shows progress even for short messages.
+  const CONTEXT_BUDGET = 200_000;
+  // Visual context-ring fraction — derive from char count + a base overhead so
+  // the ring shows progress even for short messages.
   const contextUsed = charCount + 8000;
+  const contextFraction = Math.min(1, contextUsed / CONTEXT_BUDGET);
+  // Model-usage fraction (this session, all turns).
+  const modelFraction = Math.min(1, modelUsageTokens / MODEL_BUDGET);
 
   const activeMode = MODE_OPTIONS.find(m => m.key === teachingMode) || MODE_OPTIONS[0];
   const activeThink = THINK_OPTIONS.find(m => m.key === thinkingMode) || THINK_OPTIONS[1];
@@ -536,23 +489,19 @@ export function ChatComposer({
               </MouseFollowTooltip>
             </div>
 
-            {/* 引导模式 selector — icon-only, hover tooltip, menu opens BESIDE (right) */}
+            {/* 引导模式 selector */}
             <div ref={modeRef} className="relative">
-              <MouseFollowTooltip content={`教学模式 · ${activeMode.label}`}>
-                <button
-                  type="button"
-                  onClick={() => setModeOpen(o => !o)}
-                  aria-label={`切换教学模式 · ${activeMode.label}`}
-                  aria-expanded={modeOpen}
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors sm:h-7 sm:w-7 ${
-                    modeOpen
-                      ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
-                      : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
-                  }`}
-                >
-                  <activeMode.icon className="h-4 w-4" strokeWidth={2} />
-                </button>
-              </MouseFollowTooltip>
+              <button
+                type="button"
+                onClick={() => setModeOpen(o => !o)}
+                aria-label="切换教学模式"
+                aria-expanded={modeOpen}
+                className="flex h-7 shrink-0 items-center gap-1 rounded-lg border border-transparent pl-1.5 pr-1 text-[13px] text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+              >
+                <activeMode.icon className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{activeMode.label}</span>
+                <ChevronDown className="h-3.5 w-3.5 text-neutral-400" />
+              </button>
             </div>
           </div>
 
@@ -561,53 +510,68 @@ export function ChatComposer({
 
           {/* Right cluster — ModelCard + 思考 + send */}
           <div className="flex items-center gap-1 sm:gap-1.5">
-            {/* ── Model switcher — bare text, no frame, no chip icon ──
-                Design language: the model identity is just text (like an IDE
-                status-bar mode). Hover reveals full details (usage / context
-                window); click opens the switcher card. No bordered chip, no
-                Cpu icon prefix — the text itself IS the affordance. */}
+            {/* ── ModelCard — merged: model name + usage meters + switcher ──
+                A single chip-shaped button that opens a card popover containing
+                model selection + context-usage meter + model-usage meter.
+                Surface shows: model name + a tiny inline usage bar so the user
+                sees load at a glance. */}
             <div ref={modelRef} className="relative">
-              <MouseFollowTooltip content={`切换模型 · ${activeModel.label} · 上下文 ${(contextUsed / 1000).toFixed(1)}k / ${(activeModel.contextWindow / 1000).toFixed(0)}k`}>
+              <MouseFollowTooltip content={`${activeModel.label} · 上下文 ${(contextUsed / 1000).toFixed(1)}k / ${(activeModel.contextWindow / 1000).toFixed(0)}k`}>
                 <button
                   type="button"
                   onClick={() => setModelOpen(o => !o)}
-                  aria-label={`切换模型 · ${activeModel.label}`}
+                  aria-label="模型与用量"
                   aria-expanded={modelOpen}
-                  className={`flex h-7 shrink-0 items-center rounded-md px-1.5 text-[12px] font-medium transition-colors ${
+                  className={`flex h-7 shrink-0 items-center gap-1.5 rounded-lg border pl-1.5 pr-1 text-[12px] transition-colors ${
                     modelOpen
-                      ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
-                      : 'text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
+                      ? 'border-neutral-300 bg-neutral-100 text-neutral-900 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100'
+                      : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50 hover:text-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
                   }`}
                 >
-                  {activeModel.label}
+                  <Cpu className="h-3.5 w-3.5" strokeWidth={2} />
+                  <span className="hidden font-medium sm:inline">{activeModel.label}</span>
+                  {/* Inline usage bar — 24×4 px, neutral fills, no color hint */}
+                  <span className="hidden h-1 w-6 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700 sm:inline">
+                    <motion.span
+                      className="block h-full rounded-full bg-neutral-700 dark:bg-neutral-200"
+                      initial={false}
+                      animate={{ width: `${Math.max(4, Math.min(100, Math.max(contextFraction, modelFraction) * 100))}%` }}
+                      transition={{ type: 'spring', stiffness: 200, damping: 26 }}
+                    />
+                  </span>
+                  <ChevronDown className="h-3 w-3 text-neutral-400" />
                 </button>
               </MouseFollowTooltip>
             </div>
 
-            {/* ── Subtle separator — demarcates the action zone (think + send,
-                the raised 1/4) from the config zone (attach + mode + model,
-                the flat 3/4). Keeps the send area as the visual focal point. ── */}
-            <span className="mx-0.5 h-4 w-px shrink-0 bg-neutral-200 dark:bg-neutral-700" />
-
-            {/* 思考 selector — icon-only, active = darker icon (no filled chip
-                frame). The icon itself (ZapOff/Zap/BrainCircuit/Network)
-                communicates the level; hover gives the full label. */}
+            {/* 思考 selector — sits directly left of the send button */}
             <div ref={thinkRef} className="relative">
               <MouseFollowTooltip content={`推理强度 · ${activeThink.label}`}>
                 <button
                   type="button"
                   onClick={() => setThinkOpen(o => !o)}
-                  aria-label={`切换思考模式 · ${activeThink.label}`}
+                  aria-label="切换思考模式"
                   aria-expanded={thinkOpen}
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors sm:h-7 sm:w-7 ${
-                    thinkOpen
-                      ? 'bg-neutral-100 text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100'
-                      : thinkingMode === 'off'
-                        ? 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
-                        : 'text-neutral-800 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-800'
+                  className={`flex h-7 shrink-0 items-center gap-1 rounded-lg border pl-1.5 pr-1 text-[12px] transition-colors ${
+                    thinkingMode === 'off'
+                      ? 'border-transparent text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-300'
+                      : modelOpen
+                        ? 'border-neutral-300 bg-neutral-100 text-neutral-900 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100'
+                        : 'border-neutral-200 bg-white text-neutral-800 hover:bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:hover:bg-neutral-800'
                   }`}
                 >
-                  <activeThink.icon className="h-4 w-4" strokeWidth={2} />
+                  {/* Active (non-off) gets a filled grey chip */}
+                  <span
+                    className={`flex h-4 w-4 items-center justify-center rounded ${
+                      thinkingMode === 'off'
+                        ? 'text-neutral-400 dark:text-neutral-500'
+                        : 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
+                    }`}
+                  >
+                    <activeThink.icon className="h-3 w-3" strokeWidth={2.2} />
+                  </span>
+                  <span className="hidden sm:inline">{activeThink.short}</span>
+                  <ChevronDown className="h-3 w-3 text-neutral-400" />
                 </button>
               </MouseFollowTooltip>
             </div>
@@ -658,63 +622,36 @@ export function ChatComposer({
           </div>
         </div>
 
-        {/* ── Inline hint row — attention-focus mechanism ──
-            When the user is actively typing (focused + has content), the hint
-            row collapses smoothly (height → 0, opacity → 0) to reclaim vertical
-            space for the textarea and reduce visual noise. When idle or empty,
-            it re-expands so the keyboard shortcuts remain discoverable.
+        {/* ── Inline hint row — tiny monochrome hints inside the card ──
+            Left : keyboard hints (Enter 发送 / ⇧Enter 换行) — text + line icon, no emoji
+            Right: 清空 affordance (only when draft has text and not streaming) */}
+        <div className="relative flex min-h-[14px] items-center px-1 text-[10px] text-neutral-400 dark:text-neutral-500">
+          <span className="flex items-center gap-1">
+            <KbdKey variant="enter" />
+            <span>发送</span>
+            <span className="text-neutral-300 dark:text-neutral-600">·</span>
+            <KbdKey variant="shift" />
+            <KbdKey variant="enter" />
+            <span>换行</span>
+          </span>
 
-            The old "清空" text button is removed — its function is now handled
-            by the ephemeral "清空内容" chip that surfaces contextually when the
-            user shows clearing intent (see showClearChip logic above). */}
-        <AnimatePresence initial={false}>
-          {!(isFocused && charCount > 0) && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1, transition: { height: { duration: 0.22, ease: [0.16, 1, 0.3, 1] }, opacity: { duration: 0.15 } } }}
-              exit={{ height: 0, opacity: 0, transition: { height: { duration: 0.18, ease: [0.4, 0, 1, 1] }, opacity: { duration: 0.1 } } }}
-              className="overflow-hidden"
-            >
-              <div className="relative flex min-h-[14px] items-center px-1 text-[10px] text-neutral-400 dark:text-neutral-500">
-                <span className="flex items-center gap-1">
-                  <KbdKey variant="enter" />
-                  <span>发送</span>
-                  <span className="text-neutral-300 dark:text-neutral-600">·</span>
-                  <KbdKey variant="shift" />
-                  <KbdKey variant="enter" />
-                  <span>换行</span>
-                </span>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ── Ephemeral action chip — "清空内容" ──
-            Surfaces when the user shows clearing intent (Cmd+A or 3x rapid
-            backspace). Spring-pops in near the send area; auto-dismisses after
-            5s or when text becomes empty. Click performs a one-shot clear with
-            a shrink animation. This is a context-aware ephemeral action — it
-            only exists in the moment of need, then vanishes. */}
-        <AnimatePresence>
-          {showClearChip && value.length > 0 && !isStreaming && (
-            <motion.button
-              initial={{ opacity: 0, y: 6, scale: 0.85 }}
-              animate={{ opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 450, damping: 22 } }}
-              exit={{ opacity: 0, y: 6, scale: 0.85, transition: { duration: 0.16, ease: [0.4, 0, 1, 1] } }}
-              whileTap={{ scale: 0.92 }}
-              onClick={() => {
-                onChange('');
-                setShowClearChip(false);
-                requestAnimationFrame(() => textareaRef.current?.focus());
-              }}
-              className="absolute bottom-9 right-2 z-20 flex items-center gap-1 rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-[11px] font-medium text-neutral-700 shadow-md transition-colors hover:border-neutral-800 hover:bg-neutral-800 hover:text-white dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200 dark:hover:border-neutral-200 dark:hover:bg-neutral-200 dark:hover:text-neutral-900"
-              aria-label="清空全部内容"
-            >
-              <Eraser className="h-3 w-3" strokeWidth={2} />
-              清空内容
-            </motion.button>
-          )}
-        </AnimatePresence>
+          <AnimatePresence>
+            {charCount > 0 && !isStreaming && (
+              <motion.button
+                initial={{ opacity: 0, x: 4 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 4 }}
+                onClick={() => {
+                  onChange('');
+                  requestAnimationFrame(() => textareaRef.current?.focus());
+                }}
+                className="absolute right-0 text-[10px] text-neutral-400 transition-colors hover:text-neutral-700 dark:text-neutral-500 dark:hover:text-neutral-300"
+              >
+                清空
+              </motion.button>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
 
       {/* ── Popovers — rendered at the wrapper level (NOT inside the card) so
@@ -726,6 +663,7 @@ export function ChatComposer({
       <ModeMenu
         ref={modeMenuRef}
         open={modeOpen}
+        direction={modeDir}
         current={teachingMode}
         onSelect={m => {
           setTeachingMode(m);
@@ -1050,24 +988,21 @@ const ModeMenu = React.forwardRef<
   HTMLDivElement,
   {
     open: boolean;
+    direction?: 'up' | 'down';
     current: TeachingMode;
     onSelect: (m: TeachingMode) => void;
   }
->(({ open, current, onSelect }, menuRef) => {
-  // Mode menu opens BESIDE the trigger (to the right), not above. This gives
-  // a grounded, 3D-layered feel — the menu reads as an extension of the
-  // button rather than a floating panel, and avoids the menu drifting too
-  // high when the composer is tall (long text / expanded mode). The trigger
-  // is on the LEFT side of the toolbar, so there's room to the right.
+>(({ open, direction = 'up', current, onSelect }, menuRef) => {
+  const pos = menuPos(direction, 'left');
   return (
     <AnimatePresence>
       {open && (
         <motion.div
           ref={menuRef}
-          initial={{ opacity: 0, scale: 0.94, x: -8 }}
-          animate={{ opacity: 1, scale: 1, x: 0, transition: { type: 'spring', stiffness: 420, damping: 28 } }}
-          exit={{ opacity: 0, scale: 0.94, x: -8, transition: { type: 'spring', stiffness: 420, damping: 28 } }}
-          className="absolute left-full top-0 z-50 ml-2 max-h-[60vh] w-72 overflow-y-auto overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+          initial={{ opacity: 0, y: pos.yAnim, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
+          exit={{ opacity: 0, y: pos.yAnim, scale: 0.97, transition: { type: 'spring', stiffness: 380, damping: 30 } }}
+          className={`${pos.className} w-72 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900`}
         >
           <p className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
             教学模式

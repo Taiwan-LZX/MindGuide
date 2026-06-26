@@ -54,6 +54,8 @@ import {
   Eraser,
   Maximize2,
   Code2,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 import { MouseFollowTooltip } from '@/components/learning/mouse-follow-tooltip';
@@ -864,23 +866,26 @@ export function ChatComposer({
           // fit content up to the maxHeight above.
           className="min-h-[32px] flex-none resize-none border-0 bg-transparent px-1.5 py-0.5 text-[13px] leading-[1.5] text-neutral-800 caret-neutral-700 transition-[height] duration-200 ease-out placeholder:text-neutral-400 focus:outline-none disabled:opacity-60 dark:text-neutral-100 dark:caret-neutral-300 dark:placeholder:text-neutral-500"
         />
-        {/* Expand / collapse toggle — appears once the draft reaches a modest
-            length (≈80 chars ≈ 2-3 wrapped lines) so the user has an explicit
-            escape hatch into a taller editor before internal scrolling kicks
-            in. Once expanded, the button stays visible so the user can
-            collapse back. Pure neutral, monochrome. */}
+        {/* Expand / collapse toggle — a minimal chevron icon that appears
+            once the draft reaches ~80 chars. Pure icon, no border/bg —
+            blends into the textarea surface, only the arrow communicates
+            state. ChevronUp = click to collapse (already expanded);
+            ChevronDown = click to expand. */}
         <AnimatePresence>
           {(charCount > 80 || expanded) && (
             <motion.button
               type="button"
-              initial={{ opacity: 0, y: -2 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -2 }}
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
               onClick={() => setExpanded(e => !e)}
-              className="absolute right-2 top-1.5 flex h-5 items-center gap-0.5 rounded border border-neutral-200 bg-white/90 px-1 text-[10px] text-neutral-500 backdrop-blur-sm transition-colors hover:bg-neutral-50 hover:text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900/90 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+              className="absolute right-1.5 top-1 flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
               aria-label={expanded ? '收起输入框' : '展开输入框'}
             >
-              {expanded ? '收起' : '展开'}
+              {expanded
+                ? <ChevronUp className="h-3.5 w-3.5" strokeWidth={2} />
+                : <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} />
+              }
             </motion.button>
           )}
         </AnimatePresence>
@@ -1208,7 +1213,7 @@ function AttachMenu({
       direction={direction}
       align="left"
       width={256}
-      className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+      className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-[0_4px_20px_-8px_rgba(0,0,0,0.12),0_2px_6px_-4px_rgba(0,0,0,0.08)] dark:border-neutral-700 dark:bg-neutral-900 dark:shadow-[0_4px_20px_-8px_rgba(0,0,0,0.4),0_2px_6px_-4px_rgba(0,0,0,0.3)]"
     >
       <p className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
         添加上下文
@@ -1477,7 +1482,7 @@ function ModeMenu({
       direction={direction}
       align="left"
       width={288}
-      className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+      className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-[0_4px_20px_-8px_rgba(0,0,0,0.12),0_2px_6px_-4px_rgba(0,0,0,0.08)] dark:border-neutral-700 dark:bg-neutral-900 dark:shadow-[0_4px_20px_-8px_rgba(0,0,0,0.4),0_2px_6px_-4px_rgba(0,0,0,0.3)]"
     >
       <p className="px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
         教学模式
@@ -1547,7 +1552,7 @@ function ThinkingMenu({
       direction={direction}
       align="right"
       width={288}
-      className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+      className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-1 shadow-[0_4px_20px_-8px_rgba(0,0,0,0.12),0_2px_6px_-4px_rgba(0,0,0,0.08)] dark:border-neutral-700 dark:bg-neutral-900 dark:shadow-[0_4px_20px_-8px_rgba(0,0,0,0.4),0_2px_6px_-4px_rgba(0,0,0,0.3)]"
     >
       <p className="flex items-center gap-1 px-2.5 py-1.5 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
         <BrainCircuit className="h-3 w-3" />
@@ -1629,7 +1634,7 @@ function ModelCardMenu({
       direction={direction}
       align="right"
       width={320}
-      className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-2 shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
+      className="overflow-hidden rounded-xl border border-neutral-200 bg-white p-2 shadow-[0_4px_20px_-8px_rgba(0,0,0,0.12),0_2px_6px_-4px_rgba(0,0,0,0.08)] dark:border-neutral-700 dark:bg-neutral-900 dark:shadow-[0_4px_20px_-8px_rgba(0,0,0,0.4),0_2px_6px_-4px_rgba(0,0,0,0.3)]"
     >
       {/* ── Section 1: Model selection ── */}
       <p className="flex items-center gap-1.5 px-1 py-1 text-[10.5px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">

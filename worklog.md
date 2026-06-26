@@ -567,3 +567,390 @@ Stage Summary:
   · Hover tooltip: ✅ MouseFollowTooltip follow=false 固定在选项旁边弹出描述
 - VLM 确认: "菜单选项只显示一行、hover 时弹出 tooltip 显示描述、tooltip 固定在选项旁边"
 - 修改文件: src/components/learning/chat-composer.tsx（四个菜单组件）
+
+---
+Task ID: explore-animation-8a
+Agent: Explore (animation audit)
+Task: 探索对话流程中的动画/UI 问题
+
+Work Log:
+- 阅读 /home/z/my-project/worklog.md 了解项目背景（Next.js 16 + TS + Tailwind 4 + shadcn/ui + Prisma/SQLite + Tiptap v3 + Framer Motion；P0-P3 + 输入栏打磨 + 菜单压缩已落地）
+- 通读 motion-tokens.ts（symmetric enter/exit 设计原则）+ 17 个目标组件源码：
+  · main-content.tsx (988 行) — 消息流 / streaming / KnowledgeInline 入场 / scroll-to-bottom / composer auto-hide
+  · chat-composer.tsx (1843 行) — 浮层 portal 化 / auto-resize / hint row / send-stop swap
+  · sidebar.tsx (735 行) — 会话列表 stagger / popLayout exit / 创建表单 height anim
+  · command-palette.tsx (460 行) — ⌘K 浮层 / 分组结果 / 高亮条
+  · settings-view.tsx (1182 行) — 4 tab + layoutId pill + 右侧 preview cross-fade
+  · course-panel.tsx (623 行) — 圆环进度 + 模块折叠 + 课时 layoutId
+  · card-review-mode.tsx (389 行) — 翻卡 3D + 评分 + 完成汇总
+  · feature-views.tsx (2118 行) — pageVariants 方向感知 + 6 个 feature 子视图
+  · create-new-panel.tsx (382 行) — cursor-follow spotlight + row stagger
+  · display-panel.tsx (371 行) — 三点菜单 + intent tint
+  · mouse-follow-tooltip.tsx (282 行) — portal + spring follow + fixed-anchor
+  · knowledge-inline.tsx (98 行) — 节点 stagger + mastered checkmark
+  · page.tsx (326 行) — PanelGroup + AnimatePresence + focusMode 编排
+  · use-draft-input.ts (187 行) — 草稿持久化 + history recall
+  · loading-utils.tsx + scroll-progress.tsx + keyboard-shortcuts-overlay.tsx + toast.tsx + toaster.tsx
+- 用 Agent Browser (1440×900) 实际触发 12 个关键场景并截图 17 张：
+  · welcome typing / send message / streaming thinking / streaming response / after streaming
+  · hover msg actions / quick menu open / settings view open / settings tab switch (layout/palette) / settings escape close
+  · command palette open / filtered / closed
+  · feature view tasks / task added / focus mode enter / focus mode exit
+  · session switch (back and forth) / course panel open / more features hover (spotlight)
+  · cards view / card added / review mode / flip / rate 良好 / summary
+  · progress view (charts) / settings via ⌘, / sidebar collapse via ⌘B / tasks via ⌘1
+- 重点验证 7 类动画问题：硬切（无过渡）/ 时序不协调 / 卡顿 / 状态不一致 / 缺少反馈 / spring 参数过软或过硬 / exit 不对称
+- 整理 17 个场景的当前实现 / 问题 / 改进建议，按严重程度分级
+
+Stage Summary:
+
+────────────────────────────────────────────────────────────────────────
+问题清单（按严重程度分级）
+────────────────────────────────────────────────────────────────────────
+
+[严重] 共 9 处
+
+1. 流式输出期间 scrollIntoView 抖动 + 抢占用户滚动 (main-content.tsx:148-150)
+   - 每个 streaming token 触发 `bottomRef.scrollIntoView({behavior:'smooth'})`，多个 smooth 请求堆叠 → 滚动抖动/回弹
+   - 用户主动向上滚动想读历史时，被新 token 触发的 scrollIntoView 强行拉回底部 → "翻不动"
+   - 修复：仅当 distFromBottom < threshold 时才 auto-scroll；用 useRef 跟踪用户是否在底部
+
+2. composerVisible 用 setState in scroll handler 导致频繁 re-render (main-content.tsx:157-173)
+   - handleScroll 每次 scroll 都计算 delta + setComposerVisible + setShowScrollBottom
+   - 滚 100px 可能触发 5+ 次 setState → 整个 MainContent re-render → 卡顿
+   - 修复：用 useMotionValue + useSpring 直接驱动 transform，绕过 React re-render
+
+3. 切换会话时无旧消息出场动画 (main-content.tsx:480-511)
+   - selectSession 重置 messages=[] → isLoadingMessages=true → spinner → 新 messages 错峰入场
+   - 旧消息瞬间消失，无 fade-out / slide-out；新消息有入场但整体观感"硬切序列"
+   - 修复：旧消息整体 fade-out + slide-left (200ms)，spinner overlap，新消息 fade-in + slide-right
+
+4. sidebar 进入/退出专注模式是硬切 (page.tsx:188-228)
+   - `{showSidebar ? <PanelGroup>... : <div>...}` 无 AnimatePresence
+   - sidebar 从 387px 瞬间消失，主区域瞬间扩到全宽 → "屏幕闪一下"
+   - 修复：用 motion 包裹 sidebar，width 0 ↔ 387px spring 过渡；或 PanelGroup 始终渲染，Panel collapsible 控制
+
+5. 专注模式多元素时序不协调 (page.tsx + chat-composer.tsx + course-panel.tsx)
+   - 进入时 5 个变化同时触发：sidebar 硬切消失 / coursePanel exit (~620ms) / feature view exit (~620ms) / composer CSS transition (200ms) / pill spring 入场
+   - 视觉混乱，无编排
+   - 修复：sidebar motion exit (width 收缩) / coursePanel+feature 同步 exit / pill delay 0.3s 后入场
+
+6. 命令面板选中项高亮条"瞬移" (command-palette.tsx:414-416)
+   - 每个 button 都有自己的 `{isActive && <span class="absolute left-0 h-4 w-[2px]..."/>}`
+   - activeIdx 变化时旧 button 的 span 卸载，新 button 的 span 加载 → 竖线在 button 间瞬移
+   - 修复：用 `layoutId="cmd-active-bar"` 单一 span，framer-motion 自动 animate 位置（参考 settings-view.tsx:449-454 settings-tab-pill）
+
+7. 课程面板 collapsibleVariants 仍用旧的 ease-in exit (course-panel.tsx:81-95)
+   - collapsed: height 用 ease-in [0.4, 0, 1, 1] duration 0.22 → 前 40% 几乎不动 + React commit delay → "停顿 88ms 再收起"
+   - anim-refine-003 已修复其他面板的同类问题，但 course-panel 漏改
+   - 修复：collapsed 也用 symmetric spring（与 expanded 相同的 transition）
+
+8. 拖拽 sidebar 宽度时内部内容硬切 (page.tsx + sidebar.tsx)
+   - react-resizable-panels 实时调整 Panel size，但 sidebar 内部 (session list / brand / search / tabs) 重新布局无 motion
+   - SessionRow truncate 文字、tabs 间距等瞬间变化
+   - 修复：Panel 加 `layout` prop；或 sidebar 关键子元素用 motion 包裹
+
+9. 两套 toast 系统视觉不一致 (toast.tsx vs main-content.tsx:309-329)
+   - 成就解锁/文件上传错误用 radix Toast (toast.tsx)：从底部右侧 slide-in
+   - 流式错误用自定义 motion.div (main-content.tsx:309)：从顶部中心 slide-in
+   - 位置、动画、样式完全不同；mobile 与 desktop 位置也不同（top-0 vs sm:bottom-0）
+   - 修复：统一为一套 toast 系统（推荐用 sonner 或全部 radix Toast），统一位置和动画
+
+[中等] 共 18 处
+
+10. msgVariants 缺少 exit variant (main-content.tsx:52-59)
+    - AnimatePresence initial={false} 接受 exit，但 msgVariants 只定义 hidden/visible
+    - regenerateLastMessage 删除旧消息时瞬间消失，无过渡
+
+11. 思考→内容输出过渡无交叉淡入淡出 (main-content.tsx:519 + 546)
+    - thinking bubble 和 streaming bubble 是两个独立 AnimatePresence 子元素
+    - 切换时思考 exit 同时 content enter，无 cross-fade，"先消失再出现"
+
+12. MarkdownRenderer 的 streaming prop 未实际使用 (markdown-renderer.tsx:144-150)
+    - API 接受 streaming 但解构时丢弃，流式和最终渲染走相同代码路径
+    - 长回复（>2k 字符）每 token 触发 ReactMarkdown 重新解析 → 主线程卡顿
+    - 修复：流式期间用纯文本 pre-render，结束后切换到 ReactMarkdown
+
+13. 停止生成按钮脉冲环是单次脉冲 (chat-composer.tsx:1013-1018)
+    - `animate={{ scale: [1, 1.2], opacity: [0.6, 0] }}` repeat Infinity duration 1.4
+    - 单 ring 扩散后消失，无"持续脉冲"感
+    - 修复：多层错峰 ring（每 0.5s 发射新 ring，参考 ChatGPT）
+
+14. composer 隐藏后 pointer-events 仍生效 (main-content.tsx:625-647)
+    - wrapper 有 pointer-events-none 类，但子元素有 pointer-events-auto
+    - composer 滑出后用户在那个位置点击仍触发 composer 按钮
+
+15. 滚动到底部按钮 bottom 位置硬切 (main-content.tsx:612-617)
+    - style={{ bottom: showComposer ? 124 : 24 }} 内联 style 切换
+    - 虽然有 transition-[bottom] duration-300 类，但 motion.button 的 spring transition 覆盖 CSS transition
+    - bottom 在 124 和 24 之间硬切
+
+16. feature→feature 切换用 mode="wait" 串行 (page.tsx:278)
+    - AnimatePresence mode="wait" 先 exit 旧 feature 再 enter 新 feature
+    - 整个过程 ~620ms，用户看到"空档期"
+    - 修复：mode="popLayout" 或 mode="sync" 让两者同时进出
+
+17. settings tab 内容切换 mode="wait" 串行 (settings-view.tsx:468-483)
+    - 同上问题，旧 tab exit 后新 tab enter，~620ms 空档
+    - 右侧 preview pane (905) 同样 mode="wait"，hover 反馈延迟
+
+18. sessionVariants exit 缺少 height 收缩 (sidebar.tsx:56-78)
+    - exit: opacity 0, x:-20, scale:0.95 — 无 height:0, marginBottom:0
+    - 删除会话时被删 row 向左飘走同时占据原位，其他 row 用 layout 滑到新位置时被删 row 突然消失 → 视觉跳跃
+    - 修复：exit 加 `height: 0, marginBottom: 0`
+
+19. ChevronDown 旋转 overshoot 抖动 (course-panel.tsx:474-477)
+    - spring stiffness:320, damping:28, mass:0.8 → 从 0° → 90° 过冲到 ~95° 再回弹
+    - 箭头"抖一下"
+    - 修复：damping 提高到 32+ 或换 tween
+
+20. 课时状态切换 StatusIcon 硬切 (course-panel.tsx:182-210)
+    - switch case 返回不同 JSX，无 motion
+    - available → active → completed 时图标瞬间替换
+    - 修复：AnimatePresence + layoutId 让图标平滑变形
+
+21. 翻卡 3D spring 偏慢 (card-review-mode.tsx:230-234)
+    - spring 200/28/1.1 mass 1.1 偏重，翻卡 ~1.2s
+    - 修复：mass 0.7，~800ms
+
+22. 卡片切换 mode="wait" 串行 (card-review-mode.tsx:215)
+    - 评分后旧卡 exit 再新卡 enter，~620ms 被动画卡住
+    - 修复：mode="popLayout" 或减小 mass
+
+23. MouseFollowTooltip 跨 trigger 不 cross-fade (mouse-follow-tooltip.tsx)
+    - 每个 trigger 包自己的 MouseFollowTooltip，独立 AnimatePresence
+    - A→B 时"A tooltip 消失 → 0.15s 空档 → B tooltip 出现"
+    - 修复：单一全局 tooltip 实例 + content state，cross-fade content
+
+24. motionEnabled=false 时 tooltip 仍液体跟随 (mouse-follow-tooltip.tsx:241-262)
+    - opacity duration 设 0，但 x/y spring 600/36/0.6 仍运行
+    - MotionConfig reducedMotion='always' 不 strip spring 本身（只 strip layout）
+    - 与设置承诺"关闭后界面动画即时完成"不符
+
+25. 切换会话时 textarea 高度 200ms 爬升 (chat-composer.tsx:504-519 + use-draft-input.ts:78)
+    - value 切换触发 auto-resize effect：el.style.height='auto' → 目标高度
+    - transition-[height] duration-200 让 height 平滑过渡，但切换会话时体感"延迟"
+    - 修复：切换会话时禁用 transition 一帧
+
+26. focusMode 切换时 wrapper 与 textarea 不同步 (chat-composer.tsx)
+    - effectiveExpanded 变化 → textarea height 200ms CSS 过渡
+    - wrapper mx-auto max-w-[680px] 是类切换，card 有 transition-all 但 wrapper 无
+    - wrapper 瞬间变窄/变宽，textarea 慢慢变高 — 不同步
+
+27. 成就解锁 toast 无 hover pause + 堆叠无 layout 动画 (toast.tsx + learning-store.ts:1202-1208)
+    - radix Toast 默认 hover pause 但需配置；duration 6000ms 偏长
+    - Viewport flex-col-reverse/flex-col 堆叠，新 toast 出现时旧 toast 瞬间让位无 motion
+
+[次要] 共 19 处
+
+28. 流式打字光标是经典闪烁 (main-content.tsx:563-567)
+    - opacity [1,0,1] duration 1 — 经典闪烁而非"打字机"光标
+    - 修复：width 0→100% 渐进露出 + 1px 闪烁光标（参考 Cursor/Claude.ai）
+
+29. 思考状态指示器整体重 mount (main-content.tsx:345-374)
+    - AnimatePresence mode="wait" 包裹整个 motion.div
+    - "思考中"→"回复中"切换时整个 div 重新 mount，包括文字和图标
+    - 修复：只 swap 文字 + 颜色，motion.span key by phase
+
+30. 消息 hover action row 硬弹出 (main-content.tsx:738, 774)
+    - opacity-0 transition-opacity duration-200 group-hover/msg:opacity-100
+    - 纯 CSS 过渡，无 y 偏移或 scale，按钮"硬弹出"
+    - 修复：motion.div initial={{opacity:0, y:4}} animate={{opacity:1, y:0}}
+
+31. 用户消息复制按钮非 motion.button (main-content.tsx:742-748)
+    - AI 消息的 ActionButton 用 motion.button whileHover scale
+    - 用户消息的复制按钮是普通 button — 一致性问题
+
+32. 重新生成按钮 regenerating state 永不复位 (main-content.tsx:724-728)
+    - setRegenerating(true) 后 onRegenerate 调用，但 regenerating 永远不会被重置为 false
+    - RefreshCw 的 animate-spin 一直转下去（直到 MsgBubble unmount）
+
+33. KnowledgeInline 无 collapse toggle (knowledge-inline.tsx)
+    - 常驻显示在对话流末尾，knowledgeNodes > 5 时占用大量空间
+    - 遮挡最新消息
+    - 修复：加 collapse toggle
+
+34. 圆环进度 spring 过软 (course-panel.tsx:137-148)
+    - stiffness 120 damping 20 mass 0.8 → ~1.2s 才稳定
+    - 课时状态切换触发 overallProgress 重算，圆环慢慢爬，体感"延迟"
+
+35. 课时行 hover 背景过渡太微弱 (course-panel.tsx:528-534)
+    - whileHover backgroundColor rgba(0,0,0,0.02) — 2% 黑，几乎看不见
+    - 修复：至少 4-5%
+
+36. 模块完成时数字无强调动画 (course-panel.tsx:491-500)
+    - isModuleComplete 时数字颜色变 brand，纯 CSS transition-colors
+    - 无 checkmark 入场或 scale pulse
+
+37. 评分按钮视觉同质 (card-review-mode.tsx:299-308)
+    - 4 个按钮只有 whileHover y:-2，无图标或颜色区分
+    - 用户需要读 label 才能区分
+    - 修复：每按钮独特颜色（忘了=红/困难=橙/良好=蓝/简单=绿）
+
+38. 完成汇总分布条无 stagger (card-review-mode.tsx:140-166)
+    - 4 条同时启动，无 delay
+    - 修复：delay: i * 0.08
+
+39. 完成汇总 Checkmark 图标无入场 (card-review-mode.tsx:131-133)
+    - 纯静态 SVG
+    - 修复：initial={{scale:0}} animate={{scale:1}} spring overshoot
+
+40. ESC 确认对话框 backdrop 瞬间出现 (card-review-mode.tsx:339-347)
+    - bg-neutral-900/20 backdrop-blur-[2px]，React commit 后 ~50ms blur 生效
+    - 瞬间出现非淡入
+    - 修复：backdrop 用 motion.div opacity 入场
+
+41. 新建会话表单收起与 session 入场有间隔 (sidebar.tsx:283-288)
+    - handleCreate async → setIsCreating(false) → fetchSessions refetch → session 入场
+    - "表单消失 → 等几百毫秒 → session 出现"
+    - 修复：乐观更新
+
+42. SessionRow hover 编辑/删除按钮硬弹出 (sidebar.tsx:706-732)
+    - opacity-0 group-hover:opacity-100 纯 CSS，无 motion
+    - 同 msg bubble hover 问题
+
+43. loadingSessionId spinner 无 fade-in (sidebar.tsx:649-653)
+    - CSS animate-spin，瞬间替换 BookOpen 图标
+
+44. 命令面板结果列表无 stagger (command-palette.tsx:394-435)
+    - 整个面板 enter 后所有结果瞬间出现
+    - 对比 MoreFeaturesPanel 用 rowVariants 错峰 35ms/row
+    - 修复：加 stagger
+
+45. 命令面板输入框无 clear 按钮 (command-palette.tsx:362-378)
+    - 输入后只能手动全选删除
+
+46. 三处浮层 backdrop 不一致 (command-palette.tsx:349-352 / settings-view.tsx:376-382 / keyboard-shortcuts-overlay.tsx:97)
+    - 命令面板：bg-neutral-100/80 无 blur
+    - 设置面板：bg-black/55 无 blur
+    - 快捷键覆盖层：bg-neutral-900/30 backdrop-blur-[2px]
+    - 修复：统一 blur 策略
+
+47. MainContent 无 ScrollProgress (scroll-progress.tsx)
+    - FeatureView 顶部有 1px 进度条，主对话视图没有
+    - 长对话滚动无进度指示
+    - 修复：MainContent 加 ScrollProgress
+
+48. tooltip 字号偏小 (mouse-follow-tooltip.tsx:272)
+    - text-[11.5px]，部分用户难读
+    - 修复：12px
+
+49. 多 motion 组件常驻 willChange (course-panel.tsx:315 / create-new-panel.tsx:319)
+    - willChange: 'transform, opacity' 内联 style 常驻
+    - 占用 GPU 内存
+    - 修复：用 onAnimationStart/onAnimationComplete 切换
+
+50. settings 关闭按钮 rotate 90° overshoot (settings-view.tsx:413-421)
+    - spring 320/18/0.6 → rotate 过冲到 ~100° 再回弹
+    - X 图标抖动
+    - 修复：damping 提高到 26
+
+51. ProgressView 6 个图表块最大 delay 0.4s (feature-views.tsx:951-1198)
+    - 首屏完整呈现 ~1s，用户频繁切换会嫌慢
+
+52. feature→main 方向语义 (feature-views.tsx:34-52)
+    - exit x: -28*dir，enter x: 28*dir
+    - feature→main (dir=-1)：feature 向右 +28 退出，main 从左 -28 进入
+    - 都向右移动，无"对冲"层次感，更像"整体平移"
+    - 可接受但视觉层次单薄
+
+────────────────────────────────────────────────────────────────────────
+改进建议（优先级排序）
+────────────────────────────────────────────────────────────────────────
+
+P0（严重影响核心交互，应立即修复）：
+- 修复流式 scrollIntoView 抖动 + 用户滚动抢占（#1）
+- 修复 composerVisible setState in scroll handler 卡顿（#2）
+- 修复切换会话无旧消息出场动画（#3）
+- 修复 sidebar 进入/退出专注模式硬切（#4）
+- 修复专注模式多元素时序不协调（#5）
+- 修复命令面板选中条瞬移（#6，用 layoutId）
+- 修复课程面板 collapsibleVariants 旧 ease-in exit（#7）
+
+P1（明显体验问题，应近期修复）：
+- 修复拖拽 sidebar 内容硬切（#8）
+- 统一 toast 系统（#9）
+- 补 msgVariants exit（#10）
+- 思考→内容输出交叉淡入淡出（#11）
+- MarkdownRenderer streaming prop 实际启用（#12）
+- 停止生成按钮多层脉冲环（#13）
+- composer 隐藏后 pointer-events 禁用（#14）
+- 滚动到底部按钮 bottom 位置 motion 化（#15）
+- feature→feature / tab→tab 改 mode="popLayout"（#16, #17）
+- sessionVariants exit 加 height:0（#18）
+
+P2（细节打磨，可迭代改进）：
+- ChevronDown / settings 关闭按钮 overshoot 调阻尼（#19, #50）
+- 课时 StatusIcon 用 AnimatePresence 平滑变形（#20）
+- 翻卡 spring 加速（#21, #22）
+- MouseFollowTooltip 全局单实例 cross-fade（#23, #24）
+- 切换会话 textarea 高度禁用 transition 一帧（#25）
+- focusMode wrapper 与 textarea 同步（#26）
+- 成就 toast hover pause + 堆叠 layout 动画（#27）
+
+P3（次要细节，长期优化）：
+- 打字光标改打字机风格（#28）
+- 思考状态指示器只 swap 文字（#29）
+- 消息 hover action 用 motion.div（#30）
+- 用户消息复制按钮统一 motion.button（#31）
+- 重新生成按钮 regenerating 复位（#32）
+- KnowledgeInline 加 collapse（#33）
+- 圆环进度 spring 调硬（#34）
+- 课时 hover 背景加深（#35）
+- 模块完成数字强调动画（#36）
+- 评分按钮独特颜色（#37）
+- 完成汇总 stagger + Checkmark 入场（#38, #39）
+- ESC 确认 backdrop 淡入（#40）
+- 新建会话乐观更新（#41）
+- SessionRow hover motion 化（#42）
+- loadingSessionId spinner fade-in（#43）
+- 命令面板结果 stagger + clear 按钮（#44, #45）
+- 浮层 backdrop 统一 blur 策略（#46）
+- MainContent 加 ScrollProgress（#47）
+- tooltip 字号 + 多行抖动（#48）
+- willChange 按需切换（#49）
+- ProgressView 图表 delay 缩短（#51）
+- feature→main 方向语义增强（#52）
+
+────────────────────────────────────────────────────────────────────────
+调研结论
+────────────────────────────────────────────────────────────────────────
+
+MindGuide 的动画体系整体设计感很强（motion-tokens.ts 的 symmetric enter/exit 原则、intent-tint、cursor-follow spotlight、layoutId pill 等都是高质量实现），但在以下三个维度存在系统性问题：
+
+1. **滚动与流式的交互冲突**（#1, #2, #12）：流式 token 触发 scrollIntoView 与用户滚动抢占 + setState in scroll handler 导致 re-render 风暴 + MarkdownRenderer 重新解析长文本卡顿。这三个问题叠加，长对话流式输出时主线程压力大、滚动卡顿、用户翻不动历史。建议优先修复。
+
+2. **mode="wait" 滥用导致串行延迟**（#16, #17, #22）：feature→feature、tab→tab、card→card 切换都用 mode="wait"，每次切换有 ~620ms 空档期。用户高频切换时体感"慢半拍"。建议改为 mode="popLayout" 或 mode="sync" 让进出场交叉。
+
+3. **多元素时序无编排**（#4, #5, #11, #23）：专注模式进入/退出时 5 个元素同时变化但各自独立动画；思考→内容输出无 cross-fade；tooltip 跨 trigger 不 cross-fade。这些场景缺少"编排者"角色，建议引入一个 motion orchestrator（或用 useMotionValue + useTransform 编排关键时序）。
+
+此外，course-panel 的 collapsibleVariants 是 anim-refine-003 修复的漏网之鱼（其他面板都改了，独它没改）；命令面板的选中条瞬移有现成的 layoutId 模式可参考（settings-view 的 settings-tab-pill）；toast 系统的二元分裂（radix vs 自定义）是历史包袱，建议统一。
+
+总体评估：动画质量 7.5/10。设计语言一致（symmetric spring + neutral palette + intent tint），但有 9 处严重问题和 18 处中等问题需修复才能达到"丝滑"水准。建议按 P0→P1→P2→P3 顺序迭代，P0 修复后即可显著改善核心交互体感。
+
+---
+Task ID: fix-expand-shadow-8b
+Agent: main (Z.ai Code)
+Task: 展开按钮改为箭头图标 + 修复菜单 hover 阴影
+
+Work Log:
+- 展开按钮改造:
+  · import 新增 ChevronUp, ChevronDown
+  · 移除"展开/收起"文字 + border + bg-white/90 + backdrop-blur-sm
+  · 改为纯图标按钮：expanded 时 ChevronUp（点击收起），未展开时 ChevronDown（点击展开）
+  · 样式：h-6 w-6 无边框无背景，text-neutral-400，hover 时 neutral-100 背景
+  · 入场动画从 y:-2 改为 scale:0.8（更符合图标按钮的反馈）
+- 菜单阴影修复:
+  · 四个菜单（AttachMenu/ModeMenu/ThinkingMenu/ModelCardMenu）的 shadow-lg 全部替换
+  · shadow-lg = `0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1)` 过于厚重
+  · 改为自定义柔和阴影：`shadow-[0_4px_20px_-8px_rgba(0,0,0,0.12),0_2px_6px_-4px_rgba(0,0,0,0.08)]`
+  · dark mode 对应：`dark:shadow-[0_4px_20px_-8px_rgba(0,0,0,0.4),0_2px_6px_-4px_rgba(0,0,0,0.3)]`
+  · 效果：更大的模糊半径（20px vs 15px）、更低的透明度（0.12 vs 0.1）、更远的偏移（-8px），视觉更柔和自然
+
+Stage Summary:
+- `bun run lint` 通过（0 errors / 0 warnings）
+- dev server HTTP 200 稳定
+- Agent Browser + VLM 验证:
+  · 展开按钮: ✅ is_icon_only=true, has_border=false, has_bg=false，VLM 确认"简约箭头图标、无边框无背景、干净"
+  · 菜单阴影: ✅ has_shadow_lg=false，VLM 确认"阴影柔和自然、无生硬边缘、视觉舒适"
+- 修改文件: src/components/learning/chat-composer.tsx

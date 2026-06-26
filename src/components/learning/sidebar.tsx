@@ -293,9 +293,14 @@ function FullSidebar() {
 
   const handleCreate = useCallback(async () => {
     if (!newTitle.trim()) return;
-    await createSession(newTitle.trim());
+    // BUG FIX (P2-#41): close the form + clear the input FIRST so the UI
+    // responds instantly. The session appears in the list once createSession
+    // resolves (it optimistically prepends to store.sessions). This eliminates
+    // the "form stays open while waiting" perceived delay.
+    const title = newTitle.trim();
     setNewTitle('');
     setIsCreating(false);
+    await createSession(title);
   }, [newTitle, createSession]);
 
   const handleSaveEdit = useCallback(async (id: string) => {
@@ -658,7 +663,13 @@ function SessionRow({
           : 'bg-neutral-200/60 text-neutral-500 dark:bg-neutral-800/60 dark:text-neutral-400'
       }`}>
         {isLoading ? (
-          <div className="h-4 w-4 rounded-full border-[1.5px] border-neutral-300 border-t-neutral-900 animate-spin dark:border-neutral-600 dark:border-t-white" />
+          // P2-#43: spinner fades in via motion instead of hard-replacing the icon.
+          <motion.div
+            initial={{ opacity: 0, scale: 0.7 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ type: 'spring', stiffness: 500, damping: 25, mass: 0.5 }}
+            className="h-4 w-4 rounded-full border-[1.5px] border-neutral-300 border-t-neutral-900 animate-spin dark:border-neutral-600 dark:border-t-white"
+          />
         ) : (
           <BookOpen className="h-3.5 w-3.5" />
         )}
@@ -716,9 +727,10 @@ function SessionRow({
       {/* Hover actions */}
       {!isEditing && (
         <motion.div
-          className="absolute right-1.5 top-1/2 flex -translate-y-1/2 gap-0.5 opacity-0 group-hover:opacity-100"
-          initial={{ opacity: 0 }}
-          whileHover={{ opacity: 1 }}
+          // P2-#42: added translate-y-1 → 0 + transition-all so the buttons
+          // "slide in" instead of hard-popping. CSS group-hover drives it.
+          className="absolute right-1.5 top-1/2 flex -translate-y-1/2 translate-x-1 gap-0.5 opacity-0 transition-all duration-200 ease-out group-hover:translate-x-0 group-hover:opacity-100"
+          initial={false}
         >
           <motion.button
             whileTap={{

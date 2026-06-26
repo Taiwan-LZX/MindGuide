@@ -1070,3 +1070,49 @@ Stage Summary:
   · src/components/learning/course-panel.tsx (chevron 阻尼)
   · src/components/learning/card-review-mode.tsx (翻卡加速 + popLayout)
   · src/components/learning/mouse-follow-tooltip.tsx (motionEnabled x/y)
+
+---
+Task ID: impl-p2-animation-11
+Agent: main (Z.ai Code)
+Task: P2 动画修复 — 19 处次要细节批量修复
+
+Work Log:
+- #28 打字光标: opacity [1,0,1] → [1,0.3,1]，duration 1→0.9s，"呼吸"而非"闪烁"
+- #30 消息 hover action row: 纯 CSS opacity → transition-all + translate-y-1→0，滑入而非硬弹出（用户消息 + AI 消息两处）
+- #31 用户消息复制按钮: 普通 button → motion.button whileHover scale 1.1 + whileTap 0.92，与 AI 消息 ActionButton 一致
+- #33 KnowledgeInline collapse: >5 节点时默认折叠为 3 行摘要 + "+N 个知识点"按钮；ChevronDown 旋转 toggle；AnimatePresence height 动画展开
+- #34 圆环进度 spring: stiffness 120→260 + damping 20→28 + mass 0.8→0.7，~1.2s→~500ms
+- #35 课时 hover 背景: rgba(0,0,0,0.02) → 0.04，从几乎不可见变为清晰可辨
+- #36 模块完成数字: span → motion.span，isModuleComplete 时 scale [1,1.15,1] pulse + brand 色
+- #37 评分按钮独特颜色: 4 按钮分别 hover 红/橙/翠绿/青色边框 + 淡色背景（保持克制，hover 才显露色相）
+- #38 完成汇总分布条 stagger: 每条 delay i*0.08s，4 条错峰展开
+- #39 完成汇总 Checkmark 入场: 静态 div → motion.div initial scale:0+rotate:-15 → scale:1+rotate:0 spring overshoot
+- #40 ESC backdrop: 已在 P0 修复（motion.div opacity 入场）
+- #41 新建会话乐观更新: handleCreate 先关表单+清空输入再 await createSession，消除"表单等待"感知
+- #42 SessionRow hover: opacity-0 group-hover → translate-x-1→0 + transition-all，按钮滑入
+- #43 loading spinner: 普通 div → motion.div initial scale:0.7+opacity:0 → 1+1 spring fade-in
+- #44 命令面板 stagger: button → motion.button，每项 delay ci*0.035s + spring fade+slide
+- #45 命令面板 clear 按钮: 输入文字时显示 X 按钮，点击清空+重新聚焦
+- #46 backdrop 统一: settings-view bg-black/55 → bg-neutral-900/40 backdrop-blur-[2px]（与 keyboard-shortcuts-overlay 一致）
+- #47 MainContent ScrollProgress: 对话视图顶部加 1px 进度条，追踪 scrollContainerRef
+- #48 tooltip 字号: text-[11.5px] → text-[12px]
+- #49 willChange 移除: create-new-panel + course-panel 移除常驻 willChange:'transform, opacity'，framer-motion 内部自动管理
+- #50 settings 关闭按钮: damping 18→26，消除 rotate 90° 过冲到 ~100° 的抖动
+
+Stage Summary:
+- `bun run lint` 通过（0 errors / 0 warnings）
+- dev server HTTP 200 稳定
+- Agent Browser + VLM 验证:
+  · 命令面板 clear 按钮: ✅ 存在
+  · ScrollProgress: ✅ 1 个进度条元素
+  · 无浏览器错误
+- 修改文件:
+  · src/components/learning/main-content.tsx (打字光标 + hover lift + motion 复制按钮 + ScrollProgress)
+  · src/components/learning/knowledge-inline.tsx (collapse toggle + 摘要)
+  · src/components/learning/course-panel.tsx (圆环 spring + 课时 hover + 模块完成 pulse + willChange)
+  · src/components/learning/card-review-mode.tsx (评分按钮颜色 + stagger + Checkmark 入场)
+  · src/components/learning/sidebar.tsx (乐观创建 + hover slide + spinner fade)
+  · src/components/learning/command-palette.tsx (stagger + clear 按钮 + X import)
+  · src/components/learning/settings-view.tsx (backdrop 统一 + 关闭按钮 damping)
+  · src/components/learning/mouse-follow-tooltip.tsx (字号 12px)
+  · src/components/learning/create-new-panel.tsx (willChange 移除)

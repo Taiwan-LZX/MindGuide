@@ -11,6 +11,7 @@ import { MouseFollowTooltip } from '@/components/learning/mouse-follow-tooltip';
 import { ChatComposer } from '@/components/learning/chat-composer';
 import { useDraftInput, useInputHistory } from '@/hooks/use-draft-input';
 import { toast } from '@/hooks/use-toast';
+import { ScrollProgress } from '@/components/learning/scroll-progress';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -480,6 +481,10 @@ export function MainContent() {
         </div>
       </div>
 
+      {/* P2-#47: scroll progress bar at the top of the chat thread, matching
+          the FeatureView treatment. Tracks scrollContainerRef. */}
+      <ScrollProgress targetRef={scrollContainerRef} />
+
       {/* Messages — extra bottom padding (pb-44) reserves room for the
           floating composer so the last bubble can scroll clear of it. */}
       <div
@@ -624,10 +629,14 @@ export function MainContent() {
                       className="min-w-0 text-[13.5px] leading-[1.7] text-neutral-800 dark:text-neutral-200"
                     >
                       <MarkdownRenderer content={streamingContent} streaming />
+                      {/* BUG FIX (P2-#28): replaced the classic blink cursor
+                          with a smoother "breathing" cursor — opacity pulses
+                          0.3↔1.0 (instead of 0↔1 hard blink) at 0.9s, which
+                          reads as "thinking/typing" rather than "flashing". */}
                       <motion.span
                         className="ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[0.15em] rounded-[1px] bg-neutral-500 align-text-bottom dark:bg-neutral-300"
-                        animate={{ opacity: [1, 0, 1] }}
-                        transition={{ repeat: Infinity, duration: 1, ease: 'easeInOut' }}
+                        animate={{ opacity: [1, 0.3, 1] }}
+                        transition={{ repeat: Infinity, duration: 0.9, ease: 'easeInOut' }}
                       />
                     </motion.div>
                   )}
@@ -823,18 +832,22 @@ function MsgBubble({
         <div className="max-w-[85%] rounded-xl rounded-tr-xs border border-neutral-200 bg-neutral-50 px-4 py-2.5 text-[13.5px] leading-[1.65] text-neutral-800 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-neutral-100">
           <p className="whitespace-pre-wrap break-words">{msg.content}</p>
         </div>
-        {/* Footer — timestamp + copy, hover-revealed */}
-        <div className="mr-1 flex items-center gap-1 px-1 opacity-0 transition-opacity duration-200 group-hover/msg:opacity-100">
-          <span className="font-sans text-[10px] tabular-nums text-neutral-400 dark:text-neutral-500">
+        {/* Footer — timestamp + copy, hover-revealed with lift (P2-#30/#31) */}
+        <div className="mr-1 flex translate-y-1 items-center gap-1 px-1 text-neutral-400 opacity-0 transition-all duration-200 ease-out group-hover/msg:translate-y-0 group-hover/msg:opacity-100 dark:text-neutral-500">
+          <span className="font-sans text-[10px] tabular-nums">
             {timeFmt(msg.createdAt)}
           </span>
-          <button
+          {/* BUG FIX (P2-#31): user-message copy button is now a motion.button
+              with whileHover scale, matching the AI-message ActionButton. */}
+          <motion.button
             onClick={handleCopy}
-            className="flex h-5 items-center gap-1 rounded px-1 font-sans text-[10px] text-neutral-400 transition-colors hover:text-neutral-700 dark:text-neutral-500 dark:hover:text-neutral-200"
+            whileHover={{ scale: 1.1, transition: { type: 'spring', stiffness: 400, damping: 18 } }}
+            whileTap={{ scale: 0.92 }}
+            className="flex h-5 items-center gap-1 rounded px-1 font-sans text-[10px] transition-colors hover:text-neutral-700 dark:text-neutral-500 dark:hover:text-neutral-200"
             aria-label="复制消息"
           >
             {copied ? <Check className="h-3 w-3 text-neutral-900 dark:text-neutral-100" /> : <Copy className="h-3 w-3" />}
-          </button>
+          </motion.button>
         </div>
       </div>
     );
@@ -859,8 +872,10 @@ function MsgBubble({
         <MarkdownRenderer content={msg.content} />
       </div>
 
-      {/* Footer action row — timestamp + copy + regenerate (last only) */}
-      <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover/msg:opacity-100">
+      {/* Footer action row — timestamp + copy + regenerate (last only).
+          P2-#30: added translate-y-1 → 0 lift so it slides up instead of
+          hard-popping on hover. */}
+      <div className="flex translate-y-1 items-center gap-0.5 opacity-0 transition-all duration-200 ease-out group-hover/msg:translate-y-0 group-hover/msg:opacity-100">
         <span className="mr-1 font-sans text-[10px] tabular-nums text-neutral-400 dark:text-neutral-500">
           {timeFmt(msg.createdAt)}
         </span>

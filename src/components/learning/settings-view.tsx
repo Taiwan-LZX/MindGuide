@@ -377,7 +377,9 @@ export function SettingsView() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1, transition: MOTION.backdrop }}
               exit={{ opacity: 0, transition: MOTION.backdropExit }}
-              className="fixed inset-0 z-[60] bg-black/55"
+              // P2-#46: unified backdrop — bg-neutral-900/40 + backdrop-blur-[2px],
+              // matching keyboard-shortcuts-overlay. Was bg-black/55 (too dark, no blur).
+              className="fixed inset-0 z-[60] bg-neutral-900/40 backdrop-blur-[2px]"
               onClick={() => setOpen(false)}
             />
 
@@ -413,7 +415,9 @@ export function SettingsView() {
                     whileHover={{
                       scale: 1.1,
                       rotate: 90,
-                      transition: { type: 'spring', stiffness: 320, damping: 18, mass: 0.6 },
+                      // P2-#50: damping 18 → 26 to eliminate the ~100° overshoot
+                      // that made the X icon "jiggle" past 90°.
+                      transition: { type: 'spring', stiffness: 320, damping: 26, mass: 0.6 },
                     }}
                     whileTap={{
                       scale: 0.88,

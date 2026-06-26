@@ -148,7 +148,10 @@ function CircularProgress({ value, size = 36 }: { value: number; size?: number }
           className="fill-none stroke-[var(--brand)]"
           initial={{ strokeDashoffset: circumference }}
           animate={{ strokeDashoffset: offset }}
-          transition={{ type: 'spring', stiffness: 120, damping: 20, mass: 0.8 }}
+          // BUG FIX (P2-#34): stiffness 120 → 260 + damping 20 → 28. Old
+          // config took ~1.2s to settle — felt sluggish when toggling
+          // lesson status. New config settles in ~500ms.
+          transition={{ type: 'spring', stiffness: 260, damping: 28, mass: 0.7 }}
           style={{ strokeDasharray: circumference }}
         />
       </svg>
@@ -317,7 +320,8 @@ export function CoursePanel() {
           animate="visible"
           exit="exit"
           className="relative z-40 flex h-full w-[420px] shrink-0 flex-col m-2 rounded-2xl border border-neutral-200/80 bg-white dark:border-neutral-700/50 dark:bg-neutral-900"
-          style={{ maxHeight: 'calc(100% - 16px)', transformOrigin: 'right', willChange: 'transform, opacity' }}
+          // P2-#49: removed willChange:'transform, opacity' (see create-new-panel note).
+          style={{ maxHeight: 'calc(100% - 16px)', transformOrigin: 'right' }}
         >
             {!isCourseGenerated ? (
               /* ── Not yet generated: prompt to generate ── */
@@ -497,8 +501,12 @@ export function CoursePanel() {
                                   {mod.title}
                                 </p>
                               </div>
-                              {/* Module progress number — "X/Y" style from reference */}
-                              <span
+                              {/* Module progress number — "X/Y" style from reference.
+                                  P2-#36: when isModuleComplete, animate a scale pulse
+                                  + the brand color so completion feels rewarding. */}
+                              <motion.span
+                                animate={isModuleComplete ? { scale: [1, 1.15, 1] } : { scale: 1 }}
+                                transition={isModuleComplete ? { duration: 0.4, ease: [0.16, 1, 0.3, 1] } : {}}
                                 className={`shrink-0 font-serif text-[12px] font-medium tabular-nums ${
                                   isModuleComplete
                                     ? 'text-[var(--brand)]'
@@ -506,7 +514,7 @@ export function CoursePanel() {
                                 }`}
                               >
                                 {progress.label}
-                              </span>
+                              </motion.span>
                             </button>
 
                             {/* Lessons — flat list, no nested card */}
@@ -538,7 +546,8 @@ export function CoursePanel() {
                                             isLocked
                                               ? {}
                                               : {
-                                                  backgroundColor: 'rgba(0,0,0,0.02)',
+                                                  // BUG FIX (P2-#35): 0.02 → 0.04 — old value was nearly invisible.
+                                                  backgroundColor: 'rgba(0,0,0,0.04)',
                                                   transition: { duration: 0.15 },
                                                 }
                                           }

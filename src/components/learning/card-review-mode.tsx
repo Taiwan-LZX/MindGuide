@@ -128,22 +128,29 @@ export function CardReviewMode() {
         animate={{ opacity: 1, y: 0 }}
         className="flex h-full flex-1 flex-col items-center justify-center px-6"
       >
-        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full border border-neutral-300 text-neutral-700 dark:border-neutral-600 dark:text-neutral-200">
+        {/* P2-#39: Checkmark icon now animates in with a spring overshoot. */}
+        <motion.div
+          initial={{ scale: 0, rotate: -15 }}
+          animate={{ scale: 1, rotate: 0 }}
+          transition={{ type: 'spring', stiffness: 380, damping: 18, mass: 0.7, delay: 0.1 }}
+          className="mb-5 flex h-14 w-14 items-center justify-center rounded-full border border-neutral-300 text-neutral-700 dark:border-neutral-600 dark:text-neutral-200"
+        >
           <Check className="h-7 w-7" strokeWidth={2.5} />
-        </div>
+        </motion.div>
         <p className="mb-1 font-serif text-[18px] font-medium text-neutral-900 dark:text-neutral-100">复习完成</p>
         <p className="mb-5 text-[12px] text-neutral-500 dark:text-neutral-400">
           共复习 {rated} 张 · 正确率 {accuracy}%
         </p>
 
-        {/* Rating distribution (horizontal hairline bars, monochrome) */}
+        {/* Rating distribution (horizontal hairline bars, monochrome).
+            P2-#38: added stagger — each bar starts 80ms after the previous. */}
         <div className="mb-6 w-full max-w-[420px] space-y-2.5">
           {[
             { label: '忘了', count: reviewStats.forgot, accent: 'bg-neutral-900 dark:bg-neutral-100' },
             { label: '困难', count: reviewStats.hard, accent: 'bg-neutral-700 dark:bg-neutral-300' },
             { label: '良好', count: reviewStats.good, accent: 'bg-neutral-500 dark:bg-neutral-400' },
             { label: '简单', count: reviewStats.easy, accent: 'bg-neutral-300 dark:bg-neutral-600' },
-          ].map((row) => {
+          ].map((row, i) => {
             const pct = rated > 0 ? (row.count / rated) * 100 : 0;
             return (
               <div key={row.label} className="flex items-center gap-3">
@@ -154,7 +161,7 @@ export function CardReviewMode() {
                     style={{ transformOrigin: 'left' }}
                     initial={{ scaleX: 0 }}
                     animate={{ scaleX: Math.max(0, Math.min(1, pct / 100)) }}
-                    transition={{ type: 'spring', stiffness: 200, damping: 28, mass: 1 }}
+                    transition={{ type: 'spring', stiffness: 200, damping: 28, mass: 1, delay: 0.2 + i * 0.08 }}
                   />
                 </div>
                 <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-neutral-600 dark:text-neutral-300">
@@ -315,7 +322,20 @@ export function CardReviewMode() {
                           }}
                           disabled={isSubmittingReview}
                           onClick={() => { void submitReview(b.q); }}
-                          className="group flex flex-col items-center gap-1 rounded-lg border border-neutral-200 bg-white px-2 py-3 transition-colors hover:border-neutral-400 hover:bg-neutral-50 disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:border-neutral-500 dark:hover:bg-neutral-800"
+                          // P2-#37: each button gets a unique hover border
+                          // color so the user can distinguish them at a
+                          // glance without reading the label. Kept subtle
+                          // (border-only, bg stays neutral) to respect the
+                          // academic monochrome palette.
+                          className={`group flex flex-col items-center gap-1 rounded-lg border border-neutral-200 bg-white px-2 py-3 transition-colors disabled:opacity-50 dark:border-neutral-700 dark:bg-neutral-900 ${
+                            b.q === 0
+                              ? 'hover:border-red-300 hover:bg-red-50/50 dark:hover:border-red-700 dark:hover:bg-red-950/20'
+                              : b.q === 2
+                              ? 'hover:border-orange-300 hover:bg-orange-50/50 dark:hover:border-orange-700 dark:hover:bg-orange-950/20'
+                              : b.q === 4
+                              ? 'hover:border-emerald-300 hover:bg-emerald-50/50 dark:hover:border-emerald-700 dark:hover:bg-emerald-950/20'
+                              : 'hover:border-teal-300 hover:bg-teal-50/50 dark:hover:border-teal-700 dark:hover:bg-teal-950/20'
+                          }`}
                         >
                           <span className="text-[13px] font-medium text-neutral-800 dark:text-neutral-100">{b.label}</span>
                           <span className="text-[10px] text-neutral-400 dark:text-neutral-500">{b.hint}</span>

@@ -316,7 +316,11 @@ export function MoreFeaturesPanel() {
           initial="hidden"
           animate="visible"
           exit="exit"
-          style={{ transformOrigin: 'bottom left', willChange: 'transform, opacity' }}
+          // P2-#49: removed willChange:'transform, opacity' — framer-motion
+          // manages willChange internally during active animation. A
+          // constant willChange forces the browser to keep a compositor
+          // layer allocated, wasting GPU memory.
+          style={{ transformOrigin: 'bottom left' }}
           // backdrop-blur-sm (vs -md) — cheaper on the GPU, visually identical
           // at this small popover size. The solid bg-white/95 already provides
           // the opacity; the blur is just for the soft focus effect behind.

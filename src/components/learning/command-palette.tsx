@@ -21,6 +21,7 @@ import {
   Sun,
   Moon,
   Grid2X2,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
@@ -372,6 +373,16 @@ export function CommandPalette() {
                 placeholder="搜索会话或功能…"
                 className="flex-1 border-0 bg-transparent text-[14px] text-neutral-800 placeholder:text-neutral-400 focus:outline-none dark:text-neutral-100 dark:placeholder:text-neutral-500"
               />
+              {/* P2-#45: clear button — appears when there's input text. */}
+              {query && (
+                <button
+                  onClick={() => { setQuery(''); setActiveIdx(0); inputRef.current?.focus(); }}
+                  className="flex h-5 w-5 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-300"
+                  aria-label="清空搜索"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
               <kbd className="hidden items-center rounded border border-neutral-200 bg-neutral-50 px-1.5 py-0.5 font-sans text-[10px] text-neutral-400 sm:flex dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-500">
                 ESC
               </kbd>
@@ -396,12 +407,17 @@ export function CommandPalette() {
                   <div className="px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
                     {group}
                   </div>
-                  {cmds.map(c => {
+                  {cmds.map((c, ci) => {
                     const flat = (c as Command & { __flat: number }).__flat;
                     const isActive = flat === activeIdx;
                     return (
-                      <button
+                      // P2-#44: each button now enters with a staggered
+                      // fade+slide (35ms per row) matching MoreFeaturesPanel.
+                      <motion.button
                         key={c.id}
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: ci * 0.035, type: 'spring', stiffness: 400, damping: 28, mass: 0.5 }}
                         data-idx={flat}
                         onMouseMove={() => setActiveIdx(flat)}
                         onClick={c.action}
@@ -435,7 +451,7 @@ export function CommandPalette() {
                         {isActive && (
                           <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
                         )}
-                      </button>
+                      </motion.button>
                     );
                   })}
                 </div>

@@ -278,7 +278,8 @@ export function MouseFollowTooltip({
                   pointerEvents: 'none',
                   zIndex: 100,
                 }}
-                className={`rounded-md border border-neutral-200 bg-white/95 px-2.5 py-1.5 font-sans text-[11.5px] leading-relaxed text-neutral-600 shadow-sm backdrop-blur-sm dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-300 ${className}`}
+                // P2-#48: text-[11.5px] → text-[12px] for better readability.
+                className={`rounded-md border border-neutral-200 bg-white/95 px-2.5 py-1.5 font-sans text-[12px] leading-relaxed text-neutral-600 shadow-sm backdrop-blur-sm dark:border-neutral-700 dark:bg-neutral-900/95 dark:text-neutral-300 ${className}`}
               >
                 {content}
               </motion.div>

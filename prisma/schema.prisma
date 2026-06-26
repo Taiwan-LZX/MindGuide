@@ -1,0 +1,235 @@
+// AI Learning Platform Schema
+// Core philosophy: AI understands the learner first, then guides through dialogue
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Learning Session - a focused learning conversation
+model LearningSession {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  topic       String?              // Main learning topic
+  status      String   @default("active") // active, paused, completed, archived
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  messages         LearningMessage[]
+  knowledgeNodes   KnowledgeNode[]
+  references       Reference[]
+  notes            Note?
+  courseModules    CourseModule[]
+  tasks            Task[]
+  cards            Card[]
+  materials        LearningMaterial[]
+}
+
+// Individual messages in the learning dialogue
+model LearningMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      String                // user, assistant, system
+  content   String                // Message content (markdown)
+  type      String   @default("dialogue") // dialogue, question, explanation, summary, encouragement, follow_up
+  thinking  String?               // AI's reasoning process
+  createdAt DateTime @default(now())
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// Knowledge nodes extracted/generated during learning
+model KnowledgeNode {
+  id          String   @id @default(cuid())
+  sessionId   String
+  title       String
+  content     String                // Explanation content (markdown)
+  category    String?               // concept, fact, principle, example, analogy
+  importance  Int      @default(3)   // 1-5 scale
+  mastered    Boolean  @default(false)
+  tags        String?               // Comma-separated tags
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// Reference sources collected during learning
+model Reference {
+  id        String   @id @default(cuid())
+  sessionId String
+  title     String
+  url       String?
+  type      String   @default("article") // article, book, video, paper, tutorial
+  note      String?               // Why this reference is relevant
+  createdAt DateTime @default(now())
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// Per-session rich text notes (Tiptap HTML content)
+model Note {
+  id        String   @id @default(cuid())
+  sessionId String   @unique
+  content   String   @default("")        // HTML content from Tiptap editor
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// AI-generated course module (one session → many modules)
+model CourseModule {
+  id        String   @id @default(cuid())
+  sessionId String
+  title     String
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  lessons  CourseLesson[]
+}
+
+// Individual lesson inside a module
+model CourseLesson {
+  id        String   @id @default(cuid())
+  moduleId  String
+  title     String
+  type      String   @default("theory")   // theory, practice, quiz
+  duration  String   @default("10分钟")
+  status    String   @default("locked")   // locked, available, active, completed
+  content   String   @default("")         // Detailed content description
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  module CourseModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+}
+
+// Per-session learning task (planner). Persisted so a refresh doesn't wipe
+// the user's study plan.
+model Task {
+  id        String   @id @default(cuid())
+  sessionId String
+  title     String
+  done      Boolean  @default(false)
+  priority  Int      @default(3)          // 1 (low) – 5 (high)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// Per-session learning material uploaded by the learner (PDF, markdown, text,
+// code, etc.). The extracted text content is stored alongside metadata so the
+// course generator / AI dialogue can use it as a knowledge base without
+// re-parsing the file each time.
+//
+// Pipeline: upload → parseFile() → chunkDocument() → embed() → persist
+//   • content   = full extracted plain text (≤ 200k chars)
+//   • outline   = JSON array of {title, charStart, charEnd, level}
+//   • chunks    = DocumentChunk[] (one row per retrieval unit, with embedding)
+//   • chunkCount = denormalised count for fast list rendering
+model LearningMaterial {
+  id          String   @id @default(cuid())
+  sessionId   String
+  filename    String                          // original file name, e.g. "linear-algebra-notes.pdf"
+  fileType    String   @default("text/plain") // MIME type
+  size        Int      @default(0)            // bytes
+  title       String?                          // learner-editable display title (defaults to filename)
+  content     String   @default("")           // extracted plain text (truncated to ~200k chars)
+  charCount   Int      @default(0)            // length of extracted content
+  status      String   @default("ready")      // uploading | ready | error
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Parser provenance + structural metadata (added in v1.1 RAG upgrade)
+  parser      String?                          // 'unpdf' | 'mammoth' | 'xlsx' | 'pptx' | 'html' | 'text' | 'failed'
+  pageCount   Int?                             // PDF page count (null for non-PDF)
+  language    String?                          // 'zh' | 'en' | 'mixed'
+  outline     String?                          // JSON: [{title, charStart, charEnd, level}]
+  chunkCount  Int      @default(0)            // denormalised DocumentChunk count
+
+  chunks      DocumentChunk[]
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// Retrieval unit for RAG. HybridChunker output: struct-aware + token-aware
+// chunk (max ~512 tokens by default) with pre-computed BM25-style embedding
+// (1024-dim, L2-normalised, base64). The embedding is computed once at upload
+// time and reused for every retrieval call — see src/lib/text-embedding.ts.
+//
+// v2 fields (P1 upgrade, synthesised from Docling HybridChunker + Marker
+// block-types + GROBID section taxonomy):
+//   • blockType   — what kind of block this chunk primarily is. One of:
+//                   'text' | 'title' | 'table' | 'figure' | 'formula' | 'list'
+//                   | 'code' | 'caption' | 'reference' | 'header' | 'footer'
+//                   (Docling DocItemLabel enum, trimmed to the 11 we actually use).
+//   • sectionPath — slash-delimited breadcrumb of enclosing section titles,
+//                   e.g. "3 Methods / 3.2 Training Procedure".
+//                   Replaces the flat `section` field for tree-walk retrieval.
+//   • page        — 1-based PDF page (null for non-PDF).
+//   • bbox        — JSON: [startX, startY, w, h] normalised [0,1].
+//                   Null when not applicable (text blocks). Lets the UI crop
+//                   figures or highlight table regions on the page image.
+//   • sectionRole — GROBID section taxonomy role for academic papers:
+//                   'abstract' | 'introduction' | 'methods' | 'results'
+//                   | 'discussion' | 'conclusion' | 'references' | 'appendix'
+//                   | null for non-academic. Enables role-aware retrieval boost.
+model DocumentChunk {
+  id           String   @id @default(cuid())
+  materialId   String
+  content      String                            // chunk text (≤ ~1500 chars, cleaned)
+  section      String   @default("")             // enclosing section title (legacy/v1, kept for back-compat)
+  chunkIndex   Int                                // ordinal within material
+  charStart    Int                                // offset in material.content
+  charEnd      Int
+  tokens       Int      @default(0)              // approximate token count
+  embedding    String   @default("")             // base64-encoded 1024×Float32 (L2-normalised)
+  metadata     String?                           // JSON: { level, isTitle, sectionStart?, keywords?, summary? }
+  // ── v2 fields (P1) ────────────────────────────────────────────────────────
+  blockType    String   @default("text")          // text|title|table|figure|formula|list|code|caption|reference|header|footer
+  sectionPath  String   @default("")              // slash-delimited breadcrumb of enclosing sections
+  page         Int?                               // 1-based PDF page (null for non-PDF)
+  bbox         String?                           // JSON: [startX, startY, w, h] normalised [0,1]
+  sectionRole  String?                           // GROBID role: abstract|introduction|methods|results|discussion|conclusion|references|appendix
+  createdAt    DateTime @default(now())
+
+  material LearningMaterial @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@index([materialId])
+  @@index([chunkIndex])
+  @@index([blockType])
+  @@index([sectionRole])
+}
+
+// Per-session flashcard. Persisted for spaced-repetition review.
+// SM-2 algorithm fields track ease/interval/repetition and a due date so
+// the review queue can surface only the cards the learner needs to see today.
+model Card {
+  id        String   @id @default(cuid())
+  sessionId String
+  front     String                          // prompt / question
+  back      String                          // answer / explanation
+  category  String   @default("general")
+  mastered  Boolean  @default(false)
+  order     Int      @default(0)
+  // SM-2 spaced-repetition state
+  ease        Float    @default(2.5)        // ease factor (1.3 .. 3.0)
+  interval    Int      @default(0)          // days until next review
+  repetition Int      @default(0)          // consecutive correct recalls
+  dueAt       DateTime?                     // next-due timestamp (null = never reviewed)
+  lastReviewedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  session LearningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}

@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { MOTION } from '@/lib/motion-tokens';
 import {
   Search,
   X,
@@ -86,12 +87,8 @@ const panelVariants = {
     transition: { type: 'spring' as const, stiffness: 320, damping: 26, mass: 0.8 },
   },
   exit: {
-    opacity: 0, y: -4, scale: 0.98,
-    transition: {
-      opacity: { duration: 0.16, ease: [0.16, 1, 0.3, 1] as const },
-      y: { duration: 0.18, ease: [0.4, 0, 1, 1] as const },
-      scale: { duration: 0.16, ease: [0.4, 0, 1, 1] as const },
-    },
+    opacity: 0, y: -6, scale: 0.98,
+    transition: MOTION.enter,
   },
 };
 

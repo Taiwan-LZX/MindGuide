@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MoreVertical, BookOpen, GraduationCap, ArrowUp, Square, ArrowDown, Copy, Check } from 'lucide-react';
+import { MOTION } from '@/lib/motion-tokens';
 import { useLearningStore } from '@/store/learning-store';
 import { KnowledgeInline } from '@/components/learning/knowledge-inline';
 import { MarkdownRenderer } from '@/components/learning/markdown-renderer';
@@ -57,16 +58,11 @@ const streamingBubbleVariants = {
     y: 0,
     transition: { type: 'spring' as const, stiffness: 320, damping: 28, mass: 0.7 },
   },
-  // EXIT EASING (anim-refine-003): split per-property so opacity leads with
-  // ease-out — the streaming bubble visibly fades from frame 1 instead of
-  // sitting at full opacity for ~80ms then vanishing.
+  // EXIT = ENTER reversed: same target (hidden) + same spring. Symmetric.
   exit: {
     opacity: 0,
-    y: -4,
-    transition: {
-      opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] as const },
-      y: { duration: 0.18, ease: [0.4, 0, 1, 1] as const },
-    },
+    y: 10,
+    transition: MOTION.enter,
   },
 };
 

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { MOTION } from '@/lib/motion-tokens';
 import {
   Search,
   Plus,
@@ -353,15 +354,8 @@ export function CommandPalette() {
           {/* Panel */}
           <motion.div
             initial={{ opacity: 0, y: -12, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.99 }}
-            // Per-property exit: opacity fast (ease-out), transform springy
-            // (anim-refine-003 — no dead-time window before visible motion).
-            transition={{
-              opacity: { duration: 0.16, ease: [0.16, 1, 0.3, 1] },
-              y: { type: 'spring', stiffness: 320, damping: 28, mass: 0.8 },
-              scale: { type: 'spring', stiffness: 320, damping: 28, mass: 0.8 },
-            }}
+            animate={{ opacity: 1, y: 0, scale: 1, transition: MOTION.enter }}
+            exit={{ opacity: 0, y: -12, scale: 0.98, transition: MOTION.enter }}
             className="relative w-[min(560px,92vw)] overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900"
           >
             {/* Input row */}

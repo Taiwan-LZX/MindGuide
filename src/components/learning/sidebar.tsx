@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { MOTION, EASE } from '@/lib/motion-tokens';
 import {
   Search,
   MessagesSquare,
@@ -66,25 +67,21 @@ const sessionVariants = {
       mass: 0.7,
     },
   }),
+  // EXIT = ENTER reversed for opacity/scale; x:-20 adds "slide out left"
+  // semantic for deleted sessions. Same spring physics as enter.
   exit: {
     opacity: 0,
     x: -20,
     scale: 0.95,
-    // EXIT EASING (anim-refine-003): opacity leads with ease-out so the
-    // session row visibly fades from frame 1; x + scale keep ease-in for the
-    // "sliding out to the left" metaphor.
-    transition: {
-      opacity: { duration: 0.16, ease: [0.16, 1, 0.3, 1] as const },
-      x: { duration: 0.20, ease: [0.4, 0, 1, 1] as const },
-      scale: { duration: 0.18, ease: [0.4, 0, 1, 1] as const },
-    },
+    transition: MOTION.enter,
   },
 };
 
 const createFormVariants = {
   hidden: { opacity: 0, height: 0, marginBottom: 0 },
-  visible: { opacity: 1, height: 'auto', marginBottom: 8, transition: { type: 'spring' as const, stiffness: 350, damping: 28 } },
-  exit: { opacity: 0, height: 0, marginBottom: 0, transition: { duration: 0.15 } },
+  visible: { opacity: 1, height: 'auto', marginBottom: 8, transition: { duration: 0.26, ease: EASE.INOUT } },
+  // EXIT = ENTER reversed: same target (hidden) + same tween.
+  exit: { opacity: 0, height: 0, marginBottom: 0, transition: { duration: 0.26, ease: EASE.INOUT } },
 };
 
 const sectionHeaderVariants = {

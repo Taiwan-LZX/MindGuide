@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { MOTION } from '@/lib/motion-tokens';
 
 // ─── Page-level entry/exit variants ─────────────────────────────────────────
 // OWNED BY page.tsx — this is the animation boundary for the welcome ↔ feature
@@ -37,24 +38,13 @@ export const pageVariants = {
     opacity: 1,
     x: 0,
     scale: 1,
-    transition: {
-      type: 'spring' as const,
-      stiffness: 220,
-      damping: 26,
-      mass: 0.9,
-    },
+    transition: MOTION.enterSoft,
   },
   exit: (dir: number) => ({
     opacity: 0,
-    x: -22 * dir,
-    scale: 0.98,
-    transition: {
-      // Split per-property so opacity leads (perceptible fade from frame 1)
-      // and transform follows with a slight ease-out trail.
-      opacity: { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const },
-      x: { duration: 0.26, ease: [0.16, 1, 0.3, 1] as const },
-      scale: { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const },
-    },
+    x: -28 * dir,
+    scale: 0.97,
+    transition: MOTION.enterSoft,
   }),
 };
 

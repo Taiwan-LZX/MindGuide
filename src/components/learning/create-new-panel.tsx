@@ -9,6 +9,7 @@ import {
   useMotionTemplate,
   type Variants,
 } from 'framer-motion';
+import { MOTION } from '@/lib/motion-tokens';
 import {
   X,
   ListChecks,
@@ -90,15 +91,12 @@ const popoverVariants: Variants = {
   //     and y keep ease-IN for the "falling away" physical metaphor, but
   //     finish in 0.22s (vs 0.26s) so they complete before opacity fully
   //     fades — the panel "shrinks + drops" first, then ghost-fades out.
+  // EXIT = ENTER reversed: same target (hidden) + same spring.
   exit: {
     opacity: 0,
     y: 14,
-    scale: 0.93,
-    transition: {
-      opacity: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
-      scale: { duration: 0.22, ease: [0.4, 0, 1, 1] },
-      y: { duration: 0.24, ease: [0.4, 0, 1, 1] },
-    },
+    scale: 0.965,
+    transition: MOTION.enterSoft,
   },
 };
 

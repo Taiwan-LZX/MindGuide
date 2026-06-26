@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { MOTION } from '@/lib/motion-tokens';
 
 // ─── Shortcut definitions ────────────────────────────────────────────────────
 
@@ -98,9 +99,8 @@ export function KeyboardShortcutsOverlay() {
           <motion.div
             key="ks-panel"
             initial={{ opacity: 0, y: 16, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.98 }}
-            transition={{ type: 'spring', stiffness: 280, damping: 26, mass: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1, transition: MOTION.enterSoft }}
+            exit={{ opacity: 0, y: 16, scale: 0.97, transition: MOTION.enterSoft }}
             onClick={e => e.stopPropagation()}
             className="relative w-[min(680px,92vw)] max-h-[82vh] overflow-y-auto custom-scrollbar rounded-2xl border border-neutral-200 bg-white p-8 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.18)] dark:border-neutral-800 dark:bg-neutral-900"
             role="dialog"

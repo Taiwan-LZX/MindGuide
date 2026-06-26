@@ -9,6 +9,7 @@ import {
   useMotionTemplate,
   type Variants,
 } from 'framer-motion';
+import { MOTION } from '@/lib/motion-tokens';
 import { Plus, X, Trash2, Settings, Eraser } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 
@@ -62,15 +63,12 @@ const panelVariants: Variants = {
   //     (0.18s) so they finish before opacity fully fades.
   //   · Total perceived duration ~200ms, with visible motion starting at
   //     frame 1 (vs ~frame 7 before).
+  // EXIT = ENTER reversed: same target (hidden) + same spring.
   exit: {
     opacity: 0,
-    scale: 0.92,
-    y: -8,
-    transition: {
-      opacity: { duration: 0.18, ease: [0.16, 1, 0.3, 1] },
-      scale: { duration: 0.18, ease: [0.4, 0, 1, 1] },
-      y: { duration: 0.20, ease: [0.4, 0, 1, 1] },
-    },
+    scale: 0.94,
+    y: -10,
+    transition: MOTION.enterSoft,
   },
 };
 

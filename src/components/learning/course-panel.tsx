@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { MOTION } from '@/lib/motion-tokens';
 import {
   X,
   Check,
@@ -50,15 +51,12 @@ const panelVariants = {
   // so the drawer visibly fades from frame 1 (no dead-time window). Scale + x
   // keep ease-IN for the "sliding back into the right edge" metaphor but
   // finish slightly before opacity completes.
+  // EXIT = ENTER reversed: same target (hidden) + same spring.
   exit: {
     opacity: 0,
-    scale: 0.96,
+    scale: 0.97,
     x: 24,
-    transition: {
-      opacity: { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const },
-      scale: { duration: 0.22, ease: [0.4, 0, 1, 1] as const },
-      x: { duration: 0.24, ease: [0.4, 0, 1, 1] as const },
-    },
+    transition: MOTION.enterSoft,
   },
 };
 

@@ -2,6 +2,7 @@
 
 import React, { createContext, useCallback, useContext, useRef, useState, useSyncExternalStore } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { MOTION, panelMotion, slideMotion } from '@/lib/motion-tokens';
 import {
   X,
   Sun,
@@ -294,88 +295,31 @@ const useHint = () => useContext(HintContext);
 //     "shrinks + drops" first, then continues fading out as a ghost.
 //   · Total perceived duration ~260ms, with visible motion starting at
 //     frame 1 (vs ~frame 12 before).
-const panelVariants = {
-  hidden: { opacity: 0, scale: 0.94, y: 18 },
-  visible: {
-    opacity: 1,
-    scale: 1,
-    y: 0,
-    transition: { type: 'spring' as const, stiffness: 200, damping: 24, mass: 1.0 },
-  },
-  exit: {
-    opacity: 0,
-    scale: 0.95,
-    y: 10,
-    transition: {
-      // Opacity leads: 0.22s ease-out so the user sees the modal fading
-      // immediately. SnoozeOut curve: 70% of the fade happens in the first
-      // 30% of duration.
-      opacity: { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const },
-      // Scale + y follow with a shorter ease-in: the panel "shrinks and
-      // drops" within 0.20s, then continues fading as a translucent ghost
-      // for the remaining ~20ms. This matches the physical metaphor of
-      // "departing" while avoiding the "stuck then snap" perception.
-      scale: { duration: 0.20, ease: [0.4, 0, 1, 1] as const },
-      y: { duration: 0.22, ease: [0.4, 0, 1, 1] as const },
-    },
-  },
-};
-
-// Direction-aware tab content. The x offset flips based on whether the new
-// tab is to the right (forward) or left (backward) of the previous one — so
-// switching tabs feels like flipping pages in a book, not just fading.
-// `custom` is the direction (-1 = back, +1 = forward).
+// ─── Motion variants ───────────────────────────────────────────────────────
+// Uses shared motion-tokens. Principle: EXIT = ENTER reversed (same target
+// values as `hidden`, same spring physics). See motion-tokens.ts.
 //
-// Exit easing: switched to ease-out [0.16, 1, 0.3, 1] so the old tab content
-// visibly slides away immediately (no dead-time window — see panelVariants
-// docstring above for the full rationale).
-const contentVariants = {
-  hidden: (dir: number) => ({
-    opacity: 0,
-    x: 18 * dir,
-    y: 6,
-  }),
-  visible: {
-    opacity: 1,
-    x: 0,
-    y: 0,
-    transition: { type: 'spring' as const, stiffness: 320, damping: 30, mass: 0.7 },
-  },
-  exit: (dir: number) => ({
-    opacity: 0,
-    x: -14 * dir,
-    y: -4,
-    transition: {
-      opacity: { duration: 0.16, ease: [0.16, 1, 0.3, 1] as const },
-      x: { duration: 0.20, ease: [0.16, 1, 0.3, 1] as const },
-      y: { duration: 0.16, ease: [0.4, 0, 1, 1] as const },
-    },
-  }),
-};
+// `panelVariants` = panelMotion (spring, exit mirrors enter).
+// `contentVariants` = slideMotion (direction-aware, exit slides opposite way).
+// `hintVariants` = custom (exit = hidden values + same spring).
+const panelVariants = panelMotion;
 
-// Soft cross-fade for the right pane when the hovered hint changes. Tiny
-// scale (0.99 → 1) adds depth so the swap reads as a gentle settle rather
-// than a hard cut. The key is the hint id so AnimatePresence swaps the block.
-//
-// Exit uses ease-out [0.16, 1, 0.3, 1] for the same dead-time-elimination
-// reason as panelVariants.
+const contentVariants = slideMotion;
+
 const hintVariants = {
   hidden: { opacity: 0, y: 6, scale: 0.99 },
   visible: {
     opacity: 1,
     y: 0,
     scale: 1,
-    transition: { type: 'spring' as const, stiffness: 360, damping: 28, mass: 0.6 },
+    transition: MOTION.enterSnappy,
   },
+  // Exit = hidden values + same spring. Reverse of enter.
   exit: {
     opacity: 0,
-    y: -4,
+    y: 6,
     scale: 0.99,
-    transition: {
-      opacity: { duration: 0.14, ease: [0.16, 1, 0.3, 1] as const },
-      y: { duration: 0.16, ease: [0.4, 0, 1, 1] as const },
-      scale: { duration: 0.14, ease: [0.4, 0, 1, 1] as const },
-    },
+    transition: MOTION.enterSnappy,
   },
 };
 
@@ -426,23 +370,13 @@ export function SettingsView() {
       <AnimatePresence>
         {open && (
           <>
-            {/* Backdrop — solid dark overlay.
-                PREVIOUSLY used `backdrop-blur-[3px]` which caused a 124ms
-                main-thread stall during close (verified via rAF sampling —
-                see worklog anim-refine-003). The browser does a synchronous
-                reflow when tearing down the backdrop-filter layer, which
-                freezes the entire close animation for ~124ms — the user
-                perceives "instant close" because all visible motion is
-                squeezed into the ~80ms before + ~80ms after the stall.
-                Replacing blur with a darker solid overlay eliminates the
-                stall entirely. The visual hierarchy is preserved by
-                bg-black/55 (slightly darker than the previous /40 + blur).
-                EXIT EASING: ease-out [0.16, 1, 0.3, 1] so the backdrop
-                visibly fades from frame 1 (no dead-time window). */}
+            {/* Backdrop — solid dark overlay (no backdrop-blur: it caused a
+                124ms main-thread stall on close, see worklog anim-refine-003).
+                Symmetric enter/exit: same duration + ease so close mirrors open. */}
             <motion.div
               initial={{ opacity: 0 }}
-              animate={{ opacity: 1, transition: { duration: 0.24, ease: [0.25, 0.1, 0.25, 1] } }}
-              exit={{ opacity: 0, transition: { duration: 0.18, ease: [0.16, 1, 0.3, 1] } }}
+              animate={{ opacity: 1, transition: MOTION.backdrop }}
+              exit={{ opacity: 0, transition: MOTION.backdropExit }}
               className="fixed inset-0 z-[60] bg-black/55"
               onClick={() => setOpen(false)}
             />
@@ -808,8 +742,8 @@ function PaletteTab() {
         {preview && (
           <motion.div
             initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0, transition: MOTION.enter }}
+            exit={{ opacity: 0, y: 6, transition: MOTION.enter }}
             className="flex items-center gap-3 rounded-xl border border-neutral-200 px-4 py-3 dark:border-neutral-800"
           >
             <div
@@ -957,9 +891,8 @@ function SettingsPreview({ activeTab }: { activeTab: TabKey }) {
             <motion.span
               key={(hint.icon as { displayName?: string } | undefined)?.displayName ?? 'default'}
               initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              transition={{ duration: 0.18 }}
+              animate={{ opacity: 1, scale: 1, transition: MOTION.enterSnappy }}
+              exit={{ opacity: 0, scale: 0.8, transition: MOTION.enterSnappy }}
             >
               <DemoIcon className="h-7 w-7" strokeWidth={1.6} />
             </motion.span>
@@ -1055,9 +988,8 @@ function HintDemo({
         <motion.div
           key={kind}
           initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -4 }}
-          transition={{ duration: 0.2 }}
+          animate={{ opacity: 1, y: 0, transition: MOTION.enterSnappy }}
+          exit={{ opacity: 0, y: 6, transition: MOTION.enterSnappy }}
         >
           {kind === 'theme-swatch' && <ThemeSwatchDemo isDark={isDark} />}
           {kind === 'motion' && <MotionDemo />}

@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { MOTION } from '@/lib/motion-tokens';
 import { X, RotateCw, Check, AlertCircle } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 import { formatInterval } from '@/lib/sm2';
@@ -203,9 +204,8 @@ export function CardReviewMode() {
             <motion.div
               key={current.id}
               initial={{ opacity: 0, x: 30, scale: 0.985 }}
-              animate={{ opacity: 1, x: 0, scale: 1 }}
-              exit={{ opacity: 0, x: -24, scale: 0.99 }}
-              transition={{ type: 'spring', stiffness: 260, damping: 28, mass: 0.9 }}
+              animate={{ opacity: 1, x: 0, scale: 1, transition: MOTION.enter }}
+              exit={{ opacity: 0, x: -30, scale: 0.985, transition: MOTION.enter }}
               className="relative"
               style={{ perspective: '1200px' }}
             >
@@ -279,8 +279,8 @@ export function CardReviewMode() {
                     <motion.div
                       key="ratings"
                       initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0, transition: MOTION.enter }}
+                      exit={{ opacity: 0, y: 8, transition: MOTION.enter }}
                       className="grid grid-cols-4 gap-2"
                     >
                       {QUALITY_BUTTONS.map((b) => (

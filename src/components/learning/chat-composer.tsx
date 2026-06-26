@@ -410,6 +410,7 @@ export function ChatComposer({
   const setSelectedModel = useLearningStore(s => s.setSelectedModel);
   const modelUsageTokens = useLearningStore(s => s.modelUsageTokens);
   const setCreateNewPanelOpen = useLearningStore(s => s.setCreateNewPanelOpen);
+  const focusMode = useLearningStore(s => s.focusMode);
 
   // Destructure popover state into plain locals — the `react-hooks/refs` rule
   // flags property access off any object that also carries a ref, so we pull
@@ -490,21 +491,26 @@ export function ChatComposer({
   // min instead of snapping. We reset to compact mode whenever the draft is
   // emptied so the next message starts fresh.
   const [expanded, setExpanded] = useState(false);
+  // In focus mode, force the expanded height tier so the composer is tall
+  // from the start — the whole point of focus mode is to give the learner
+  // a generous writing surface without needing to type 80 chars first.
+  const effectiveExpanded = expanded || focusMode;
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
     const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
-    const maxH = expanded ? Math.floor(vh * 0.6) : Math.floor(vh * 0.35);
+    const maxH = effectiveExpanded ? Math.floor(vh * 0.6) : Math.floor(vh * 0.35);
     el.style.height = `${Math.min(el.scrollHeight, maxH)}px`;
     // When the draft is cleared, drop back to compact mode for next message.
+    // (Only when NOT in focus mode — in focus mode we keep the tall surface.)
     // Deferred to a microtask so we don't call setState synchronously inside
     // this effect (which would trigger a cascading re-render per the
     // react-hooks/set-state-in-effect rule).
-    if (value === '' && expanded) {
+    if (value === '' && effectiveExpanded && !focusMode) {
       queueMicrotask(() => setExpanded(false));
     }
-  }, [value, expanded]);
+  }, [value, effectiveExpanded, focusMode]);
 
   // ── Attention-focus state machine ──
   // hint visibility by scene:
@@ -743,7 +749,10 @@ export function ChatComposer({
   );
 
   return (
-    <div className="relative flex flex-col" data-chat-composer>
+    <div
+      className={`relative flex flex-col ${focusMode ? 'mx-auto w-full max-w-[680px]' : ''}`}
+      data-chat-composer
+    >
       {/* ── Switch-confirmation toast (P8) — a tiny pill that fades in above
           the composer for ~1.8s after the user changes mode/model/thinking.
           Pure neutral, monochrome. Renders ABOVE the status back card so it
@@ -778,8 +787,10 @@ export function ChatComposer({
 
       {/* ── Composer card ── */}
       <div
-        className={`relative z-10 flex flex-col gap-1.5 overflow-hidden rounded-2xl border bg-white p-2 transition-colors dark:bg-neutral-900 ${
-          isFocused
+        className={`relative z-10 flex flex-col gap-1.5 overflow-hidden rounded-2xl border bg-white p-2 transition-all dark:bg-neutral-900 ${
+          focusMode
+            ? 'border-neutral-300 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.12),0_4px_12px_-4px_rgba(0,0,0,0.06)] dark:border-neutral-600 dark:shadow-[0_12px_40px_-12px_rgba(0,0,0,0.5)]'
+            : isFocused
             ? 'border-neutral-300 dark:border-neutral-600'
             : 'border-neutral-200/80 hover:border-neutral-300 dark:border-neutral-800 dark:hover:border-neutral-700'
         }`}
@@ -810,7 +821,7 @@ export function ChatComposer({
           placeholder={placeholder}
           disabled={isStreaming}
           rows={1}
-          style={{ maxHeight: expanded ? '60vh' : '35vh' }}
+          style={{ maxHeight: effectiveExpanded ? '60vh' : '35vh' }}
           // `flex-none` (instead of the original `flex-1`) is required for the
           // auto-resize effect's `el.style.height = …px` to actually take
           // effect: with `flex: 1 1 0%` (flex-basis: 0), the flex algorithm

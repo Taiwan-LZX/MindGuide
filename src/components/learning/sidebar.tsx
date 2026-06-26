@@ -293,7 +293,7 @@ function FullSidebar() {
   }, [editTitle, updateSessionTitle]);
 
   return (
-    <aside className="flex h-full w-[260px] shrink-0 flex-col bg-neutral-100 dark:bg-neutral-900" data-sidebar>
+    <aside className="flex h-full w-full shrink-0 flex-col bg-neutral-100 dark:bg-neutral-900" data-sidebar>
       {/* ── Top: Brand + Tabs ── */}
       <motion.div
         className="space-y-3 px-3 pt-4 pb-2"

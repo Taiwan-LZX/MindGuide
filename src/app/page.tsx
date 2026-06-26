@@ -2,6 +2,7 @@
 
 import React, { useEffect } from 'react';
 import { MotionConfig, motion, AnimatePresence } from 'framer-motion';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useLearningStore } from '@/store/learning-store';
 import { usePreferences } from '@/store/preferences-store';
 import { Sidebar } from '@/components/learning/sidebar';
@@ -13,6 +14,7 @@ import { MoreFeaturesPanel } from '@/components/learning/create-new-panel';
 import { CoursePanel } from '@/components/learning/course-panel';
 import { CommandPalette } from '@/components/learning/command-palette';
 import { KeyboardShortcutsOverlay } from '@/components/learning/keyboard-shortcuts-overlay';
+import { Focus } from 'lucide-react';
 
 export default function Page() {
   const {
@@ -29,6 +31,8 @@ export default function Page() {
     setSidebarOpen,
     setCreateNewPanelOpen,
     setActiveFeatureView,
+    focusMode,
+    toggleFocusMode,
   } = useLearningStore();
   const motionEnabled = usePreferences(s => s.motionEnabled);
   const accentColor = usePreferences(s => s.accentColor);
@@ -72,17 +76,21 @@ export default function Page() {
     }
   }, [accentColor]);
 
-  // Close quick menu / settings view on Escape
+  // Close quick menu / settings view on Escape. Also exit focus mode on
+  // Escape (after settings layers are closed) — focus mode is the
+  // "outermost" layer and should be exited last so ESC peels off layers in
+  // the natural order: settings-view → settings-panel → focus-mode.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (settingsViewOpen) setSettingsViewOpen(false);
         else if (settingsPanelOpen) setSettingsPanelOpen(false);
+        else if (focusMode) toggleFocusMode();
       }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [settingsPanelOpen, setSettingsPanelOpen, settingsViewOpen, setSettingsViewOpen]);
+  }, [settingsPanelOpen, setSettingsPanelOpen, settingsViewOpen, setSettingsViewOpen, focusMode, toggleFocusMode]);
 
   // ── Global keyboard shortcuts ────────────────────────────────────────────
   // Registers ⌘1-6 (feature jump), ⌘B (toggle sidebar), ⌘, (open settings)
@@ -123,6 +131,14 @@ export default function Page() {
         return;
       }
 
+      // ⌘E: toggle focus mode (allowed even when typing — the user may be
+      // mid-composition and want to enter focus to write a longer message).
+      if (e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+        useLearningStore.getState().toggleFocusMode();
+        return;
+      }
+
       // ⌘B / ⌘, are suppressed inside editable fields to avoid hijacking
       // legitimate modifier+key combinations during text entry.
       if (isEditable) return;
@@ -140,10 +156,12 @@ export default function Page() {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [setActiveFeatureView, setCreateNewPanelOpen, setSidebarOpen, setSettingsViewOpen]);
+  }, [setActiveFeatureView, setCreateNewPanelOpen, setSidebarOpen, setSettingsViewOpen, toggleFocusMode]);
 
-  // Determine if sidebar should be shown
-  const showSidebar = displayMode !== 'full' && sidebarOpen;
+  // Determine if sidebar should be shown. In focus mode the sidebar is
+  // always hidden regardless of sidebarOpen (the focus toggle snapshots +
+  // forces sidebarOpen=false, but we also guard here for safety).
+  const showSidebar = !focusMode && displayMode !== 'full' && sidebarOpen;
 
   // viewDir comes from the store — see `activeFeatureViewDir` in
   // learning-store.ts. The store computes it atomically inside
@@ -158,77 +176,150 @@ export default function Page() {
     // while leaving opacity animations intact. 'user' (when enabled) also
     // respects the OS prefers-reduced-motion setting.
     <MotionConfig reducedMotion={motionEnabled ? 'user' : 'always'}>
-      <div className="flex h-dvh w-screen overflow-hidden bg-background">
-        {/* Sidebar */}
-        {showSidebar && <Sidebar collapsed={false} />}
-        {!showSidebar && displayMode !== 'full' && <Sidebar collapsed={true} />}
+      <div className="relative flex h-dvh w-screen overflow-hidden bg-background">
+        {/* ── Resizable panel group ───────────────────────────────────────
+            Sidebar (collapsible, 200–480px) | Main content (flex).
+            The handle is a 4px-wide transparent strip that reveals a brand
+            accent bar on hover — subtle so it doesn't compete with content
+            but discoverable when the user moves the cursor toward the seam.
 
-        {/* Main content area */}
-        <div className="relative flex flex-1 flex-col overflow-hidden">
-          {/* ── Page-level view transition ────────────────────────────────────
-              AnimatePresence mode="wait" + custom={viewDir} + key={activeFeatureView || 'main'}
-              is the SINGLE owner of the welcome ↔ feature transition.
+            In focus mode the entire PanelGroup collapses to just the main
+            content (sidebar hidden, no handle). */}
+        {showSidebar ? (
+          <PanelGroup direction="horizontal" autoSaveId="mindguide-layout">
+            <Panel
+              id="sidebar"
+              order={1}
+              defaultSize={20}
+              minSize={14}
+              maxSize={32}
+              collapsible
+              collapsedSize={0}
+              onCollapse={() => setSidebarOpen(false)}
+              className="h-full"
+            >
+              <Sidebar collapsed={false} />
+            </Panel>
+            <PanelResizeHandle
+              className="group relative w-[3px] shrink-0 bg-transparent transition-colors hover:bg-[var(--brand)]/30 data-[resize-handle-state=drag]:bg-[var(--brand)]/50"
+              aria-label="拖拽调整侧边栏宽度"
+            >
+              <div className="absolute left-1/2 top-1/2 h-8 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-neutral-200 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-neutral-700" />
+            </PanelResizeHandle>
+            <Panel id="main" order={2} defaultSize={80} minSize={50} className="h-full">
+              <MainAreaContent
+                activeFeatureView={activeFeatureView}
+                activeFeatureViewDir={activeFeatureViewDir}
+                focusMode={focusMode}
+              />
+            </Panel>
+          </PanelGroup>
+        ) : (
+          <div className="flex h-full w-full">
+            {!focusMode && displayMode !== 'full' && <Sidebar collapsed={true} />}
+            <div className="relative flex h-full flex-1 flex-col overflow-hidden">
+              <MainAreaContent
+                activeFeatureView={activeFeatureView}
+                activeFeatureViewDir={activeFeatureViewDir}
+                focusMode={focusMode}
+              />
+            </div>
+          </div>
+        )}
 
-              Bug context (anim-refine-003): previously this was
-                `{activeFeatureView ? <FeatureView /> : <MainContent />}`
-              with NO AnimatePresence wrapper. React's commit phase
-              synchronously unmounted whichever branch was leaving,
-              destroying its internal AnimatePresence before framer-motion
-              could fire the exit variant. The exit animation therefore
-              never ran — the user saw "instant switch" with zero frames.
-
-              Fix: hoist AnimatePresence here so it persists across
-              activeFeatureView changes. Each branch is a motion.div with
-              key + variants + initial/animate/exit. The `key` includes
-              the feature id so feature-to-feature switches ALSO animate
-              (the wrapper remounts). */}
-          <AnimatePresence mode="wait" custom={activeFeatureViewDir}>
-            {activeFeatureView ? (
-              <motion.div
-                key={`feature-${activeFeatureView}`}
-                custom={activeFeatureViewDir}
-                variants={pageVariants}
-                initial="hidden"
-                animate="visible"
-                exit="exit"
-                className="relative flex h-full flex-1 flex-col"
-              >
-                <FeatureView />
-              </motion.div>
-            ) : (
-              <motion.div
-                key="main"
-                custom={activeFeatureViewDir}
-                variants={pageVariants}
-                initial="hidden"
-                animate="visible"
-                exit="exit"
-                className="relative flex h-full flex-1 flex-col"
-              >
-                <MainContent />
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Course Panel (floating, inside main area) */}
-          <CoursePanel />
-
-          {/* More Features Panel (popover) */}
-          <MoreFeaturesPanel />
-
-          {/* Quick Settings Menu (three-dot popover) */}
-          <SettingsPanel />
-
-          {/* Detailed Settings View (full-screen overlay) */}
-          <SettingsView />
-
-          {/* Command Palette (⌘K) */}
-          <CommandPalette />
-
-          {/* Keyboard Shortcuts Overlay (?) */}
-          <KeyboardShortcutsOverlay />
-        </div>
+        {/* ── Focus mode indicator ───────────────────────────────────────
+            A small pill at the top-center of the viewport that confirms the
+            user is in focus mode and hints how to exit. Pointer-events-none
+            so it never blocks clicks. */}
+        <AnimatePresence>
+          {focusMode && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0, transition: { type: 'spring', stiffness: 380, damping: 28 } }}
+              exit={{ opacity: 0, y: -8, transition: { duration: 0.16 } }}
+              className="pointer-events-none absolute left-1/2 top-3 z-[70] flex -translate-x-1/2 items-center gap-2 rounded-full border border-neutral-200 bg-white/90 px-3 py-1.5 text-[11px] font-medium text-neutral-600 shadow-md backdrop-blur-sm dark:border-neutral-700 dark:bg-neutral-900/90 dark:text-neutral-300"
+              role="status"
+              aria-live="polite"
+            >
+              <Focus className="h-3 w-3 text-[var(--brand)]" />
+              <span>专注模式</span>
+              <kbd className="rounded border border-neutral-200 bg-neutral-50 px-1 py-0.5 font-sans text-[9px] text-neutral-500 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-400">
+                Esc 退出
+              </kbd>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </MotionConfig>
+  );
+}
+
+// ─── Main Area Content ──────────────────────────────────────────────────────
+//
+// Extracted so both the resizable-panel branch and the collapsed-sidebar
+// branch render the exact same inner content (feature view transition +
+// floating overlays). The focusMode flag is read by MainContent to enlarge
+// the composer — see chat-composer.tsx for the corresponding CSS hooks.
+function MainAreaContent({
+  activeFeatureView,
+  activeFeatureViewDir,
+  focusMode,
+}: {
+  activeFeatureView: string | null;
+  activeFeatureViewDir: 1 | -1;
+  focusMode: boolean;
+}) {
+  return (
+    <div
+      className="relative flex h-full flex-1 flex-col overflow-hidden"
+      data-focus-mode={focusMode ? 'on' : 'off'}
+    >
+      {/* ── Page-level view transition ──────────────────────────────────── */}
+      <AnimatePresence mode="wait" custom={activeFeatureViewDir}>
+        {activeFeatureView && !focusMode ? (
+          <motion.div
+            key={`feature-${activeFeatureView}`}
+            custom={activeFeatureViewDir}
+            variants={pageVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            className="relative flex h-full flex-1 flex-col"
+          >
+            <FeatureView />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="main"
+            custom={activeFeatureViewDir}
+            variants={pageVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            className="relative flex h-full flex-1 flex-col"
+          >
+            <MainContent />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Course Panel (floating, inside main area). Hidden in focus mode. */}
+      {!focusMode && <CoursePanel />}
+
+      {/* More Features Panel (popover) */}
+      <MoreFeaturesPanel />
+
+      {/* Quick Settings Menu (three-dot popover) */}
+      <SettingsPanel />
+
+      {/* Detailed Settings View (full-screen overlay) */}
+      <SettingsView />
+
+      {/* Command Palette (⌘K) */}
+      <CommandPalette />
+
+      {/* Keyboard Shortcuts Overlay (?) */}
+      <KeyboardShortcutsOverlay />
+    </div>
   );
 }

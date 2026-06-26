@@ -167,6 +167,14 @@ interface LearningStore {
   settingsPanelOpen: boolean;
   settingsViewOpen: boolean;
   createNewPanelOpen: boolean;
+  // Focus mode — entered via ⌘E. Collapses sidebar + course panel + any
+  // active feature view, and visually centers + enlarges the composer so the
+  // learner can compose long questions without distraction. The previous
+  // sidebar/coursePanelOpen state is remembered so exiting focus mode
+  // restores it.
+  focusMode: boolean;
+  // Persisted sidebar width (px) for the resizable panel. Default 260.
+  sidebarWidth: number;
   // Teaching mode — the "programming mode" analogue. The composer exposes this
   // as a selector (引导 / 讲解 / 练习 / 复习); the chat route reads it and tweaks
   // the system prompt so the same model behaves like four different teachers.
@@ -301,6 +309,9 @@ interface LearningStore {
   setSidebarOpen: (open: boolean) => void;
   setKnowledgePanelOpen: (open: boolean) => void;
   setDisplayMode: (mode: 'side' | 'half' | 'full') => void;
+  toggleFocusMode: () => void;
+  setFocusMode: (on: boolean) => void;
+  setSidebarWidth: (px: number) => void;
   setTeachingMode: (mode: 'guide' | 'explain' | 'practice' | 'review') => void;
   setThinkingMode: (mode: 'off' | 'standard' | 'deep' | 'structured') => void;
   setSelectedModel: (model: 'GLM-4.6' | 'GLM-4.5' | 'GLM-4-Air') => void;
@@ -368,6 +379,8 @@ const initialState = {
   sidebarOpen: true,
   knowledgePanelOpen: true,
   displayMode: 'side' as const,
+  focusMode: false,
+  sidebarWidth: 260,
   teachingMode: 'guide' as const,
   thinkingMode: 'standard' as 'off' | 'standard' | 'deep' | 'structured',
   selectedModel: 'GLM-4.6' as 'GLM-4.6' | 'GLM-4.5' | 'GLM-4-Air',
@@ -430,6 +443,16 @@ const initialState = {
 // Module-level timer to debounce notes auto-save across store instances
 let notesSaveTimer: ReturnType<typeof setTimeout> | null = null;
 const NOTES_SAVE_DELAY_MS = 800;
+
+// ─── Focus Mode Snapshot ────────────────────────────────────────────────────
+// Module-level ref holding the pre-focus sidebar/course/featureView state so
+// exiting focus mode can restore it. Lives outside the store because the UI
+// never reads it directly — it's transient restore data.
+let focusSnapshot: {
+  sidebarOpen: boolean;
+  coursePanelOpen: boolean;
+  activeFeatureView: string | null;
+} | null = null;
 
 // ─── Achievement Unlock Tracking ────────────────────────────────────────────
 // Persisted set of achievement IDs the user has already unlocked, so we can
@@ -1378,6 +1401,48 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
   setSidebarOpen: (open: boolean) => set({ sidebarOpen: open }),
   setKnowledgePanelOpen: (open: boolean) => set({ knowledgePanelOpen: open }),
   setDisplayMode: (mode: 'side' | 'half' | 'full') => set({ displayMode: mode, sidebarOpen: mode !== 'full' }),
+
+  // ── Focus mode ────────────────────────────────────────────────────────────
+  //
+  // Toggling focus ON remembers the current sidebarOpen + coursePanelOpen +
+  // activeFeatureView so they can be restored on exit. While focus mode is
+  // active, the layout (page.tsx) hides the sidebar and the course panel,
+  // and the composer (chat-composer) enlarges itself + centers.
+  //
+  // We stash the pre-focus state in a module-scoped ref (not in the store
+  // itself — it's transient restore data the UI never reads directly).
+  setFocusMode: (on: boolean) => {
+    if (on) {
+      // Enter: snapshot current state, then collapse everything.
+      const st = get();
+      focusSnapshot = {
+        sidebarOpen: st.sidebarOpen,
+        coursePanelOpen: st.coursePanelOpen,
+        activeFeatureView: st.activeFeatureView,
+      };
+      set({
+        focusMode: true,
+        sidebarOpen: false,
+        coursePanelOpen: false,
+        activeFeatureView: null,
+        createNewPanelOpen: false,
+        settingsPanelOpen: false,
+      });
+    } else {
+      // Exit: restore the snapshot (fallback to sensible defaults if null).
+      const snap = focusSnapshot ?? { sidebarOpen: true, coursePanelOpen: false, activeFeatureView: null };
+      set({
+        focusMode: false,
+        sidebarOpen: snap.sidebarOpen,
+        coursePanelOpen: snap.coursePanelOpen,
+        activeFeatureView: snap.activeFeatureView,
+      });
+      focusSnapshot = null;
+    }
+  },
+  toggleFocusMode: () => get().setFocusMode(!get().focusMode),
+  setSidebarWidth: (px: number) =>
+    set({ sidebarWidth: Math.max(200, Math.min(480, Math.round(px))) }),
   setTeachingMode: (mode: 'guide' | 'explain' | 'practice' | 'review') => set({ teachingMode: mode }),
   setThinkingMode: (mode: 'off' | 'standard' | 'deep' | 'structured') => set({ thinkingMode: mode }),
   setSelectedModel: (model: 'GLM-4.6' | 'GLM-4.5' | 'GLM-4-Air') => set({ selectedModel: model }),

@@ -31,6 +31,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: '⌘ K', desc: '打开命令面板' },
       { keys: '?', desc: '显示快捷键帮助' },
       { keys: '⌘ B', desc: '折叠 / 展开侧边栏' },
+      { keys: '⌘ E', desc: '进入 / 退出专注模式' },
       { keys: '⌘ ,', desc: '打开显示设置' },
     ],
   },

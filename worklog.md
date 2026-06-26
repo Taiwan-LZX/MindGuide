@@ -386,3 +386,62 @@ Stage Summary:
   · src/app/page.tsx (全局⌘1-6/⌘B/⌘,注册)
   · src/store/learning-store.ts (selectSession重置+互斥+setKnowledgeImportance)
   · src/app/api/knowledge/[id]/route.ts (PATCH支持importance)
+
+---
+Task ID: impl-p2-resizable-focus-4
+Agent: main (Z.ai Code)
+Task: P2 实施 — 可拖拽布局 (react-resizable-panels) + 专注模式 (⌘E)
+
+Work Log:
+- 读取 page.tsx / sidebar.tsx / learning-store.ts 确认现有布局结构（固定 flex 布局，sidebar 260px 硬编码）
+- 确认 react-resizable-panels 已在 package.json 且已安装（v3.0.3）
+- Store 改造 (learning-store.ts):
+  · 新增 focusMode: boolean + sidebarWidth: number 状态字段
+  · 新增 toggleFocusMode / setFocusMode / setSidebarWidth 三个 action
+  · setFocusMode(on) 实现：进入时 snapshot sidebarOpen/coursePanelOpen/activeFeatureView 到模块级 focusSnapshot 变量，然后折叠所有；退出时从 snapshot 恢复
+  · 新增模块级 focusSnapshot 变量（_transient restore data，不进 store）
+- page.tsx 重写:
+  · 引入 PanelGroup + Panel + PanelResizeHandle 替代固定 flex 布局
+  · sidebar Panel: defaultSize=20%, minSize=14%, maxSize=32%, collapsible, onCollapse→setSidebarOpen(false)
+  · PanelResizeHandle: 3px 透明条，hover 显示 brand 色 30% 透明度，drag 时 50%，中间有 8px 高的 neutral 拖拽指示器
+  · autoSaveId="mindguide-layout" 自动持久化面板比例到 localStorage
+  · 抽取 MainAreaContent 组件（feature view transition + 所有浮层），被两个分支（PanelGroup / collapsed-sidebar）复用
+  · 专注模式时 showSidebar=false，整个 PanelGroup 不渲染，只渲染 MainAreaContent
+  · 专注模式时 CoursePanel 也不渲染
+  · 新增专注模式指示器 pill（顶部居中，Focus 图标 + "专注模式" + "Esc 退出" kbd，pointer-events-none）
+  · ESC handler 分层：settings-view → settings-panel → focus-mode（专注模式最后退出）
+  · 全局快捷键新增 ⌘E toggleFocusMode（允许在输入框聚焦时触发，因为用户可能正在写作想进入专注）
+- sidebar.tsx 改造:
+  · FullSidebar 的 aside 从 w-[260px] 改为 w-full（让 Panel 控制宽度，sidebar fill 父容器）
+- chat-composer.tsx 改造（专注模式视觉强化）:
+  · 读取 focusMode from store
+  · 新增 effectiveExpanded = expanded || focusMode（专注模式强制 expanded 高度层级）
+  · auto-resize effect 使用 effectiveExpanded，且专注模式不清空时重置 expanded
+  · textarea maxHeight 用 effectiveExpanded
+  · composer wrapper 在专注模式加 mx-auto w-full max-w-[680px]（居中限宽）
+  · composer card 在专注模式加阴影 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.12)] + border-neutral-300
+  · transition-colors 改为 transition-all（让阴影过渡平滑）
+- keyboard-shortcuts-overlay.tsx 更新:
+  · 导航组新增 { keys: '⌘ E', desc: '进入 / 退出专注模式' }
+
+Stage Summary:
+- `bun run lint` 通过（0 errors / 0 warnings）
+- dev server HTTP 200 稳定
+- Agent Browser 端到端验证:
+  · 可拖拽布局: ✅ 拖拽 handle 后 sidebar 从 287px → 387px（+100px）
+  · 拖拽手柄 hover 反馈: ✅ brand 色高亮
+  · ⌘E 专注模式进入: ✅ sidebar 完全隐藏 + 指示器 pill 显示 + composer 居中放大(max-w-680px) + 卡片阴影
+  · ⌘E 在输入框聚焦时也能触发: ✅（effectiveExpanded 让 textarea 立即变高）
+  · ESC 退出专注模式: ✅ sidebar 恢复 + 指示器消失
+  · ⌘B 折叠侧边栏: ✅ 387px → 56px（折叠态）
+  · ⌘1 跳转功能视图: ✅ 仍然工作
+  · autoSaveId 持久化: ✅ 刷新后保持拖拽后的比例
+- VLM 视觉确认:
+  · 专注模式: "侧边栏完全隐藏、顶部有专注模式指示器、输入框居中放大有阴影、整体营造专注写作氛围"
+  · 可拖拽布局: "侧边栏宽度可调、有可见分隔线、布局合理"
+- 修改文件清单:
+  · src/store/learning-store.ts (focusMode + sidebarWidth 状态 + 3个action + focusSnapshot)
+  · src/app/page.tsx (PanelGroup 重写 + MainAreaContent 抽取 + ⌘E注册 + 专注指示器)
+  · src/components/learning/sidebar.tsx (w-[260px] → w-full 适配 Panel)
+  · src/components/learning/chat-composer.tsx (focusMode 读取 + effectiveExpanded + 居中限宽 + 阴影)
+  · src/components/learning/keyboard-shortcuts-overlay.tsx (⌘E 文档)

@@ -34,9 +34,13 @@ export function KnowledgeInline({ nodes }: { nodes: KnowledgeNode[] }) {
   if (nodes.length === 0) return null;
 
   const mastered = nodes.filter(n => n.mastered).length;
-  const pct = nodes.length > 0 ? (mastered / nodes.length) * 100 : 0;
+  // P1: compute average mastery score for the inline header
+  const avgMastery = nodes.length > 0
+    ? nodes.reduce((s, n) => s + (n.masteryScore || 0), 0) / nodes.length
+    : 0;
   const visibleNodes = collapsed ? nodes.slice(0, 3) : nodes;
   const hiddenCount = nodes.length - visibleNodes.length;
+  const BLOOM_LABELS = ['记忆', '理解', '应用', '分析', '评价', '创造'];
 
   return (
     <div className="rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
@@ -52,14 +56,14 @@ export function KnowledgeInline({ nodes }: { nodes: KnowledgeNode[] }) {
           >
             <ChevronDown className="h-3 w-3" />
           </motion.div>
-          学习进度 · {mastered}/{nodes.length}
+          学习进度 · {mastered}/{nodes.length} · 掌握度 {Math.round(avgMastery * 100)}%
         </button>
         <div className="h-1 w-24 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
           <motion.div
-            className="h-full rounded-full bg-neutral-900 dark:bg-white"
+            className="h-full rounded-full bg-[var(--brand)]"
             style={{ transformOrigin: 'left' }}
             initial={{ scaleX: 0 }}
-            animate={{ scaleX: Math.max(0, Math.min(1, pct / 100)) }}
+            animate={{ scaleX: Math.max(0, Math.min(1, avgMastery)) }}
             transition={{ type: 'spring', stiffness: 300, damping: 25, delay: 0.2 }}
           />
         </div>
@@ -115,7 +119,15 @@ export function KnowledgeInline({ nodes }: { nodes: KnowledgeNode[] }) {
                       )}
                     </AnimatePresence>
                   </motion.button>
-                  <span className={node.mastered ? 'line-through' : ''}>{node.title}</span>
+                  <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className={node.mastered ? 'line-through' : ''}>{node.title}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="rounded px-1 py-px text-[8px] font-medium bg-neutral-100 text-neutral-500 dark:bg-neutral-700 dark:text-neutral-400">
+                        {BLOOM_LABELS[(node.bloomLevel || 1) - 1]}
+                      </span>
+                      <span className="text-[8px] tabular-nums text-neutral-400">{Math.round((node.masteryScore || 0) * 100)}%</span>
+                    </div>
+                  </div>
                 </motion.div>
               ))}
             </div>
@@ -123,13 +135,14 @@ export function KnowledgeInline({ nodes }: { nodes: KnowledgeNode[] }) {
         )}
       </AnimatePresence>
 
-      {/* Collapsed summary — shows first 3 node titles + "+N more" */}
+      {/* Collapsed summary — shows first 3 node titles + mastery + "+N more" */}
       {collapsed && (
         <div className="space-y-1">
           {visibleNodes.map(node => (
             <div key={node.id} className="flex items-center gap-2 px-2.5 py-1.5 text-[12px] text-neutral-400 dark:text-neutral-500">
               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${node.mastered ? 'bg-[var(--brand)]' : 'bg-neutral-300 dark:bg-neutral-600'}`} />
-              <span className="truncate">{node.title}</span>
+              <span className="truncate flex-1">{node.title}</span>
+              <span className="shrink-0 text-[9px] tabular-nums">{Math.round((node.masteryScore || 0) * 100)}%</span>
             </div>
           ))}
           {hiddenCount > 0 && (

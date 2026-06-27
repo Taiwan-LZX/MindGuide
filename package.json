@@ -1,6 +1,7 @@
 {
   "name": "mindguide",
   "version": "1.1.0",
+  "description": "AI 对话式学习平台 — 通过苏格拉底式追问引导深度思考，自动追踪知识掌握状态",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",

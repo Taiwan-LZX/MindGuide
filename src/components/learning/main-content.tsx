@@ -621,7 +621,11 @@ export function MainContent() {
             {isStreaming && lastMsgRole !== 'assistant' && (
               <motion.div
                 key="streaming-bubble"
-                layout
+                // FIX: removed `layout` — it was firing a layout animation on
+                // every content height change (each new token), competing with
+                // the inner body's enter/exit animation and creating the
+                // "two animations" effect the user saw. The outer bubble
+                // should be a stable container — only animate on mount/unmount.
                 variants={streamingBubbleVariants}
                 initial="hidden"
                 animate="visible"
@@ -635,12 +639,11 @@ export function MainContent() {
                   </span>
                   <span className="text-[11.5px] font-medium text-neutral-500 dark:text-neutral-400">MindGuide</span>
                   {streamingPhase === 'thinking' && (
-                    <motion.span
-                      layout
+                    <span
                       className="ml-1 rounded-full border border-neutral-200 px-1.5 py-px text-[9.5px] text-neutral-400 dark:border-neutral-700 dark:text-neutral-500"
                     >
                       推理中
-                    </motion.span>
+                    </span>
                   )}
                 </div>
                 {/* Body swaps between reasoning panel and streaming content.

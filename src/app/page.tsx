@@ -221,9 +221,9 @@ export default function Page() {
             ref={sidebarPanelRef}
             id="sidebar"
             order={1}
-            defaultSize={20}
-            minSize={14}
-            maxSize={32}
+            defaultSize={16}
+            minSize={12}
+            maxSize={28}
             collapsible
             collapsedSize={0}
             onCollapse={() => {
@@ -249,7 +249,7 @@ export default function Page() {
           >
             <div className="absolute left-1/2 top-1/2 h-8 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-neutral-200 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-neutral-700" />
           </PanelResizeHandle>
-          <Panel id="main" order={2} defaultSize={80} minSize={50} className="h-full">
+          <Panel id="main" order={2} defaultSize={84} minSize={50} className="h-full w-full">
             <MainAreaContent
               activeFeatureView={activeFeatureView}
               activeFeatureViewDir={activeFeatureViewDir}
@@ -304,15 +304,19 @@ function MainAreaContent({
 
   return (
     <div
-      className="relative flex h-full flex-1 flex-col overflow-hidden"
+      className="relative flex h-full w-full flex-col overflow-hidden"
       data-focus-mode={focusMode ? 'on' : 'off'}
     >
       {/* Three-column layout: conversation | course panel | right rail
-          When coursePanelOpen is true, the main area splits into a
-          resizable conversation + course panel. The right rail (Lessons/Chat
-          icons) is a slim fixed-width strip matching the reference design. */}
+          Layout proportions (when course panel is open):
+            - Conversation: flex-1 (fills remaining space)
+            - Course panel: 340px fixed (shrink-0)
+            - Right rail: 44px fixed (shrink-0)
+          When course panel is closed, conversation takes full width and
+          only the right rail (44px) is visible. The sidebar (left) is
+          managed by the outer PanelGroup and defaults to ~20% of viewport. */}
       <div className="flex h-full">
-        {/* Conversation / Feature view area */}
+        {/* Conversation / Feature view area — takes all remaining space */}
         <div className="relative flex min-w-0 flex-1 flex-col">
           <AnimatePresence mode="popLayout" custom={activeFeatureViewDir}>
             {activeFeatureView && !focusMode ? (
@@ -343,37 +347,40 @@ function MainAreaContent({
           </AnimatePresence>
         </div>
 
-        {/* Course Panel — embedded as a right-side panel (not floating).
-            When coursePanelOpen is true, it takes ~30% of the main area.
-            When false, it collapses to 0. Hidden in focus mode. */}
+        {/* Course Panel — embedded right-side panel.
+            340px fixed width, visible when coursePanelOpen is true. */}
         {!focusMode && coursePanelOpen && (
-          <>
-            <div className="w-[3px] shrink-0 bg-neutral-200/60 dark:bg-neutral-800" />
-            <div className="w-[360px] shrink-0 overflow-hidden">
-              <CoursePanel />
-            </div>
-          </>
+          <div className="w-[340px] shrink-0 overflow-hidden border-l border-neutral-200/60 dark:border-neutral-800">
+            <CoursePanel />
+          </div>
         )}
 
-        {/* Right rail — slim icon strip matching the reference design.
-            Contains Lessons/Chat toggle icons. */}
+        {/* Right rail — slim 44px icon strip. Always visible (when not
+            in focus mode). Contains Lessons/Chat toggle + can be extended
+            with more icons (files, settings, etc.). */}
         {!focusMode && (
-          <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-l border-neutral-200/60 bg-neutral-50 py-3 dark:border-neutral-800 dark:bg-neutral-900">
+          <div className="flex w-11 shrink-0 flex-col items-center gap-1.5 border-l border-neutral-200/60 bg-neutral-50 py-2 dark:border-neutral-800 dark:bg-neutral-900">
             <button
               onClick={() => useLearningStore.getState().setCoursePanelOpen(!coursePanelOpen)}
-              className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+              className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
                 coursePanelOpen
                   ? 'bg-neutral-200 text-neutral-900 dark:bg-neutral-700 dark:text-neutral-100'
                   : 'text-neutral-400 hover:bg-neutral-200/60 hover:text-neutral-600 dark:hover:bg-neutral-800'
               }`}
               aria-label="课程"
+              title="课程"
             >
               <BookOpen className="h-4 w-4" />
             </button>
             <button
               onClick={() => useLearningStore.getState().setCoursePanelOpen(false)}
-              className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-200/60 hover:text-neutral-600 dark:hover:bg-neutral-800"
+              className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+                !coursePanelOpen
+                  ? 'bg-neutral-200 text-neutral-900 dark:bg-neutral-700 dark:text-neutral-100'
+                  : 'text-neutral-400 hover:bg-neutral-200/60 hover:text-neutral-600 dark:hover:bg-neutral-800'
+              }`}
               aria-label="对话"
+              title="对话"
             >
               <MessageSquare className="h-4 w-4" />
             </button>

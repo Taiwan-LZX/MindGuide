@@ -250,7 +250,7 @@ export function SettingsPanel() {
             animate="visible"
             exit="exit"
             style={{ transformOrigin: 'top right' }}
-            className="fixed right-2 top-2 z-[50] w-[260px] overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_8px_30px_-12px_rgba(0,0,0,0.12),0_2px_8px_-4px_rgba(0,0,0,0.08)] dark:border-neutral-800 dark:bg-neutral-900 dark:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.5),0_2px_8px_-4px_rgba(0,0,0,0.4)]"
+            className="fixed right-2 top-2 z-[50] w-[260px] overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_4px_20px_-8px_rgba(0,0,0,0.12),0_2px_6px_-4px_rgba(0,0,0,0.08)] dark:border-neutral-800 dark:bg-neutral-900 dark:shadow-[0_4px_20px_-8px_rgba(0,0,0,0.4),0_2px_6px_-4px_rgba(0,0,0,0.3)]"
           >
             {/* Header */}
             <div className="flex items-center justify-between border-b border-neutral-100 px-4 py-3 dark:border-neutral-800">

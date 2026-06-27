@@ -546,9 +546,9 @@ function AppearanceTab() {
         <div
           onMouseEnter={() => setHovered(motionEnabled ? 'motion-on' : 'motion-off')}
           onMouseLeave={() => setHovered(null)}
-          className="flex items-start justify-between gap-3 rounded-xl border border-neutral-200 px-4 py-3 transition-colors hover:border-neutral-300 dark:border-neutral-800 dark:hover:border-neutral-700"
+          className="flex items-center justify-between gap-4 rounded-xl border border-neutral-200 px-4 py-3 transition-colors hover:border-neutral-300 dark:border-neutral-800 dark:hover:border-neutral-700"
         >
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="text-[13px] font-medium text-neutral-700 dark:text-neutral-200">
               启用界面动画
             </p>
@@ -556,7 +556,9 @@ function AppearanceTab() {
               关闭后动画即时完成，减少视觉波动；尊重系统「减少动态效果」偏好
             </p>
           </div>
-          <Toggle checked={motionEnabled} onChange={() => setMotionEnabled(!motionEnabled)} label="切换动态效果" />
+          <div className="shrink-0 self-center">
+            <Toggle checked={motionEnabled} onChange={() => setMotionEnabled(!motionEnabled)} label="切换动态效果" />
+          </div>
         </div>
       </section>
     </div>
@@ -591,9 +593,12 @@ function LayoutTab() {
               onMouseLeave={() => setHovered(null)}
               onFocus={() => setHovered(`layout-${opt.value}`)}
               onBlur={() => setHovered(null)}
+              // FIX: use ring instead of border for selected state so the
+              // card size doesn't change (border adds 1px, ring overlays).
+              // Both states use border-1 so cards are always the same size.
               className={`flex aspect-square flex-col items-center justify-center gap-1.5 rounded-xl border transition-all duration-200 ${
                 selected
-                  ? 'border-neutral-900 bg-white shadow-sm dark:border-neutral-200 dark:bg-neutral-800'
+                  ? 'border-neutral-400 bg-white shadow-sm ring-1 ring-neutral-900/10 dark:border-neutral-500 dark:bg-neutral-800 dark:ring-neutral-100/10'
                   : 'border-neutral-200 bg-white hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-700'
               }`}
             >

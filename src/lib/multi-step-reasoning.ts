@@ -57,6 +57,11 @@ export interface MultiStepConfig {
   knowledgeNodes: Array<{ title: string; content: string; category?: string; mastered: boolean }>;
   teachingMode: string;
   selectedModel: string;
+  /** Whether the selected model supports native reasoning_content. If false,
+   *  the engine uses prompt-only CoT (no `thinking: {type:'enabled'}` param)
+   *  so it works with any OpenAI-compatible model, including fast non-reasoning
+   *  models like GLM-4-Air. Defaults to true. */
+  modelSupportsThinking?: boolean;
 }
 
 export interface MultiStepResult {
@@ -200,6 +205,11 @@ export async function runMultiStepReasoning(
   const stepDurations: number[] = [];
   const pipelineStart = Date.now();
 
+  // Whether the model supports native reasoning_content. If not, we skip
+  // the `thinking: {type:'enabled'}` param and rely purely on the step
+  // prompts to drive CoT. This makes the engine work with ANY model.
+  const supportsThinking = config.modelSupportsThinking !== false;
+
   // RAG retrieval with citation tagging
   const passages = await retrievePassages(config.sessionId, config.message, 4);
   const { context: kbContext, citations } = buildCitedContext(passages, 12_000);
@@ -235,13 +245,18 @@ ${stepDef.prompt}`,
     // Phase 3: retry once on failure
     for (let attempt = 0; attempt < 2 && !success; attempt++) {
       try {
-        // Phase 3: stream the intermediate step so tokens arrive live
-        const upstream = (await zai.chat.completions.create({
+        // Phase 3: stream the intermediate step so tokens arrive live.
+        // Only pass `thinking: {type:'enabled'}` if the model supports it;
+        // otherwise rely on the step prompt alone for CoT.
+        const createParams: any = {
           messages,
           model: config.selectedModel,
-          thinking: { type: 'enabled' },
           stream: true,
-        } as any)) as ReadableStream<Uint8Array> | undefined;
+        };
+        if (supportsThinking) {
+          createParams.thinking = { type: 'enabled' };
+        }
+        const upstream = (await zai.chat.completions.create(createParams)) as ReadableStream<Uint8Array> | undefined;
 
         if (upstream && typeof upstream.getReader === 'function') {
           // Streaming path — parse SSE deltas and forward tokens
@@ -323,11 +338,9 @@ ${stepDef.prompt}`,
           thinking = stripEmoji(stepThinking);
         } else {
           // Fallback: non-streaming
-          const completion = await zai.chat.completions.create({
-            messages,
-            model: config.selectedModel,
-            thinking: { type: 'enabled' },
-          } as any);
+          const fallbackParams: any = { messages, model: config.selectedModel };
+          if (supportsThinking) fallbackParams.thinking = { type: 'enabled' };
+          const completion = await zai.chat.completions.create(fallbackParams);
           result = stripEmoji(completion?.choices?.[0]?.message?.content || '');
           thinking = stripEmoji(completion?.choices?.[0]?.message?.reasoning_content || '');
           // Forward the full result as one "token"

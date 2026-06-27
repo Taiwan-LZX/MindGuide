@@ -647,14 +647,97 @@ export function MainContent() {
                     </span>
                   )}
                 </div>
-                {/* Body swaps between reasoning panel and streaming content.
-                    FIX: mode="wait" caused a white-screen flash — the old
-                    body fully exited (0.2s fade-out) BEFORE the new body
-                    mounted (0.2s fade-in), leaving a ~200ms visual gap.
-                    Now mode="popLayout" lets both coexist briefly: the
-                    thinking body fades out + slides up while the streaming
-                    body fades in + slides up from below, giving a smooth
-                    directional cross-fade with no empty frame. */}
+
+                {/* Multi-step reasoning steps — OUTSIDE the thinking/streaming
+                    body swap so they persist across the transition. Previously
+                    these were inside thinking-body and got removed when the body
+                    switched to streaming-body, causing steps to "vanish" the
+                    moment content started arriving. Now they stay visible
+                    throughout thinking AND answering phases. */}
+                {streamingSteps.length > 0 && (
+                  <div className="space-y-1.5">
+                    {streamingSteps.map((step, i) => (
+                      <motion.div
+                        key={step.index}
+                        initial={{ opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.05, type: 'spring', stiffness: 380, damping: 28 }}
+                        className="rounded-md border border-neutral-200/60 bg-neutral-50/60 p-2 dark:border-neutral-700/60 dark:bg-neutral-800/40"
+                      >
+                        <div className="mb-0.5 flex items-center gap-1.5">
+                          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[var(--brand)] text-[9px] font-bold text-[var(--brand-foreground)]">
+                            {step.index + 1}
+                          </span>
+                          <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-300">
+                            {step.label}
+                          </span>
+                          <span className="text-[9px] text-neutral-400">
+                            {step.index + 1}/{step.total}
+                          </span>
+                          {step.durationMs && (
+                            <span className="ml-auto text-[9px] tabular-nums text-neutral-400">
+                              {(step.durationMs / 1000).toFixed(1)}s
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+                          {step.result}
+                        </p>
+                      </motion.div>
+                    ))}
+                    {/* Live step indicator while a step is streaming */}
+                    {streamingCurrentStep && (
+                      <motion.div
+                        initial={{ opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+                        className="rounded-md border border-[var(--brand)]/30 bg-[var(--brand)]/[0.03] p-2 dark:border-[var(--brand)]/20 dark:bg-[var(--brand)]/[0.05]"
+                      >
+                        <div className="mb-0.5 flex items-center gap-1.5">
+                          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[var(--brand)] text-[9px] font-bold text-[var(--brand-foreground)]">
+                            {streamingCurrentStep.index + 1}
+                          </span>
+                          <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-300">
+                            {streamingCurrentStep.label}
+                          </span>
+                          <span className="text-[9px] text-neutral-400">
+                            {streamingCurrentStep.index + 1}/{streamingCurrentStep.total}
+                          </span>
+                          <motion.span
+                            className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--brand)]"
+                            animate={{ opacity: [1, 0.3, 1], scale: [1, 0.8, 1] }}
+                            transition={{ repeat: Infinity, duration: 1, ease: 'easeInOut' }}
+                          />
+                        </div>
+                        {streamingCurrentStep.liveText ? (
+                          <p className="text-[11px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+                            {streamingCurrentStep.liveText}
+                            <motion.span
+                              className="ml-0.5 inline-block h-[1em] w-[1.5px] translate-y-[0.1em] rounded-[1px] bg-[var(--brand)] align-text-bottom"
+                              animate={{ opacity: [1, 0.3, 1] }}
+                              transition={{ repeat: Infinity, duration: 0.8, ease: 'easeInOut' }}
+                            />
+                          </p>
+                        ) : (
+                          <p className="text-[10.5px] text-neutral-400">正在生成…</p>
+                        )}
+                      </motion.div>
+                    )}
+                    {/* Metrics after all steps complete */}
+                    {streamingMetrics && (
+                      <div className="flex items-center gap-3 px-1 text-[9.5px] text-neutral-400 dark:text-neutral-500">
+                        <span className="tabular-nums">
+                          推理耗时 {(streamingMetrics.totalDurationMs / 1000).toFixed(1)}s
+                        </span>
+                        <span className="tabular-nums">
+                          {streamingMetrics.stepCount} 步
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Body swaps between reasoning panel and streaming content. */}
                 <AnimatePresence mode="popLayout" initial={false}>
                   {streamingPhase === 'thinking' || (!streamingContent && !streamingPhase) ? (
                     <motion.div
@@ -665,97 +748,8 @@ export function MainContent() {
                       transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                     >
                       <Reasoning isStreaming={streamingPhase === 'thinking'}>
-                        {/* Phase 2: Multi-step reasoning progress.
-                            When streamingSteps is non-empty (deep/structured
-                            modes), show each step with its label + result.
-                            Each step animates in as it arrives. */}
-                        {streamingSteps.length > 0 && (
-                          <div className="mb-3 space-y-2">
-                            {streamingSteps.map((step, i) => (
-                              <motion.div
-                                key={step.index}
-                                initial={{ opacity: 0, x: -8 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: i * 0.05, type: 'spring', stiffness: 380, damping: 28 }}
-                                className="rounded-md border border-neutral-200/60 bg-white/60 p-2 dark:border-neutral-700/60 dark:bg-neutral-800/40"
-                              >
-                                <div className="mb-1 flex items-center gap-1.5">
-                                  <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[var(--brand)] text-[9px] font-bold text-[var(--brand-foreground)]">
-                                    {step.index + 1}
-                                  </span>
-                                  <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-300">
-                                    {step.label}
-                                  </span>
-                                  <span className="text-[9px] text-neutral-400">
-                                    {step.index + 1}/{step.total}
-                                  </span>
-                                </div>
-                                <p className="text-[11.5px] leading-relaxed text-neutral-500 dark:text-neutral-400">
-                                  {step.result}
-                                </p>
-                              </motion.div>
-                            ))}
-                            {/* Phase 3: Live step — shows the CURRENTLY STREAMING
-                                step with its partial text updating in real-time
-                                as tokens arrive. Replaces the old static
-                                "正在执行下一步…" indicator. */}
-                            {streamingCurrentStep && (
-                              <motion.div
-                                initial={{ opacity: 0, x: -8 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-                                className="rounded-md border border-[var(--brand)]/30 bg-[var(--brand)]/[0.03] p-2 dark:border-[var(--brand)]/20 dark:bg-[var(--brand)]/[0.05]"
-                              >
-                                <div className="mb-1 flex items-center gap-1.5">
-                                  <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[var(--brand)] text-[9px] font-bold text-[var(--brand-foreground)]">
-                                    {streamingCurrentStep.index + 1}
-                                  </span>
-                                  <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-300">
-                                    {streamingCurrentStep.label}
-                                  </span>
-                                  <span className="text-[9px] text-neutral-400">
-                                    {streamingCurrentStep.index + 1}/{streamingCurrentStep.total}
-                                  </span>
-                                  <motion.span
-                                    className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--brand)]"
-                                    animate={{ opacity: [1, 0.3, 1], scale: [1, 0.8, 1] }}
-                                    transition={{ repeat: Infinity, duration: 1, ease: 'easeInOut' }}
-                                  />
-                                </div>
-                                {streamingCurrentStep.liveText ? (
-                                  <p className="text-[11.5px] leading-relaxed text-neutral-500 dark:text-neutral-400">
-                                    {streamingCurrentStep.liveText}
-                                    <motion.span
-                                      className="ml-0.5 inline-block h-[1em] w-[1.5px] translate-y-[0.1em] rounded-[1px] bg-[var(--brand)] align-text-bottom"
-                                      animate={{ opacity: [1, 0.3, 1] }}
-                                      transition={{ repeat: Infinity, duration: 0.8, ease: 'easeInOut' }}
-                                    />
-                                  </p>
-                                ) : (
-                                  <p className="text-[10.5px] text-neutral-400">正在生成…</p>
-                                )}
-                              </motion.div>
-                            )}
-                            {/* Fallback indicator when no live step but still thinking */}
-                            {!streamingCurrentStep && streamingPhase === 'thinking' && streamingSteps.length === 0 && (
-                              <motion.div
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                className="flex items-center gap-1.5 px-1 text-[10.5px] text-neutral-400"
-                              >
-                                <motion.span
-                                  className="h-1 w-1 rounded-full bg-[var(--brand)]"
-                                  animate={{ opacity: [1, 0.3, 1] }}
-                                  transition={{ repeat: Infinity, duration: 1, ease: 'easeInOut' }}
-                                />
-                                正在准备回复…
-                              </motion.div>
-                            )}
-                          </div>
-                        )}
                         {/* Model's live reasoning_content (from the final
-                            streaming step). Shown below the multi-step
-                            results when available. */}
+                            streaming step). */}
                         {streamingThinking ? (
                           <AnimatedMarkdown content={streamingThinking} />
                         ) : streamingSteps.length === 0 && !streamingCurrentStep ? (
@@ -763,9 +757,7 @@ export function MainContent() {
                             正在准备回复…
                           </span>
                         ) : null}
-                        {/* Phase 3: Citations — RAG passage refs rendered as
-                            a compact list below the reasoning. Each [N] maps
-                            to a material title + section. */}
+                        {/* Citations */}
                         {streamingCitations.length > 0 && (
                           <div className="mt-3 border-t border-neutral-200/60 pt-2 dark:border-neutral-700/60">
                             <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-neutral-400">
@@ -787,22 +779,6 @@ export function MainContent() {
                             </div>
                           </div>
                         )}
-                        {/* Phase 3: Metrics — total reasoning duration + step count */}
-                        {streamingMetrics && (
-                          <div className="mt-2 flex items-center gap-3 text-[9.5px] text-neutral-400 dark:text-neutral-500">
-                            <span className="tabular-nums">
-                              推理耗时 {(streamingMetrics.totalDurationMs / 1000).toFixed(1)}s
-                            </span>
-                            <span className="tabular-nums">
-                              {streamingMetrics.stepCount} 步
-                            </span>
-                            {streamingMetrics.stepDurations.length > 0 && (
-                              <span className="tabular-nums">
-                                平均 {(streamingMetrics.stepDurations.reduce((a, b) => a + b, 0) / streamingMetrics.stepDurations.length / 1000).toFixed(1)}s/步
-                              </span>
-                            )}
-                          </div>
-                        )}
                       </Reasoning>
                     </motion.div>
                   ) : (
@@ -815,10 +791,6 @@ export function MainContent() {
                       className="min-w-0 text-[13.5px] leading-[1.7] text-neutral-800 dark:text-neutral-200"
                     >
                       <MarkdownRenderer content={streamingContent} streaming />
-                      {/* BUG FIX (P2-#28): replaced the classic blink cursor
-                          with a smoother "breathing" cursor — opacity pulses
-                          0.3↔1.0 (instead of 0↔1 hard blink) at 0.9s, which
-                          reads as "thinking/typing" rather than "flashing". */}
                       <motion.span
                         className="ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[0.15em] rounded-[1px] bg-neutral-500 align-text-bottom dark:bg-neutral-300"
                         animate={{ opacity: [1, 0.3, 1] }}

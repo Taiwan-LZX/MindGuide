@@ -484,6 +484,9 @@ export async function POST(req: NextRequest) {
                 knowledgeNodes: knowledgeNodes || [],
                 teachingMode,
                 selectedModel,
+                // GLM-4-Air is a fast non-reasoning model — it doesn't support
+                // the `thinking` param. The engine will use prompt-only CoT.
+                modelSupportsThinking: selectedModel !== 'GLM-4-Air',
               },
               // onStep — called when a step completes with its full result
               (step) => {

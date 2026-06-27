@@ -1350,67 +1350,189 @@ function MiniStat({
 function KnowledgeGraphView({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
   const { knowledgeNodes, toggleKnowledgeMastered, setKnowledgeImportance } = useLearningStore();
 
+  const BLOOM_LABELS = ['记忆', '理解', '应用', '分析', '评价', '创造'];
+
+  // Summary stats for the learner profile header
+  const totalNodes = knowledgeNodes.length;
+  const masteredCount = knowledgeNodes.filter(n => n.mastered).length;
+  const avgMastery = totalNodes > 0
+    ? knowledgeNodes.reduce((s, n) => s + (n.masteryScore || 0), 0) / totalNodes
+    : 0;
+  const avgBloom = totalNodes > 0
+    ? knowledgeNodes.reduce((s, n) => s + (n.bloomLevel || 1), 0) / totalNodes
+    : 1;
+  const nodesWithPrereqs = knowledgeNodes.filter(n => n.prerequisites).length;
+  const totalAssessments = knowledgeNodes.reduce((s, n) => s + (n.assessmentCount || 0), 0);
+
   return (
     <>
       <FeatureHeader title="知识图谱" icon={Layers} color="bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400" />
       <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar">
-        <div className="mx-auto max-w-[600px] px-6 py-5">
+        <div className="mx-auto max-w-[640px] px-6 py-5">
           {knowledgeNodes.length === 0 ? (
             <EmptyState icon={Layers} title="知识图谱为空" description="开始学习来构建你的知识网络" />
           ) : (
-            <div className="space-y-3">
-              <AnimatePresence initial={false}>
-                {knowledgeNodes.map((node, i) => (
+            <>
+              {/* ── Learner Profile Summary ──
+                  Based on 2026 adaptive-knowledge-graph paper: a "cognitive
+                  model" header that gives the learner instant awareness of
+                  their knowledge boundary — mastery %, Bloom level, prerequisite
+                  chains, and assessment count. This solves the "I don't know
+                  what I don't know" problem. */}
+              <div className="mb-5 rounded-xl border border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-800 dark:bg-neutral-900/60">
+                <p className="mb-3 font-serif text-[11px] uppercase tracking-wider text-neutral-400">学习者画像</p>
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="text-center">
+                    <p className="font-serif text-[20px] font-medium tabular-nums text-neutral-800 dark:text-neutral-100">
+                      {Math.round(avgMastery * 100)}<span className="text-[12px] text-neutral-400">%</span>
+                    </p>
+                    <p className="text-[10px] text-neutral-400">平均掌握度</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="font-serif text-[20px] font-medium tabular-nums text-neutral-800 dark:text-neutral-100">
+                      {avgBloom.toFixed(1)}<span className="text-[12px] text-neutral-400">/6</span>
+                    </p>
+                    <p className="text-[10px] text-neutral-400">Bloom 层级</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="font-serif text-[20px] font-medium tabular-nums text-neutral-800 dark:text-neutral-100">
+                      {masteredCount}<span className="text-[12px] text-neutral-400">/{totalNodes}</span>
+                    </p>
+                    <p className="text-[10px] text-neutral-400">已掌握</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="font-serif text-[20px] font-medium tabular-nums text-neutral-800 dark:text-neutral-100">
+                      {totalAssessments}
+                    </p>
+                    <p className="text-[10px] text-neutral-400">评估次数</p>
+                  </div>
+                </div>
+                {/* Overall mastery progress bar */}
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-700">
                   <motion.div
-                    key={node.id}
-                    custom={i}
-                    variants={itemVariants}
-                    initial="hidden"
-                    animate="visible"
-                    className={`flex items-center gap-3 rounded-xl border p-3.5 transition-colors ${
-                      node.mastered
-                        ? 'border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/50'
-                        : 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900'
-                    }`}
-                  >
-                    {/* Mastered toggle — now clickable (was read-only before) */}
-                    <button
-                      onClick={() => toggleKnowledgeMastered(node.id)}
-                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-all hover:scale-105 ${
-                        node.mastered
-                          ? 'bg-[var(--brand)] text-[var(--brand-foreground)]'
-                          : 'border border-neutral-200 text-neutral-400 hover:border-neutral-400 dark:border-neutral-700'
-                      }`}
-                      aria-label={node.mastered ? '标记为未掌握' : '标记为已掌握'}
-                    >
-                      {node.mastered ? <Check className="h-4 w-4" strokeWidth={2.5} /> : <span className="text-[12px] leading-none">·</span>}
-                    </button>
-                    <div className="flex-1 min-w-0">
-                      <p className="truncate text-[13px] font-medium text-neutral-700 dark:text-neutral-200">{node.title}</p>
-                      {node.category && <p className="text-[11px] text-neutral-400">{node.category}</p>}
-                    </div>
-                    {/* Importance selector — 5 clickable dots (was read-only text before) */}
-                    <div className="flex shrink-0 items-center gap-1" role="group" aria-label="重要度">
-                      {Array.from({ length: 5 }).map((_, idx) => {
-                        const filled = idx < node.importance;
-                        return (
+                    className="h-full rounded-full bg-[var(--brand)]"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${avgMastery * 100}%` }}
+                    transition={{ type: 'spring', stiffness: 200, damping: 28 }}
+                  />
+                </div>
+              </div>
+
+              {/* ── Knowledge nodes with mastery heatmap ── */}
+              <div className="space-y-2.5">
+                <AnimatePresence initial={false}>
+                  {knowledgeNodes.map((node, i) => {
+                    const score = node.masteryScore || 0;
+                    const bloom = node.bloomLevel || 1;
+                    const assessed = node.assessmentCount || 0;
+                    let prereqs: string[] = [];
+                    if (node.prerequisites) {
+                      try { prereqs = JSON.parse(node.prerequisites); } catch {}
+                    }
+
+                    // Mastery color: 0=red-ish, 0.5=amber, 1=green
+                    const masteryColor = score >= 0.7
+                      ? 'bg-emerald-500'
+                      : score >= 0.4
+                      ? 'bg-amber-500'
+                      : 'bg-neutral-300 dark:bg-neutral-600';
+
+                    return (
+                      <motion.div
+                        key={node.id}
+                        custom={i}
+                        variants={itemVariants}
+                        initial="hidden"
+                        animate="visible"
+                        className={`rounded-xl border p-3.5 transition-colors ${
+                          node.mastered
+                            ? 'border-neutral-300 bg-neutral-50 dark:border-neutral-700 dark:bg-neutral-800/50'
+                            : 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900'
+                        }`}
+                      >
+                        {/* Row 1: toggle + title + category */}
+                        <div className="flex items-center gap-3">
                           <button
-                            key={idx}
-                            onClick={() => setKnowledgeImportance(node.id, idx + 1)}
-                            className={`h-2 w-2 rounded-full transition-all hover:scale-125 ${
-                              filled
-                                ? 'bg-[var(--brand)]'
-                                : 'bg-neutral-200 hover:bg-neutral-300 dark:bg-neutral-700 dark:hover:bg-neutral-600'
+                            onClick={() => toggleKnowledgeMastered(node.id)}
+                            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-all hover:scale-105 ${
+                              node.mastered
+                                ? 'bg-[var(--brand)] text-[var(--brand-foreground)]'
+                                : 'border border-neutral-200 text-neutral-400 hover:border-neutral-400 dark:border-neutral-700'
                             }`}
-                            aria-label={`重要度 ${idx + 1}`}
-                          />
-                        );
-                      })}
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
+                            aria-label={node.mastered ? '标记为未掌握' : '标记为已掌握'}
+                          >
+                            {node.mastered ? <Check className="h-3.5 w-3.5" strokeWidth={2.5} /> : <span className="text-[11px] leading-none">·</span>}
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <p className="truncate text-[13px] font-medium text-neutral-700 dark:text-neutral-200">{node.title}</p>
+                            <div className="mt-0.5 flex items-center gap-2">
+                              {node.category && <span className="text-[10px] text-neutral-400">{node.category}</span>}
+                              <span className="text-[9px] text-neutral-300 dark:text-neutral-600">·</span>
+                              <span className="rounded px-1 py-px text-[9px] font-medium bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                                {BLOOM_LABELS[bloom - 1] || '记忆'}
+                              </span>
+                              {assessed > 0 && (
+                                <span className="text-[9px] text-neutral-400">评估 ×{assessed}</span>
+                              )}
+                            </div>
+                          </div>
+                          {/* Importance dots */}
+                          <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label="重要度">
+                            {Array.from({ length: 5 }).map((_, idx) => (
+                              <button
+                                key={idx}
+                                onClick={() => setKnowledgeImportance(node.id, idx + 1)}
+                                className={`h-1.5 w-1.5 rounded-full transition-all hover:scale-125 ${
+                                  idx < node.importance ? 'bg-[var(--brand)]' : 'bg-neutral-200 dark:bg-neutral-700'
+                                }`}
+                                aria-label={`重要度 ${idx + 1}`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Row 2: mastery heatmap bar */}
+                        <div className="mt-2.5 flex items-center gap-2">
+                          <span className="text-[9px] tabular-nums text-neutral-400 w-8">{Math.round(score * 100)}%</span>
+                          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
+                            <motion.div
+                              className={`h-full rounded-full ${masteryColor}`}
+                              initial={{ width: 0 }}
+                              animate={{ width: `${score * 100}%` }}
+                              transition={{ type: 'spring', stiffness: 200, damping: 28, delay: i * 0.03 }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Row 3: prerequisite chain (if any) */}
+                        {prereqs.length > 0 && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1">
+                            <span className="text-[9px] text-neutral-400">前置:</span>
+                            {prereqs.map((p, pi) => (
+                              <span key={pi} className="flex items-center gap-1">
+                                <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[9px] font-medium text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                                  {p}
+                                </span>
+                                {pi < prereqs.length - 1 && <span className="text-[8px] text-neutral-300">→</span>}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
+              </div>
+
+              {/* Footer: prerequisite chain count */}
+              {nodesWithPrereqs > 0 && (
+                <div className="mt-4 flex items-center justify-center gap-2 text-[10px] text-neutral-400">
+                  <span>{nodesWithPrereqs} 个知识点有前置依赖</span>
+                  <span className="text-neutral-300">·</span>
+                  <span>AI 会自动追踪你的知识边界</span>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

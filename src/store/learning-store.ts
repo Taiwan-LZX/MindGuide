@@ -32,6 +32,11 @@ export interface KnowledgeNode {
   importance: number;
   mastered: boolean;
   tags?: string | null;
+  // P1: Knowledge tracing fields
+  masteryScore?: number;
+  bloomLevel?: number;
+  prerequisites?: string | null;
+  assessmentCount?: number;
   createdAt: string;
 }
 

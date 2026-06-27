@@ -415,8 +415,10 @@ export function ChatComposer({
   const selectedModel = useLearningStore(s => s.selectedModel);
   const setSelectedModel = useLearningStore(s => s.setSelectedModel);
   const modelUsageTokens = useLearningStore(s => s.modelUsageTokens);
-  const setCreateNewPanelOpen = useLearningStore(s => s.setCreateNewPanelOpen);
   const focusMode = useLearningStore(s => s.focusMode);
+  // File context: show chips for materials uploaded to the current session
+  // so the user knows which files the model has access to.
+  const materials = useLearningStore(s => s.materials);
 
   // Destructure popover state into plain locals — the `react-hooks/refs` rule
   // flags property access off any object that also carries a ref, so we pull
@@ -762,13 +764,36 @@ export function ChatComposer({
   const handleAttach = useCallback(
     (opt: AttachmentOption) => {
       setAttachOpen(false);
-      // For now, "file" opens the existing create-new panel (which has the
-      // upload flow). Other attachment types are placeholders that insert a
-      // mention token into the composer so the user sees the intent captured.
+      // FIX: "添加文件" now directly opens the file picker inline instead of
+      // redirecting to the "更多功能" panel. The selected files are uploaded
+      // to the current session via uploadMaterials, and a context token chip
+      // is inserted into the composer so the user sees which files are attached.
       if (opt.key === 'file') {
-        setCreateNewPanelOpen(true);
+        // Create a hidden file input and trigger it
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.multiple = true;
+        input.accept = '.pdf,.docx,.xlsx,.pptx,.md,.txt,.html,.csv';
+        input.onchange = async (e) => {
+          const files = (e.target as HTMLInputElement).files;
+          if (!files || files.length === 0) return;
+          const sessionId = useLearningStore.getState().currentSessionId;
+          if (!sessionId) return;
+          // Upload files to the session
+          await useLearningStore.getState().uploadMaterials(sessionId, Array.from(files), { precision: 'fast' });
+          // Insert context tokens for each uploaded file
+          const tokens = Array.from(files).map(f => `@[${f.name}]`).join(' ');
+          onChange(value + (value.endsWith(' ') || value === '' ? '' : ' ') + tokens + ' ');
+          requestAnimationFrame(() => {
+            textareaRef.current?.focus();
+            const el = textareaRef.current;
+            if (el) el.selectionStart = el.selectionEnd = el.value.length;
+          });
+        };
+        input.click();
         return;
       }
+      // For other attachment types, insert a mention token
       const token = `@[${opt.label}] `;
       onChange(value + (value.endsWith(' ') || value === '' ? '' : ' ') + token);
       requestAnimationFrame(() => {
@@ -779,7 +804,7 @@ export function ChatComposer({
         }
       });
     },
-    [setAttachOpen, setCreateNewPanelOpen, onChange, value]
+    [setAttachOpen, onChange, value]
   );
 
   return (
@@ -818,6 +843,24 @@ export function ChatComposer({
         contextTokens={contextTokens}
         onRemoveToken={handleRemoveToken}
       />
+
+      {/* ── File context chips — show uploaded materials so the user knows
+          which files the model has access to. Each chip shows the filename
+          and can be removed (detach from context, not delete the file). ── */}
+      {materials.length > 0 && (
+        <div className="mb-[-2px] flex flex-wrap gap-1 rounded-t-xl border border-b-0 border-neutral-200 bg-neutral-50/80 px-2 py-1.5 dark:border-neutral-700 dark:bg-neutral-800/60">
+          {materials.map((m) => (
+            <span
+              key={m.id}
+              className="inline-flex items-center gap-1 rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-neutral-600 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
+              title={m.filename}
+            >
+              <FileText className="h-2.5 w-2.5 shrink-0 text-neutral-400" />
+              <span className="max-w-[120px] truncate">{m.title || m.filename}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* ── Composer card ── */}
       <div

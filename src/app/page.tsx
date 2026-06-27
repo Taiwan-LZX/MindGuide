@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import { MotionConfig, motion, AnimatePresence } from 'framer-motion';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
+import { BookOpen, MessageSquare } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 import { usePreferences } from '@/store/preferences-store';
 import { Sidebar } from '@/components/learning/sidebar';
@@ -299,47 +300,86 @@ function MainAreaContent({
   activeFeatureViewDir: 1 | -1;
   focusMode: boolean;
 }) {
+  const coursePanelOpen = useLearningStore(s => s.coursePanelOpen);
+
   return (
     <div
       className="relative flex h-full flex-1 flex-col overflow-hidden"
       data-focus-mode={focusMode ? 'on' : 'off'}
     >
-      {/* ── Page-level view transition ────────────────────────────────────
-          BUG FIX (P1-#16): changed mode="wait" → mode="popLayout" so the
-          old view exits WHILE the new view enters (cross-fade + slide)
-          instead of serial "exit then enter" which left a ~620ms empty gap.
-          popLayout pops the exiting element out of flow so the entering
-          element can mount immediately. */}
-      <AnimatePresence mode="popLayout" custom={activeFeatureViewDir}>
-        {activeFeatureView && !focusMode ? (
-          <motion.div
-            key={`feature-${activeFeatureView}`}
-            custom={activeFeatureViewDir}
-            variants={pageVariants}
-            initial="hidden"
-            animate="visible"
-            exit="exit"
-            className="relative flex h-full flex-1 flex-col"
-          >
-            <FeatureView />
-          </motion.div>
-        ) : (
-          <motion.div
-            key="main"
-            custom={activeFeatureViewDir}
-            variants={pageVariants}
-            initial="hidden"
-            animate="visible"
-            exit="exit"
-            className="relative flex h-full flex-1 flex-col"
-          >
-            <MainContent />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Three-column layout: conversation | course panel | right rail
+          When coursePanelOpen is true, the main area splits into a
+          resizable conversation + course panel. The right rail (Lessons/Chat
+          icons) is a slim fixed-width strip matching the reference design. */}
+      <div className="flex h-full">
+        {/* Conversation / Feature view area */}
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <AnimatePresence mode="popLayout" custom={activeFeatureViewDir}>
+            {activeFeatureView && !focusMode ? (
+              <motion.div
+                key={`feature-${activeFeatureView}`}
+                custom={activeFeatureViewDir}
+                variants={pageVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative flex h-full flex-1 flex-col"
+              >
+                <FeatureView />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="main"
+                custom={activeFeatureViewDir}
+                variants={pageVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative flex h-full flex-1 flex-col"
+              >
+                <MainContent />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
-      {/* Course Panel (floating, inside main area). Hidden in focus mode. */}
-      {!focusMode && <CoursePanel />}
+        {/* Course Panel — embedded as a right-side panel (not floating).
+            When coursePanelOpen is true, it takes ~30% of the main area.
+            When false, it collapses to 0. Hidden in focus mode. */}
+        {!focusMode && coursePanelOpen && (
+          <>
+            <div className="w-[3px] shrink-0 bg-neutral-200/60 dark:bg-neutral-800" />
+            <div className="w-[360px] shrink-0 overflow-hidden">
+              <CoursePanel />
+            </div>
+          </>
+        )}
+
+        {/* Right rail — slim icon strip matching the reference design.
+            Contains Lessons/Chat toggle icons. */}
+        {!focusMode && (
+          <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-l border-neutral-200/60 bg-neutral-50 py-3 dark:border-neutral-800 dark:bg-neutral-900">
+            <button
+              onClick={() => useLearningStore.getState().setCoursePanelOpen(!coursePanelOpen)}
+              className={`flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
+                coursePanelOpen
+                  ? 'bg-neutral-200 text-neutral-900 dark:bg-neutral-700 dark:text-neutral-100'
+                  : 'text-neutral-400 hover:bg-neutral-200/60 hover:text-neutral-600 dark:hover:bg-neutral-800'
+              }`}
+              aria-label="课程"
+            >
+              <BookOpen className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => useLearningStore.getState().setCoursePanelOpen(false)}
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-400 transition-colors hover:bg-neutral-200/60 hover:text-neutral-600 dark:hover:bg-neutral-800"
+              aria-label="对话"
+            >
+              <MessageSquare className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* More Features Panel (popover) */}
       <MoreFeaturesPanel />

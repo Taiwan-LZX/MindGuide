@@ -280,8 +280,8 @@ export function CoursePanel() {
   const userMsgCount = messages.filter((m) => m.role === 'user').length;
   const canGenerate = userMsgCount >= 3;
 
-  // ESC to close + click outside to close (unified close contract, matching
-  // other floating panels like command-palette / settings-view).
+  // ESC to close (panel is now embedded in layout, not floating — no
+  // click-outside-to-close needed).
   useEffect(() => {
     if (!coursePanelOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -290,23 +290,8 @@ export function CoursePanel() {
         setCoursePanelOpen(false);
       }
     };
-    const onDown = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        // Don't close if clicking the toggle button (BookOpen) — that toggles
-        const target = e.target as HTMLElement;
-        if (target.closest('[data-course-toggle]')) return;
-        setCoursePanelOpen(false);
-      }
-    };
     document.addEventListener('keydown', onKey);
-    const timer = setTimeout(() => {
-      document.addEventListener('mousedown', onDown);
-    }, 50);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      clearTimeout(timer);
-      document.removeEventListener('mousedown', onDown);
-    };
+    return () => document.removeEventListener('keydown', onKey);
   }, [coursePanelOpen, setCoursePanelOpen]);
 
   return (
@@ -319,9 +304,8 @@ export function CoursePanel() {
           initial="hidden"
           animate="visible"
           exit="exit"
-          className="relative z-40 flex h-full w-[420px] shrink-0 flex-col m-2 rounded-2xl border border-neutral-200/80 bg-white dark:border-neutral-700/50 dark:bg-neutral-900"
-          // P2-#49: removed willChange:'transform, opacity' (see create-new-panel note).
-          style={{ maxHeight: 'calc(100% - 16px)', transformOrigin: 'right' }}
+          className="flex h-full w-full flex-col bg-white dark:bg-neutral-900"
+          style={{ transformOrigin: 'right' }}
         >
             {!isCourseGenerated ? (
               /* ── Not yet generated: prompt to generate ── */

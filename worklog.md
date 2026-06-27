@@ -1464,3 +1464,49 @@ Stage Summary:
 - LobeChat 的"自动 prune reasoning 模型不支持参数"逻辑很值得抄，避免给 DeepSeek-R1 传 top_p/temperature 报错
 - fetch-event-source 默认 1s 重连太激进，遇到 503 要手动加指数退避 + jitter（参考 medium 文章 andersen-it-community）
 - AI SDK 5 的 streamObject 暂不支持 reasoning part（issue #10197），MindGuide 走 streamText 才能拿到 reasoning
+
+---
+Task ID: impl-reasoning-realtime-10
+Agent: main (Z.ai Code)
+Task: Phase 1 推理动画实时反馈 — Reasoning 组件 + FlowToken + 真实推理数据流
+
+Work Log:
+- 安装 FlowToken (bun add flowtoken@1.0.40) — token 到达视觉反馈库
+- AI Elements registry URL 404（已下线或迁移），改为自建 Reasoning 组件：
+  · src/components/learning/reasoning.tsx — 参考 AI Elements <Reasoning> 设计但修复两个已知 bug
+  · 修复 #1 (duration=0): 用 ref-based startRef + rAF polling，避免 unmount 前计时器未触发
+  · 修复 #2 (多消息展开串扰): 用 local expanded state 而非共享 layoutId
+  · 功能：流式时自动展开 + "思考中 Ns" 实时计时 + brand 色脉冲指示器；结束后自动折叠 + "已思考 Ns"
+- main-content.tsx 接入真实推理数据流:
+  · 从 store 解构 streamingThinking（之前只清空未使用）
+  · 把 ThreadThinkingAnim（3 个跳动圆点装饰动画）替换为 <Reasoning isStreaming={streamingPhase==='thinking'}>
+  · 推理文本用 FlowToken 的 <AnimatedMarkdown content={streamingThinking}> 渲染 — token 到达 fade-in 动画
+  · 无 thinking 内容时显示"正在准备推理…"
+- MsgBubble 已有消息推理展示:
+  · 扩展 msg 类型加 thinking?: string | null
+  · AI 消息内容前加 <Reasoning isStreaming={false}> 包裹 MarkdownRenderer(msg.thinking)
+  · 持久化的推理文本现在可折叠查看，默认收起显示"已思考"
+- 移除不再使用的代码:
+  · 删除 ThreadThinkingAnim / ThreadStandardAnim / ThreadDeepAnim / ThreadStructuredAnim 四个装饰动画函数（~120 行）
+  · 移除 thinkingMode 解构（不再需要选择动画类型）
+  · 移除 ThinkingMode type
+- 修复 duration 显示:
+  · 已有消息（非流式 duration=0）只显示"已思考"不显示时间
+  · 流式消息显示实时"思考中 Ns"
+  · 流式结束后显示"已思考 Ns"
+
+Stage Summary:
+- `bun run lint` 通过（0 errors / 0 warnings）
+- dev server HTTP 200 稳定
+- Agent Browser + VLM 验证:
+  · Reasoning 面板渲染: ✅ reasoning_panels=1, brain_icons=1
+  · "已思考"标签: ✅ 正确显示（不再显示 0s）
+  · 点击展开: ✅ 显示推理过程文本（markdown 格式）
+  · VLM 确认: "展开后显示推理过程文本，markdown 格式，视觉专业"
+- 核心改进: 推理动画从"纯装饰性 3 圆点"变成"真实推理文本流 + token 到达动画 + 实时计时"
+  · Before: ThreadThinkingAnim — 3 个跳动圆点，与模型推理过程无关
+  · After: <Reasoning> + <AnimatedMarkdown> — 渲染模型真实 reasoning_content，token 到达有 fade-in，显示思考时长
+- 修改文件:
+  · src/components/learning/reasoning.tsx (新建: 自建 Reasoning 组件 + bug 修复)
+  · src/components/learning/main-content.tsx (接入 streamingThinking + 替换装饰动画 + MsgBubble 加推理面板)
+- 新增依赖: flowtoken@1.0.40

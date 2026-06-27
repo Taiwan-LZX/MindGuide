@@ -12,6 +12,8 @@ import { ChatComposer } from '@/components/learning/chat-composer';
 import { useDraftInput, useInputHistory } from '@/hooks/use-draft-input';
 import { toast } from '@/hooks/use-toast';
 import { ScrollProgress } from '@/components/learning/scroll-progress';
+import { Reasoning } from '@/components/learning/reasoning';
+import { AnimatedMarkdown } from 'flowtoken';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -130,6 +132,7 @@ export function MainContent() {
     isLoadingMessages,
     isStreaming,
     streamingContent,
+    streamingThinking,
     streamingPhase,
     lastStreamError,
     knowledgeNodes,
@@ -139,7 +142,6 @@ export function MainContent() {
     coursePanelOpen,
     isCourseGenerated,
   } = useLearningStore();
-  const thinkingMode = useLearningStore(s => s.thinkingMode);
 
   // Draft persistence — the composer's text is saved to localStorage on a
   // per-session basis so a page refresh or session switch doesn't lose the
@@ -605,9 +607,12 @@ export function MainContent() {
                     </motion.span>
                   )}
                 </div>
-                {/* Body swaps between thinking animation and streaming content.
-                    Using AnimatePresence mode="wait" HERE (inner) so the body
-                    cross-fades while the header stays put. */}
+                {/* Body swaps between reasoning panel and streaming content.
+                    REASONING UPGRADE: replaced the decorative ThreadThinkingAnim
+                    (3 bouncing dots) with a real <Reasoning> panel that renders
+                    the model's actual reasoning_content text via FlowToken's
+                    AnimatedMarkdown (token-arrival fade-in animation). Now the
+                    "thinking" animation reflects the REAL reasoning process. */}
                 <AnimatePresence mode="wait" initial={false}>
                   {streamingPhase === 'thinking' || (!streamingContent && !streamingPhase) ? (
                     <motion.div
@@ -617,7 +622,15 @@ export function MainContent() {
                       exit={{ opacity: 0 }}
                       transition={{ duration: 0.2 }}
                     >
-                      <ThreadThinkingAnim mode={thinkingMode} />
+                      <Reasoning isStreaming={streamingPhase === 'thinking'}>
+                        {streamingThinking ? (
+                          <AnimatedMarkdown content={streamingThinking} />
+                        ) : (
+                          <span className="text-neutral-400 dark:text-neutral-500">
+                            正在准备推理…
+                          </span>
+                        )}
+                      </Reasoning>
                     </motion.div>
                   ) : (
                     <motion.div
@@ -793,7 +806,7 @@ function MsgBubble({
   isLastAssistant = false,
   onRegenerate,
 }: {
-  msg: { role: string; content: string; createdAt: string };
+  msg: { role: string; content: string; createdAt: string; thinking?: string | null };
   isLastAssistant?: boolean;
   onRegenerate?: () => void;
 }) {
@@ -865,6 +878,17 @@ function MsgBubble({
         </span>
         <span className="text-[11.5px] font-medium text-neutral-500 dark:text-neutral-400">MindGuide</span>
       </div>
+
+      {/* Reasoning panel — shows the model's persisted thinking trace
+          (msg.thinking) in a collapsible panel ABOVE the answer. This is
+          the SAME <Reasoning> component used during live streaming, but
+          here isStreaming=false so it starts collapsed with "已思考" label.
+          Users can click to expand and review the reasoning. */}
+      {msg.thinking && msg.thinking.trim() && (
+        <Reasoning isStreaming={false} className="mb-2">
+          <MarkdownRenderer content={msg.thinking} />
+        </Reasoning>
+      )}
 
       {/* Flowing markdown — no bubble background, just prose. space-y-* is
           handled inside MarkdownRenderer's element styles. */}
@@ -969,124 +993,6 @@ function WelcomeView() {
           />
         </motion.div>
       </div>
-    </div>
-  );
-}
-
-// ─── Thread thinking animation ───────────────────────────────────────────────
-//
-// Rendered inside the message thread's thinking bubble. Mirrors the
-// StatusBackCard animations in chat-composer but sized for inline prose flow:
-//   • off / standard — three-dot wave + "正在思考"
-//   • deep           — orbiting electron around a solid neutral core + "深度推理中"
-//   • structured     — three cascading tier chips (链式→批判→收敛) + "结构化推理中"
-// Keeping a separate component here (rather than importing from chat-composer)
-// avoids pulling composer-only dependencies into the thread render path.
-
-type ThinkingMode = 'off' | 'standard' | 'deep' | 'structured';
-
-function ThreadThinkingAnim({ mode }: { mode: ThinkingMode }) {
-  if (mode === 'deep') return <ThreadDeepAnim />;
-  if (mode === 'structured') return <ThreadStructuredAnim />;
-  return <ThreadStandardAnim />;
-}
-
-function ThreadStandardAnim() {
-  return (
-    <div className="flex items-center gap-1.5 py-1">
-      {[0, 1, 2].map((dot) => (
-        <motion.span
-          key={dot}
-          className="h-1.5 w-1.5 rounded-full bg-neutral-400 dark:bg-neutral-500"
-          animate={{
-            y: [0, -4, 0],
-            opacity: [0.35, 1, 0.35],
-            scale: [0.85, 1.1, 0.85],
-          }}
-          transition={{
-            repeat: Infinity,
-            duration: 1.1,
-            delay: dot * 0.16,
-            ease: 'easeInOut',
-          }}
-        />
-      ))}
-      <span className="ml-1.5 font-sans text-[10.5px] text-neutral-400 dark:text-neutral-500">
-        正在思考
-      </span>
-    </div>
-  );
-}
-
-function ThreadDeepAnim() {
-  return (
-    <div className="flex items-center gap-2 py-1">
-      <span className="relative flex h-4 w-4 items-center justify-center">
-        <motion.span
-          className="absolute h-1.5 w-1.5 rounded-full bg-neutral-800 dark:bg-neutral-200"
-          animate={{ scale: [1, 1.25, 1], opacity: [0.7, 1, 0.7] }}
-          transition={{ repeat: Infinity, duration: 1.6, ease: 'easeInOut' }}
-        />
-        <motion.span
-          className="absolute h-4 w-4 rounded-full border border-neutral-400/60 dark:border-neutral-500/60"
-          style={{ transform: 'rotateX(65deg)' }}
-          animate={{ rotate: 360 }}
-          transition={{ repeat: Infinity, duration: 2.4, ease: 'linear' }}
-        />
-        <motion.span
-          className="absolute h-4 w-4 rounded-full border border-neutral-400/40 dark:border-neutral-500/40"
-          style={{ transform: 'rotateY(65deg)' }}
-          animate={{ rotate: -360 }}
-          transition={{ repeat: Infinity, duration: 3, ease: 'linear' }}
-        />
-        <motion.span
-          className="absolute h-1 w-1 rounded-full bg-neutral-700 dark:bg-neutral-300"
-          animate={{ rotate: 360 }}
-          transition={{ repeat: Infinity, duration: 1.8, ease: 'linear' }}
-          style={{ transformOrigin: '0px 8px' }}
-        />
-      </span>
-      <span className="font-sans text-[10.5px] text-neutral-500 dark:text-neutral-400">
-        深度推理中
-        <span className="ml-1 text-neutral-400 dark:text-neutral-500">· 多角度 · 反例检验</span>
-      </span>
-    </div>
-  );
-}
-
-function ThreadStructuredAnim() {
-  const tiers = ['链式', '批判', '收敛'];
-  return (
-    <div className="flex items-center gap-2 py-1">
-      <span className="flex items-center gap-1">
-        {tiers.map((t, i) => (
-          <motion.span
-            key={t}
-            className="flex h-4 items-center gap-0.5 rounded-full border border-neutral-300/70 bg-white px-1 text-[8.5px] font-medium text-neutral-500 dark:border-neutral-600/70 dark:bg-neutral-800 dark:text-neutral-400"
-            animate={{
-              opacity: [0.35, 1, 0.35],
-              scale: [0.92, 1.04, 0.92],
-              borderColor: [
-                'rgba(168,162,158,0.5)',
-                'rgba(23,23,23,0.7)',
-                'rgba(168,162,158,0.5)',
-              ],
-            }}
-            transition={{
-              repeat: Infinity,
-              duration: 2.1,
-              delay: i * 0.4,
-              ease: 'easeInOut',
-            }}
-          >
-            <span className="h-1 w-1 rounded-full bg-neutral-400 dark:bg-neutral-500" />
-            {t}
-          </motion.span>
-        ))}
-      </span>
-      <span className="font-sans text-[10.5px] text-neutral-500 dark:text-neutral-400">
-        结构化推理中
-      </span>
     </div>
   );
 }

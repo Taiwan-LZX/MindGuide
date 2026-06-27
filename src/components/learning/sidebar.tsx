@@ -126,16 +126,20 @@ function CollapsedSidebar() {
 
   return (
     <aside className="flex h-full w-[56px] shrink-0 flex-col items-center bg-neutral-100 py-4 dark:bg-neutral-900" data-sidebar>
-      {/* Logo */}
-      <motion.div
+      {/* Logo — click to expand the sidebar */}
+      <motion.button
         custom={0}
         variants={iconStripVariants}
         initial="hidden"
         animate="visible"
+        whileHover={{ scale: 1.06, transition: { type: 'spring', stiffness: 400, damping: 22 } }}
+        whileTap={{ scale: 0.94, transition: { type: 'spring', stiffness: 600, damping: 25 } }}
+        onClick={() => setSidebarOpen(true)}
         className="mb-6 flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--brand)] text-[var(--brand-foreground)]"
+        aria-label="展开侧边栏"
       >
         <MessagesSquare className="h-4 w-4" />
-      </motion.div>
+      </motion.button>
 
       {/* Icon buttons */}
       <MouseFollowTooltip content="课程">

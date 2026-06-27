@@ -1,9 +1,7 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import { MotionConfig, motion, AnimatePresence } from 'framer-motion';
-import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from 'react-resizable-panels';
-import { BookOpen, MessageSquare } from 'lucide-react';
 import { useLearningStore } from '@/store/learning-store';
 import { usePreferences } from '@/store/preferences-store';
 import { Sidebar } from '@/components/learning/sidebar';
@@ -159,29 +157,12 @@ export default function Page() {
     return () => document.removeEventListener('keydown', handler);
   }, [setActiveFeatureView, setCreateNewPanelOpen, setSidebarOpen, setSettingsViewOpen, toggleFocusMode]);
 
-  // Determine if sidebar should be shown. In focus mode the sidebar is
-  // always hidden regardless of sidebarOpen (the focus toggle snapshots +
-  // forces sidebarOpen=false, but we also guard here for safety).
-  const showSidebar = !focusMode && displayMode !== 'full' && sidebarOpen;
-
-  // Imperative ref to the sidebar Panel — lets us collapse/expand it
-  // smoothly via react-resizable-panels' built-in animation instead of
-  // unmounting/remounting the PanelGroup. This preserves the drag-resize
-  // state AND gives a clean transition for focus mode / ⌘B toggle.
-  const sidebarPanelRef = useRef<ImperativePanelHandle>(null);
-
-  // Collapse/expand the sidebar Panel imperatively when showSidebar changes.
-  // react-resizable-panels handles the width animation internally, so the
-  // sidebar slides shut instead of hard-cutting.
-  useEffect(() => {
-    const panel = sidebarPanelRef.current;
-    if (!panel) return;
-    if (showSidebar) {
-      panel.expand();
-    } else {
-      panel.collapse();
-    }
-  }, [showSidebar]);
+  // Determine sidebar visibility. In focus mode the sidebar is fully hidden.
+  // When sidebarOpen is false (but not focus mode), we show the collapsed
+  // 56px icon strip instead of fully hiding — this gives the user a
+  // persistent navigation anchor they can click to re-expand.
+  const showFullSidebar = !focusMode && displayMode !== 'full' && sidebarOpen;
+  const showCollapsedSidebar = !focusMode && displayMode !== 'full' && !sidebarOpen;
 
   // viewDir comes from the store — see `activeFeatureViewDir` in
   // learning-store.ts. The store computes it atomically inside
@@ -216,47 +197,50 @@ export default function Page() {
             <div>} hard-switched on focus mode, unmounting everything. Now
             the PanelGroup stays mounted and the sidebar Panel collapses/
             expands with built-in animation. Drag-resize is preserved. */}
-        <PanelGroup direction="horizontal" autoSaveId="mindguide-layout">
-          <Panel
-            ref={sidebarPanelRef}
-            id="sidebar"
-            order={1}
-            defaultSize={16}
-            minSize={12}
-            maxSize={28}
-            collapsible
-            collapsedSize={0}
-            onCollapse={() => {
-              // Sync store state when the panel collapses (e.g. user dragged
-              // it to 0 or pressed the collapse arrow). Guard against
-              // focusMode to avoid feedback loops.
-              if (!focusMode && useLearningStore.getState().sidebarOpen) {
-                setSidebarOpen(false);
-              }
-            }}
-            onExpand={() => {
-              if (!focusMode && !useLearningStore.getState().sidebarOpen) {
-                setSidebarOpen(true);
-              }
-            }}
-            className="h-full"
-          >
-            <Sidebar collapsed={false} />
-          </Panel>
-          <PanelResizeHandle
-            className="group relative w-[3px] shrink-0 bg-transparent transition-colors hover:bg-[var(--brand)]/30 data-[resize-handle-state=drag]:bg-[var(--brand)]/50"
-            aria-label="拖拽调整侧边栏宽度"
-          >
-            <div className="absolute left-1/2 top-1/2 h-8 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-neutral-200 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-neutral-700" />
-          </PanelResizeHandle>
-          <Panel id="main" order={2} defaultSize={84} minSize={50} className="h-full w-full">
+        {/* Layout: sidebar (full or collapsed) + main area.
+            Uses flex layout instead of PanelGroup to avoid conditional
+            Panel rendering issues. The sidebar width is controlled by
+            sidebarOpen state — full sidebar when open, 56px icon strip
+            when collapsed. Drag-to-resize is handled by CSS resize. */}
+        <div className="flex h-full w-full">
+          {showFullSidebar && (
+            <>
+              <div className="h-full shrink-0" style={{ width: 'var(--sidebar-width, 240px)' }}>
+                <Sidebar collapsed={false} />
+              </div>
+              <div
+                className="group relative w-[3px] shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-[var(--brand)]/30"
+                aria-label="拖拽调整侧边栏宽度"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  const startX = e.clientX;
+                  const startWidth = (e.currentTarget.previousElementSibling as HTMLElement)?.offsetWidth || 240;
+                  const onMove = (ev: MouseEvent) => {
+                    const newWidth = Math.max(200, Math.min(400, startWidth + ev.clientX - startX));
+                    document.documentElement.style.setProperty('--sidebar-width', `${newWidth}px`);
+                  };
+                  const onUp = () => {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                  };
+                  document.addEventListener('mousemove', onMove);
+                  document.addEventListener('mouseup', onUp);
+                }}
+              >
+                <div className="absolute left-1/2 top-1/2 h-8 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-neutral-200 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-neutral-700" />
+              </div>
+            </>
+          )}
+          {showCollapsedSidebar && <Sidebar collapsed={true} />}
+          {/* Main content area */}
+          <div className="flex min-w-0 flex-1 flex-col">
             <MainAreaContent
               activeFeatureView={activeFeatureView}
               activeFeatureViewDir={activeFeatureViewDir}
               focusMode={focusMode}
             />
-          </Panel>
-        </PanelGroup>
+          </div>
+        </div>
 
         {/* ── Focus mode indicator ───────────────────────────────────────
             A small pill at the top-center of the viewport that confirms the
@@ -307,14 +291,11 @@ function MainAreaContent({
       className="relative flex h-full w-full flex-col overflow-hidden"
       data-focus-mode={focusMode ? 'on' : 'off'}
     >
-      {/* Three-column layout: conversation | course panel | right rail
-          Layout proportions (when course panel is open):
-            - Conversation: flex-1 (fills remaining space)
-            - Course panel: 340px fixed (shrink-0)
-            - Right rail: 44px fixed (shrink-0)
-          When course panel is closed, conversation takes full width and
-          only the right rail (44px) is visible. The sidebar (left) is
-          managed by the outer PanelGroup and defaults to ~20% of viewport. */}
+      {/* Two-area layout: conversation | course panel
+          The right rail is removed — course toggle is handled by the
+          BookOpen button in the top bar (next to the three-dot menu).
+          When coursePanelOpen is true, the course panel takes 340px on
+          the right. When false, conversation takes full width. */}
       <div className="flex h-full">
         {/* Conversation / Feature view area — takes all remaining space */}
         <div className="relative flex min-w-0 flex-1 flex-col">
@@ -348,42 +329,11 @@ function MainAreaContent({
         </div>
 
         {/* Course Panel — embedded right-side panel.
-            340px fixed width, visible when coursePanelOpen is true. */}
+            340px fixed width, visible when coursePanelOpen is true.
+            Toggle via the BookOpen button in the top bar. */}
         {!focusMode && coursePanelOpen && (
           <div className="w-[340px] shrink-0 overflow-hidden border-l border-neutral-200/60 dark:border-neutral-800">
             <CoursePanel />
-          </div>
-        )}
-
-        {/* Right rail — slim 44px icon strip. Always visible (when not
-            in focus mode). Contains Lessons/Chat toggle + can be extended
-            with more icons (files, settings, etc.). */}
-        {!focusMode && (
-          <div className="flex w-11 shrink-0 flex-col items-center gap-1.5 border-l border-neutral-200/60 bg-neutral-50 py-2 dark:border-neutral-800 dark:bg-neutral-900">
-            <button
-              onClick={() => useLearningStore.getState().setCoursePanelOpen(!coursePanelOpen)}
-              className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
-                coursePanelOpen
-                  ? 'bg-neutral-200 text-neutral-900 dark:bg-neutral-700 dark:text-neutral-100'
-                  : 'text-neutral-400 hover:bg-neutral-200/60 hover:text-neutral-600 dark:hover:bg-neutral-800'
-              }`}
-              aria-label="课程"
-              title="课程"
-            >
-              <BookOpen className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => useLearningStore.getState().setCoursePanelOpen(false)}
-              className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
-                !coursePanelOpen
-                  ? 'bg-neutral-200 text-neutral-900 dark:bg-neutral-700 dark:text-neutral-100'
-                  : 'text-neutral-400 hover:bg-neutral-200/60 hover:text-neutral-600 dark:hover:bg-neutral-800'
-              }`}
-              aria-label="对话"
-              title="对话"
-            >
-              <MessageSquare className="h-4 w-4" />
-            </button>
           </div>
         )}
       </div>

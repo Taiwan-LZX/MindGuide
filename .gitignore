@@ -60,3 +60,7 @@ examples/
 download/
 .zscripts/
 skills/
+Caddyfile
+start-dev.sh
+worklog.md
+mini-services/

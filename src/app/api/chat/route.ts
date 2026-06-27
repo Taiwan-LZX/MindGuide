@@ -305,6 +305,19 @@ function buildMessageContext(
     contextParts.pop();
   }
 
+  // FIX (D1): if historyMessages was empty (first message or empty array),
+  // contextParts will only contain system messages — no user turn at all.
+  // The ZAI API returns 400 "messages 参数非法" in this case. We inject the
+  // current user message as a guaranteed user turn at the end.
+  if (!contextParts.some(p => p.role === 'user')) {
+    // The current message is passed separately to buildMessageContext's caller;
+    // we use a placeholder that the caller will replace. But since we don't
+    // have the message here, we add it from the caller's perspective.
+    // Actually — the caller passes historyMessages which should include the
+    // current message. If it doesn't, we add a minimal user turn.
+    contextParts.push({ role: 'user', content: '请开始教学。' });
+  }
+
   return contextParts;
 }
 
@@ -400,7 +413,12 @@ export async function POST(req: NextRequest) {
     const passages = await retrievePassages(sessionId, message, 6);
     const kbContext = buildKnowledgeBaseContext(passages, 18_000);
 
-    const messageHistory = buildMessageContext(historyMessages || [], knowledgeNodes || [], kbContext, teachingMode, thinkingMode);
+    // FIX (D1): ensure the current user message is always in the history.
+    // The client sends historyMessages (previous turns) + message (current).
+    // If historyMessages is empty (first turn) or doesn't include the current
+    // message, buildMessageContext would produce only system messages → 400.
+    const allMessages = [...(historyMessages || []), { role: 'user', content: message, type: 'dialogue' }];
+    const messageHistory = buildMessageContext(allMessages, knowledgeNodes || [], kbContext, teachingMode, thinkingMode);
 
     // Real streaming: SDK returns the upstream ReadableStream when stream:true
     const upstream = (await zai.chat.completions.create({
@@ -633,6 +651,85 @@ export async function POST(req: NextRequest) {
               });
             } catch (dbErr) {
               console.error('Failed to persist AI message:', dbErr);
+            }
+
+            // ── P0-A2: AI auto-generate knowledge nodes from the conversation ──
+            //
+            // After the assistant reply is persisted, we make a SEPARATE (non-streaming)
+            // AI call to extract 2-4 knowledge nodes from this turn's Q&A. The nodes
+            // are persisted to DB so the client's next fetchKnowledgeNodes() picks
+            // them up. This implements the "自动提取知识点" core promise.
+            //
+            // We also auto-generate 1-2 flashcards from the extracted nodes and
+            // 1 task, so the learner has immediate study artifacts without manual
+            // creation (P0-A3).
+            try {
+              const extractPrompt = `分析以下学习对话，提取 2-4 个核心知识点。每个知识点需要：
+- title: 简洁的概念名称（5-15字）
+- content: 概念的解释说明（50-150字）
+- category: 类型（concept/fact/principle/example/analogy 之一）
+- importance: 重要性 1-5（5=最核心）
+
+严格返回以下 JSON 格式，不要包含其他文字：
+{"nodes":[{"title":"","content":"","category":"","importance":3}]}
+
+学习者问题：${message}
+AI回复：${persistedContent.slice(0, 2000)}`;
+
+              const extractCompletion = await zai.chat.completions.create({
+                messages: [{ role: 'user', content: extractPrompt }],
+                model: selectedModel,
+                thinking: { type: 'disabled' },
+              } as any);
+
+              const extractText = extractCompletion?.choices?.[0]?.message?.content || '';
+              // Parse JSON from the response (handle markdown code fences)
+              const jsonMatch = extractText.match(/\{[\s\S]*\}/);
+              if (jsonMatch) {
+                const parsed = JSON.parse(jsonMatch[0]);
+                const nodes = parsed.nodes || [];
+                for (const node of nodes) {
+                  if (node.title && node.content) {
+                    await db.knowledgeNode.create({
+                      data: {
+                        sessionId,
+                        title: String(node.title).slice(0, 100),
+                        content: String(node.content).slice(0, 500),
+                        category: String(node.category || 'concept'),
+                        importance: Math.max(1, Math.min(5, Number(node.importance) || 3)),
+                      },
+                    });
+                  }
+                }
+
+                // P0-A3: auto-generate flashcards from extracted nodes
+                for (const node of nodes.slice(0, 2)) {
+                  if (node.title && node.content) {
+                    await db.card.create({
+                      data: {
+                        sessionId,
+                        front: String(node.title),
+                        back: String(node.content).slice(0, 300),
+                        category: String(node.category || 'general'),
+                      },
+                    });
+                  }
+                }
+
+                // P0-A3: auto-generate a study task
+                if (nodes.length > 0) {
+                  await db.task.create({
+                    data: {
+                      sessionId,
+                      title: `复习知识点：${nodes[0].title}`,
+                      priority: nodes[0].importance >= 4 ? 4 : 3,
+                    },
+                  });
+                }
+              }
+            } catch (extractErr) {
+              console.error('Auto-extract knowledge nodes failed:', extractErr);
+              // Non-fatal — the conversation still completed successfully.
             }
           }
         }

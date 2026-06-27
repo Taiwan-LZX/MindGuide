@@ -243,27 +243,3 @@ function sectionBoost(sectionTitle: string): number {
   return 0;
 }
 
-// ─── query expansion (HyDE, optional) ───────────────────────────────────────
-//
-// HyDE (Gao et al. 2023): for complex queries, ask the LLM to generate a
-// hypothetical answer, then embed THAT for retrieval. The hypothetical answer
-// lexically overlaps with relevant chunks better than the terse question.
-//
-// Implementation note: this requires a chat completion call, so it's only
-// worth it for queries longer than ~30 chars. We expose it as a helper; the
-// chat / course routes can opt-in per-call.
-
-export async function expandQueryWithHyDE(
-  query: string,
-  generate: (prompt: string) => Promise<string>
-): Promise<string> {
-  // Short queries don't benefit from expansion.
-  if (query.length < 30) return query;
-  const prompt = `You are helping a retrieval system. Given the learner's question, write a 2-3 sentence hypothetical answer that would lexically overlap with relevant study material. Do not add any preamble. Just the answer.\n\nQuestion: ${query}\n\nHypothetical answer:`;
-  try {
-    const hyde = await generate(prompt);
-    return `${query}\n\n${hyde}`;
-  } catch {
-    return query;
-  }
-}

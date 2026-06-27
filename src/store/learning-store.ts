@@ -914,9 +914,14 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       // disruption. The user already sees the complete message; this just
       // ensures future operations (delete, edit) have the correct ID.
       get().fetchMessages(currentSessionId).then(() => {
-        // Refresh knowledge nodes and references after the silent refetch
+        // Refresh knowledge nodes, references, cards, tasks, and stats
+        // after the silent refetch. The server auto-generates knowledge
+        // nodes + flashcards + tasks from each AI reply, so we need to
+        // re-fetch to pick them up.
         get().fetchKnowledgeNodes(currentSessionId);
         get().fetchReferences(currentSessionId);
+        get().fetchCards(currentSessionId);
+        get().fetchTasks(currentSessionId);
         get().fetchStats();
       });
 

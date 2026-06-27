@@ -702,16 +702,6 @@ function cleanChunkContent(raw: string): string {
 
 // ─── title-chunk detection ──────────────────────────────────────────────────
 
-function isTitleChunk(content: string, section: DocSection | undefined, cursor: number): boolean {
-  if (!section) return false;
-  // A chunk is a "title chunk" if it starts at the section start and is short.
-  if (section.charStart !== cursor) return false;
-  if (content.length > 200) return false;
-  // And matches the heading text (allowing for trailing whitespace/blank).
-  const head = content.trim();
-  if (head.length < 2) return false;
-  return section.title.startsWith(head.slice(0, 20)) || head.startsWith(section.title.slice(0, 20));
-}
 
 // ─── recursive split (LangChain-style) ──────────────────────────────────────
 
@@ -796,7 +786,6 @@ function makeChunk(content: string, parent: Chunk, charStart: number, idx: numbe
 // ─── v2 block-type + section-role heuristic classifiers ─────────────────────
 //
 // These are deliberately cheap (regex-based) so they run at chunking time
-// without another LLM call. Phase 2 will replace `classifyBlockType` with
 // VLM-emitted types when available (precision='high' mode), falling back to
 // these heuristics for fast mode.
 
@@ -804,7 +793,6 @@ function makeChunk(content: string, parent: Chunk, charStart: number, idx: numbe
  * Classify a chunk into one of the BlockType categories based on its content.
  *
  * Priority order (first match wins):
- *   1. title     — chunk is mostly a heading (detected by isTitleChunk)
  *   2. table     — contains HTML <table> or markdown pipe |---| table
  *   3. figure    — contains ![Figure: ...](...) image reference
  *   4. formula   — contains \[...\] display math
@@ -814,56 +802,6 @@ function makeChunk(content: string, parent: Chunk, charStart: number, idx: numbe
  *   8. list      — majority of non-empty lines start with - / * / N.
  *   9. text      — default
  */
-export function classifyBlockType(
-  content: string,
-  section: DocSection | undefined,
-  cursor: number
-): BlockType {
-  // 1. Title — delegate to existing heuristic.
-  if (isTitleChunk(content, section, cursor)) return 'title';
-
-  // 2. Table — HTML <table> or markdown pipe table (|---| separator line).
-  if (/<table[\s>]/i.test(content) || /^\s*\|[-:\s|]+\|\s*$/m.test(content)) {
-    return 'table';
-  }
-
-  // 3. Figure — markdown image with "Figure:" alt text (olmOCR v2 convention)
-  //    or generic ![...](...) image reference.
-  if (/!\[Figure:/i.test(content) || /!\[[^\]]*\]\([^)]+\)/.test(content)) {
-    return 'figure';
-  }
-
-  // 4. Formula — display math \[...\] (olmOCR v2) or legacy $$...$$.
-  if (/\\\[[\s\S]*?\\\]/.test(content) || /\$\$[\s\S]*?\$\$/.test(content)) {
-    return 'formula';
-  }
-
-  // 5. Code — fenced code block.
-  if (/```[\s\S]*?```/.test(content)) {
-    return 'code';
-  }
-
-  // 6. Reference — bibliography entry pattern: "[1] Author, Title..." or
-  //    "(Author, 2020)" style at line start.
-  if (/^\s*\[\d+\]\s+\S/m.test(content) || /^\s*\([A-Z][a-z]+,\s*\d{4}\)/m.test(content)) {
-    return 'reference';
-  }
-
-  // 7. Caption — "Figure 1:", "Table 2:", "图 1", "表 2".
-  if (/^\s*(Figure|Table|图|表|Eq\.|方程)\s*\d+/im.test(content)) {
-    return 'caption';
-  }
-
-  // 8. List — majority of non-empty lines start with bullet/number marker.
-  const lines = content.split('\n').filter((l) => l.trim().length > 0);
-  if (lines.length >= 2) {
-    const listLines = lines.filter((l) => /^\s*([-*•]|\d+[.)])\s+\S/.test(l)).length;
-    if (listLines / lines.length >= 0.6) return 'list';
-  }
-
-  // 9. Default.
-  return 'text';
-}
 
 /**
  * Detect GROBID section role from a section title.

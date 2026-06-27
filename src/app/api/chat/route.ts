@@ -5,6 +5,7 @@ import { stripEmoji } from '@/lib/emoji-sanitize';
 import { retrievePassages, buildKnowledgeBaseContext } from '@/lib/retrieval';
 import { parseBody, chatSchema } from '@/lib/api-validator';
 import { runMultiStepReasoning } from '@/lib/multi-step-reasoning';
+import { assessMastery, discoverPrerequisites, buildKnowledgeBoundaryContext } from '@/lib/knowledge-tracing';
 
 // The core AI teaching system prompt
 const TEACHING_SYSTEM_PROMPT = `你是一位资深的教育者和学习导师，你的核心使命是通过对话式教学帮助学习者真正理解知识。
@@ -156,7 +157,8 @@ function buildMessageContext(
   knowledgeNodes: Array<{ title: string; content: string; category?: string; mastered: boolean }>,
   kbContext: string,
   teachingMode: string = 'guide',
-  thinkingMode: string = 'standard'
+  thinkingMode: string = 'standard',
+  knowledgeBoundaryContext: string = '',
 ) {
   const contextParts: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
 
@@ -189,6 +191,18 @@ function buildMessageContext(
     contextParts.push({
       role: 'system',
       content: knowledgeContext,
+    });
+  }
+
+  // P1: Knowledge boundary context — gives the AI a real-time picture of
+  // what the learner has mastered, what they're learning, and what
+  // prerequisites are missing. This replaces the vague "ask Socratic
+  // questions" approach with data-driven teaching: the AI knows exactly
+  // where the learner's boundary is and can teach at the right depth.
+  if (knowledgeBoundaryContext) {
+    contextParts.push({
+      role: 'system',
+      content: knowledgeBoundaryContext,
     });
   }
 
@@ -413,12 +427,15 @@ export async function POST(req: NextRequest) {
     const passages = await retrievePassages(sessionId, message, 6);
     const kbContext = buildKnowledgeBaseContext(passages, 18_000);
 
-    // FIX (D1): ensure the current user message is always in the history.
-    // The client sends historyMessages (previous turns) + message (current).
-    // If historyMessages is empty (first turn) or doesn't include the current
-    // message, buildMessageContext would produce only system messages → 400.
+    // P1: Build knowledge boundary context from the learner's current
+    // mastery data. This gives the AI tutor a clear picture of what the
+    // learner knows, what they're learning, and what prerequisites are
+    // missing — enabling data-driven teaching instead of vague Socratic
+    // questioning.
+    const knowledgeBoundaryContext = await buildKnowledgeBoundaryContext(sessionId);
+
     const allMessages = [...(historyMessages || []), { role: 'user', content: message, type: 'dialogue' }];
-    const messageHistory = buildMessageContext(allMessages, knowledgeNodes || [], kbContext, teachingMode, thinkingMode);
+    const messageHistory = buildMessageContext(allMessages, knowledgeNodes || [], kbContext, teachingMode, thinkingMode, knowledgeBoundaryContext);
 
     // Real streaming: SDK returns the upstream ReadableStream when stream:true
     const upstream = (await zai.chat.completions.create({
@@ -730,6 +747,40 @@ AI回复：${persistedContent.slice(0, 2000)}`;
             } catch (extractErr) {
               console.error('Auto-extract knowledge nodes failed:', extractErr);
               // Non-fatal — the conversation still completed successfully.
+            }
+
+            // ── P1: Knowledge Tracing — assess mastery + discover prerequisites ──
+            //
+            // After knowledge nodes are extracted, we run two additional
+            // LLM calls (non-streaming, non-blocking):
+            //
+            // 1. Mastery assessment (Dialogue KT): evaluates the learner's
+            //    latest response against each knowledge node, updates
+            //    masteryScore (0-1) and bloomLevel (1-6).
+            //
+            // 2. Prerequisite discovery (RPKT): for unmastered nodes,
+            //    recursively traces prerequisite concepts to find the
+            //    learner's actual knowledge boundary.
+            //
+            // Both are non-fatal — if they fail, the conversation still
+            // completed successfully and the learner can continue.
+            try {
+              // 1. Assess mastery
+              const assessments = await assessMastery(
+                sessionId, message, persistedContent, selectedModel,
+              );
+
+              // 2. Discover prerequisites for unmastered nodes
+              if (assessments.length > 0) {
+                const unmasteredTitles = assessments
+                  .filter(a => a.masteryScore < 0.7)
+                  .map(a => a.nodeTitle);
+                if (unmasteredTitles.length > 0) {
+                  await discoverPrerequisites(sessionId, unmasteredTitles, selectedModel);
+                }
+              }
+            } catch (ktErr) {
+              console.error('Knowledge tracing failed:', ktErr);
             }
           }
         }

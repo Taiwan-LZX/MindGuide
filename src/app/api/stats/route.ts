@@ -16,7 +16,7 @@ export async function GET() {
     ] = await Promise.all([
       db.learningSession.findMany({ select: { id: true, createdAt: true, updatedAt: true, status: true } }),
       db.learningMessage.findMany({ select: { id: true, role: true, sessionId: true, createdAt: true } }),
-      db.knowledgeNode.findMany({ select: { id: true, mastered: true, sessionId: true, createdAt: true, category: true } }),
+      db.knowledgeNode.findMany({ select: { id: true, mastered: true, sessionId: true, createdAt: true, category: true, masteryScore: true, bloomLevel: true, assessmentCount: true, prerequisites: true } }),
       db.knowledgeNode.findMany({ where: { mastered: true }, select: { id: true } }),
       db.learningSession.findMany({
         take: 200,
@@ -228,6 +228,15 @@ export async function GET() {
         userMessages: userMsgCount,
         knowledgeNodes: allKnowledge.length,
         masteredKnowledge: masteredKnowledge.length,
+        // P1: Knowledge tracing stats
+        avgMasteryScore: allKnowledge.length > 0
+          ? Math.round((allKnowledge.reduce((s, n: any) => s + (n.masteryScore || 0), 0) / allKnowledge.length) * 100) / 100
+          : 0,
+        avgBloomLevel: allKnowledge.length > 0
+          ? Math.round((allKnowledge.reduce((s, n: any) => s + (n.bloomLevel || 1), 0) / allKnowledge.length) * 10) / 10
+          : 1,
+        totalAssessments: allKnowledge.reduce((s, n: any) => s + (n.assessmentCount || 0), 0),
+        nodesWithPrerequisites: allKnowledge.filter((n: any) => n.prerequisites).length,
         learningTimeLabel,
         maxRoundsInOneSession,
         currentStreak: streak,

@@ -53,6 +53,26 @@ model KnowledgeNode {
   importance  Int      @default(3)   // 1-5 scale
   mastered    Boolean  @default(false)
   tags        String?               // Comma-separated tags
+  // P1: Knowledge tracing fields (based on RPKT + Dialogue KT papers)
+  // masteryScore: 0.0-1.0 probability that the learner has mastered this
+  //   concept, updated after each dialogue turn via LLM-based assessment.
+  //   Replaces the binary mastered flag for progressive tracking — mastered
+  //   is still toggled when masteryScore crosses 0.7 threshold.
+  masteryScore Float   @default(0.0)
+  // bloomLevel: 1-6 (Remember/Understand/Apply/Analyze/Evaluate/Create).
+  //   Tracks the learner's current cognitive depth for this concept.
+  //   AI advances the level when the learner demonstrates competence at
+  //   the current level, following Bloom's Taxonomy progressive questioning.
+  bloomLevel   Int     @default(1)
+  // prerequisites: JSON array of knowledge node titles that this node
+  //   depends on. Populated by the recursive prerequisite discovery
+  //   (RPKT algorithm) — when the learner doesn't understand this node,
+  //   the system traces back to prerequisites and teaches those first.
+  prerequisites String?             // JSON: ["概念A", "概念B"]
+  // assessmentCount: how many times the AI has assessed this node
+  //   (via dialogue turns). Used to weight the mastery score — more
+  //   assessments = higher confidence.
+  assessmentCount Int  @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

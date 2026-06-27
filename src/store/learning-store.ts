@@ -859,8 +859,32 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
         phaseHeld = false;
       }
 
-      // Re-fetch from DB to get server-side IDs (prevents duplicates)
-      set({
+      // ── Smooth transition: streaming -> settled message ──
+      //
+      // BUG FIX: previously the code cleared all streaming state THEN called
+      // fetchMessages (a network request), leaving a ~200-500ms window where
+      // the streaming bubble had vanished but the new message hadn't loaded
+      // yet. The user perceived this as "page reload" / "white flash".
+      //
+      // FIX: create the assistant message object from the streaming data we
+      // ALREADY HAVE (fullContent + fullThinking), append it to the messages
+      // array immediately, THEN clear streaming state in the same set() call.
+      // The streaming bubble exits while the new message enters in the same
+      // render frame — no visual gap. fetchMessages runs in the background
+      // to pick up the server-side ID, but the UI never shows a loading state.
+      const finalContent = stripEmoji(fullContent);
+      const assistantMessage: LearningMessage = {
+        id: `temp-ai-${Date.now()}`,
+        sessionId: currentSessionId,
+        role: 'assistant',
+        content: finalContent,
+        type: 'dialogue',
+        thinking: fullThinking ? stripEmoji(fullThinking).slice(0, 8000) : null,
+        createdAt: new Date().toISOString(),
+      };
+
+      set((state) => ({
+        messages: [...state.messages, assistantMessage],
         isStreaming: false,
         streamingContent: '',
         streamingThinking: '',
@@ -869,21 +893,25 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
         streamingCurrentStep: null,
         streamingCitations: [],
         streamingMetrics: null,
-      });
+      }));
+
       // Accumulate model usage estimate for this session — every assistant
       // turn adds input + output tokens. We approximate with message length
       // (chars/4 ≈ tokens) since the SSE stream doesn't surface usage. This
       // is what the ModelCard's "模型用量" meter reads.
       const approxAddedTokens = Math.ceil((content.length + fullContent.length + fullThinking.length) / 4);
       set({ modelUsageTokens: get().modelUsageTokens + approxAddedTokens });
-      await get().fetchMessages(currentSessionId);
 
-      // Refresh knowledge nodes and references
-      get().fetchKnowledgeNodes(currentSessionId);
-      get().fetchReferences(currentSessionId);
-
-      // Refresh global stats in the background (achievement progress may have changed)
-      get().fetchStats();
+      // Background refresh: fetch from DB to replace the temp ID with the
+      // real server-side ID. This runs SILENTLY — no loading state, no UI
+      // disruption. The user already sees the complete message; this just
+      // ensures future operations (delete, edit) have the correct ID.
+      get().fetchMessages(currentSessionId).then(() => {
+        // Refresh knowledge nodes and references after the silent refetch
+        get().fetchKnowledgeNodes(currentSessionId);
+        get().fetchReferences(currentSessionId);
+        get().fetchStats();
+      });
 
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -958,7 +986,27 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       const cleaned = (data.messages || []).map((m: { role: string; content: string }) =>
         m.role === 'assistant' ? { ...m, content: stripEmoji(m.content || '') } : m
       );
-      set({ messages: cleaned });
+      // SMART MERGE: if the current messages array has temp-ID entries (from
+      // the streaming-to-settled transition), replace them with the DB
+      // versions by matching on content + role. This avoids a visual flash
+      // caused by key changes when the full array is replaced.
+      const current = get().messages;
+      const hasTempIds = current.some(m => m.id.startsWith('temp-'));
+      if (hasTempIds) {
+        // Match by role + content prefix (first 50 chars) to find temp entries
+        // and swap in the DB version with the real ID.
+        const merged = cleaned.map((dbMsg: LearningMessage) => {
+          const tempMatch = current.find(m =>
+            m.id.startsWith('temp-') &&
+            m.role === dbMsg.role &&
+            m.content.slice(0, 50) === dbMsg.content.slice(0, 50)
+          );
+          return tempMatch ? { ...dbMsg, id: dbMsg.id } : dbMsg;
+        });
+        set({ messages: merged });
+      } else {
+        set({ messages: cleaned });
+      }
     } catch (error) {
       console.error('Failed to fetch messages:', error);
     } finally {

@@ -400,7 +400,12 @@ export function MainContent() {
   }
 
   // ── Loading ──
-  if (isLoadingMessages) {
+  // Only show the full-screen spinner on INITIAL load (no messages yet).
+  // During background refetch (after streaming ends), isLoadingMessages is
+  // true but we already have messages — showing the spinner would replace
+  // the entire conversation with a loading state, which the user perceives
+  // as a "page reload". Guard with messages.length === 0.
+  if (isLoadingMessages && messages.length === 0) {
     return (
       <div className="flex h-full items-center justify-center">
         <motion.div

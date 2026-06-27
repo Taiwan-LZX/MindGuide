@@ -170,14 +170,19 @@ async function retrieveViaTreeWalk(
     nodeList.forEach((nodeRef, rank) => {
       // nodeRef is "materialId:nodeId" or just "nodeId".
       const [matId, nodeId] = nodeRef.includes(':') ? nodeRef.split(':', 2) : [undefined, nodeRef];
-      // Find the node in allNodes.
-      const node = allNodes.find((n) =>
+      // BUG FIX (B5): previously used .find() which only returned the FIRST
+      // matching node when matId was undefined. If two materials had nodes
+      // with the same nodeId, the wrong material's node could be selected.
+      // Now we collect ALL matching nodes so every material with a matching
+      // nodeId gets its chunks included in the retrieval.
+      const matchingNodes = allNodes.filter((n) =>
         (matId ? n.materialId === matId : true) && n.nodeId === nodeId
       );
-      if (!node) return;
-      const list = selectedByMaterial.get(node.materialId) ?? [];
-      list.push({ nodeId: node.nodeId, charStart: node.charStart, charEnd: node.charEnd, rank: rank + 1 });
-      selectedByMaterial.set(node.materialId, list);
+      for (const node of matchingNodes) {
+        const list = selectedByMaterial.get(node.materialId) ?? [];
+        list.push({ nodeId: node.nodeId, charStart: node.charStart, charEnd: node.charEnd, rank: rank + 1 });
+        selectedByMaterial.set(node.materialId, list);
+      }
     });
 
     // Fetch chunks for each material and match by char range.

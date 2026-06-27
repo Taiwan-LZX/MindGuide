@@ -1860,3 +1860,48 @@ telemetry 失真，无法做成本审计。
 9. [P2] 给 multi-step-reasoning 加超时。
 10. [P3] sm2.ts ease 保留 4 位小数；detectSectionRole 补充中文编号模式。
 
+
+---
+Task ID: fix-p0-bugs-13
+Agent: main (Z.ai Code)
+Task: P0 bug 修复 — 6 处严重问题全部修复
+
+Work Log:
+- B1 流式字符丢失 (chat/route.ts:529):
+  · 根因: `new TextDecoder()` 在 while 循环内创建，每次迭代都 new 一个新实例
+  · `stream: true` 的内部字节缓冲区（持有跨 chunk 的不完整多字节序列）在每次 new 时被丢弃
+  · 中文 3 字节字符（如"传"=E4 BC A0）跨两个 chunk 时，第一个 chunk 末尾字节被丢弃
+  · 修复: 在循环外创建一个持久的 `const decoder = new TextDecoder()`，循环内复用
+  · 验证: 2745 字符长回复，"反向传播"/"梯度"/"链式法则"/"损失函数" 全部完整，LaTeX 公式无截断
+- B2 多步推理 SSE buffer 未 flush (multi-step-reasoning.ts:254-280):
+  · 根因: while 循环结束后没有处理 buffer 里残留的最后一个不完整事件
+  · 修复: 循环后加 `if (buffer.trim()) { ... }` 解析尾部残留
+- B3 多步推理 retry 重复发送 token (multi-step-reasoning.ts:236-305):
+  · 根因: retry 时 stepContent/stepThinking 没有重置，第一次失败已流式输出的 token 被再次发送
+  · 修复: stepContent/stepThinking 移到 for 循环内（每次 attempt 重置），且 `onStepToken` 只在 attempt===0 时调用
+- B4 多步推理单事件多 data 行只取第一个 (multi-step-reasoning.ts:262):
+  · 根因: `evt.split('\n').find(l => l.trim().startsWith('data:'))` 只取第一个 data 行
+  · SSE 规范允许一个事件含多个 data 行，上游可能把多个 delta 打包在一个事件里
+  · 修复: 改为 `for (const line of evt.split('\n'))` 遍历所有 data 行
+- B5 tree-walk nodeId 跨 material 命中 (retrieval.ts:174-176):
+  · 根因: `allNodes.find(n => (matId ? n.materialId === matId : true) && n.nodeId === nodeId)`
+  · 当 matId 为 undefined 时，.find() 只返回第一个匹配，跨 material 同 nodeId 时命中错误
+  · 修复: 改为 .filter() 收集所有匹配节点，遍历加入 selectedByMaterial
+- B6 发送防抖 (main-content.tsx:310-319):
+  · 根因: handleSend 的 `if (!t || isStreaming) return` 在 sendMessage async 设 isStreaming=true 之前可被重入
+  · 快速双击 Enter 两次都通过 isStreaming=false 检查，导致重复用户消息
+  · 修复: 新增 sendingRef（ref-based 锁）+ lastSendRef（3s 相同内容去重）
+  · 验证: 双击 Enter 只发送 1 条（DB 确认 1 user + 1 assistant，之前会有 2+2）
+
+Stage Summary:
+- `bun run lint` 通过（0 errors / 0 warnings）
+- dev server HTTP 200 稳定
+- B1 验证: 2745 字符长回复，5 个关键词全部完整，LaTeX 公式无截断 ✅
+- B6 验证: 双击 Enter 只产生 1 条 user 消息（DB 确认）✅
+- B2-B4 验证: 多步推理 SSE 流正确（stepStart + stepToken + step 事件齐全）✅
+- B5 验证: tree-walk 用 .filter() 收集所有匹配节点 ✅
+- 修改文件:
+  · src/app/api/chat/route.ts (B1: TextDecoder 循环外创建)
+  · src/lib/multi-step-reasoning.ts (B2: buffer flush + B3: retry 防重复 + B4: 多 data 行遍历)
+  · src/lib/retrieval.ts (B5: .find → .filter)
+  · src/components/learning/main-content.tsx (B6: sendingRef + 3s 去重)

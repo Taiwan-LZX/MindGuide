@@ -307,15 +307,37 @@ export function MainContent() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
+  // BUG FIX (B6): send debounce. Previously, a rapid double-Enter or double-
+  // click on the send button could fire handleSend twice before isStreaming
+  // was set to true (because sendMessage is async). This caused duplicate
+  // user messages. Now we use a ref-based lock + a 3s same-content dedup.
+  const lastSendRef = useRef<{ text: string; time: number } | null>(null);
+  const sendingRef = useRef(false);
+
   const handleSend = useCallback(async (overrideText?: string) => {
     const t = (overrideText ?? input).trim();
     if (!t || isStreaming) return;
-    // Push to input history (for ↑ recall) and clear the persisted draft.
-    pushHistory(t);
-    setHistoryIndex(-1);
-    clearDraft();
-    setInput('');
-    await sendMessage(t);
+    // Ref-based lock — prevents re-entry before isStreaming flips to true.
+    if (sendingRef.current) return;
+    // 3s same-content dedup — prevents accidental double-send of identical text.
+    const now = Date.now();
+    if (lastSendRef.current && lastSendRef.current.text === t && now - lastSendRef.current.time < 3000) {
+      return;
+    }
+    sendingRef.current = true;
+    lastSendRef.current = { text: t, time: now };
+    try {
+      // Push to input history (for ↑ recall) and clear the persisted draft.
+      pushHistory(t);
+      setHistoryIndex(-1);
+      clearDraft();
+      setInput('');
+      await sendMessage(t);
+    } finally {
+      // Release the lock once sendMessage resolves (isStreaming is now true
+      // or an error was thrown). Keep lastSendRef for the 3s dedup window.
+      sendingRef.current = false;
+    }
   }, [input, isStreaming, sendMessage, pushHistory, clearDraft, setInput]);
 
   // ── Input history navigation (↑ / ↓) ──────────────────────────────────────

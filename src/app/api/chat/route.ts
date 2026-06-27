@@ -522,11 +522,19 @@ export async function POST(req: NextRequest) {
         }
 
         const reader = upstream.getReader();
+        // BUG FIX (B1): create ONE TextDecoder outside the loop and reuse it.
+        // Previously `new TextDecoder()` was created inside the loop, so the
+        // `stream: true` option's internal byte buffer (which holds incomplete
+        // multi-byte sequences at chunk boundaries) was discarded on every
+        // iteration. This caused Chinese characters split across chunks to
+        // lose bytes — e.g. "反向传播" became "反向播" (传's 3 bytes spanned
+        // two chunks, first chunk's trailing bytes were dropped).
+        const decoder = new TextDecoder();
         try {
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            const chunkStr = new TextDecoder().decode(value, { stream: true });
+            const chunkStr = decoder.decode(value, { stream: true });
             const pieces = parseUpstreamSse(chunkStr, bufferRef);
             for (const piece of pieces) {
               if (piece.kind === 'thinking') {

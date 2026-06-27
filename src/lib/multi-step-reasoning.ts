@@ -246,8 +246,13 @@ ${stepDef.prompt}`,
         if (upstream && typeof upstream.getReader === 'function') {
           // Streaming path — parse SSE deltas and forward tokens
           const reader = upstream.getReader();
+          // BUG FIX (B1 same fix): one persistent TextDecoder outside the loop
+          // so multi-byte sequences split across chunks are not lost.
           const decoder = new TextDecoder();
           let buffer = '';
+          // BUG FIX (B3): on retry, reset stepContent/stepThinking to empty
+          // so tokens from the failed first attempt are NOT re-sent. Only
+          // the successful attempt's tokens should be forwarded.
           let stepContent = '';
           let stepThinking = '';
 
@@ -259,9 +264,45 @@ ${stepDef.prompt}`,
             buffer = events.pop() || '';
 
             for (const evt of events) {
-              const line = evt.split('\n').find(l => l.trim().startsWith('data:'));
-              if (!line) continue;
-              const data = line.trim().slice(5).trim();
+              // BUG FIX (B4): iterate ALL data: lines in the event, not just
+              // the first one. An SSE event can contain multiple data: lines
+              // (per the SSE spec), and the upstream may pack multiple deltas
+              // into one event. Using .find() only got the first, dropping
+              // the rest.
+              const lines = evt.split('\n');
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed.startsWith('data:')) continue;
+                const data = trimmed.slice(5).trim();
+                if (!data || data === '[DONE]') continue;
+                try {
+                  const parsed = JSON.parse(data);
+                  const delta = parsed?.choices?.[0]?.delta;
+                  if (!delta) continue;
+                  if (typeof delta.content === 'string' && delta.content) {
+                    stepContent += delta.content;
+                    // Forward token to frontend for live display.
+                    // Only forward on the FIRST successful attempt — if this
+                    // is a retry, we skip forwarding to avoid duplicates.
+                    if (onStepToken && attempt === 0) onStepToken(i, delta.content);
+                  }
+                  if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) {
+                    stepThinking += delta.reasoning_content;
+                  }
+                } catch { /* skip malformed */ }
+              }
+            }
+          }
+
+          // BUG FIX (B2): flush any trailing buffered event. The SSE stream
+          // may end with a partial event still in the buffer (no trailing
+          // \n\n). Parse it the same way as complete events.
+          if (buffer.trim()) {
+            const lines = buffer.split('\n');
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith('data:')) continue;
+              const data = trimmed.slice(5).trim();
               if (!data || data === '[DONE]') continue;
               try {
                 const parsed = JSON.parse(data);
@@ -269,15 +310,15 @@ ${stepDef.prompt}`,
                 if (!delta) continue;
                 if (typeof delta.content === 'string' && delta.content) {
                   stepContent += delta.content;
-                  // Forward token to frontend for live display
-                  if (onStepToken) onStepToken(i, delta.content);
+                  if (onStepToken && attempt === 0) onStepToken(i, delta.content);
                 }
                 if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) {
                   stepThinking += delta.reasoning_content;
                 }
-              } catch { /* skip malformed */ }
+              } catch { /* skip */ }
             }
           }
+
           result = stripEmoji(stepContent);
           thinking = stripEmoji(stepThinking);
         } else {
@@ -290,7 +331,7 @@ ${stepDef.prompt}`,
           result = stripEmoji(completion?.choices?.[0]?.message?.content || '');
           thinking = stripEmoji(completion?.choices?.[0]?.message?.reasoning_content || '');
           // Forward the full result as one "token"
-          if (onStepToken) onStepToken(i, result);
+          if (onStepToken && attempt === 0) onStepToken(i, result);
         }
 
         success = true;

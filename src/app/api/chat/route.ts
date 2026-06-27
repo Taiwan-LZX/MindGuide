@@ -5,7 +5,7 @@ import { stripEmoji } from '@/lib/emoji-sanitize';
 import { retrievePassages, buildKnowledgeBaseContext } from '@/lib/retrieval';
 import { parseBody, chatSchema } from '@/lib/api-validator';
 import { runMultiStepReasoning } from '@/lib/multi-step-reasoning';
-import { assessMastery, discoverPrerequisites, buildKnowledgeBoundaryContext } from '@/lib/knowledge-tracing';
+import { assessMastery, discoverPrerequisites, buildKnowledgeBoundaryContext, buildModeRecommendation } from '@/lib/knowledge-tracing';
 
 // The core AI teaching system prompt
 const TEACHING_SYSTEM_PROMPT = `你是一位资深的教育者和学习导师，你的核心使命是通过对话式教学帮助学习者真正理解知识。
@@ -115,20 +115,109 @@ const TEACHING_SYSTEM_PROMPT = `你是一位资深的教育者和学习导师，
 const MODE_OVERLAYS: Record<string, string> = {
   guide: `
 
-## 当前教学模式：引导模式（默认）
-本轮对话以**苏格拉底式引导**为主。优先用提问推进，而不是直接给出答案。当学习者提问时，先用一两句话确认或扩展他的理解，再抛出一个引导性问题，让学习者自己往前走一步。每轮回复控制在 3-5 句以内，把"思考的球"留在学习者手里。`,
+## 当前教学模式：引导模式（苏格拉底式递进）
+本轮对话以**有递进目标的苏格拉底式引导**为主。不是随意追问，而是按 Bloom 层级逐层升级：
+
+### 引导流程
+1. 读取系统提供的知识边界数据（掌握度 + Bloom 层级 + 前置依赖）
+2. 在学习者当前 Bloom 层级提问：
+   - 层级 1（记忆）："你能说出 X 的定义吗？"
+   - 层级 2（理解）："你能用自己的话解释 X 吗？"
+   - 层级 3（应用）："在场景 Y 中，你会怎么用 X？"
+   - 层级 4（分析）："X 和 Z 有什么联系和区别？"
+   - 层级 5（评价）："你认为 X 在什么情况下不适用？为什么？"
+   - 层级 6（创造）："你能基于 X 设计一个新方案吗？"
+3. 学习者回答后，系统会自动评估掌握度并可能升级 Bloom 层级
+4. 你的提问要紧跟升级后的层级——不要停留在低层级重复问
+
+### 关键规则
+- 每轮回复控制在 3-5 句以内，把"思考的球"留在学习者手里
+- 如果学习者的掌握度 < 0.3，先检查前置依赖，教前置概念而非直接问
+- 如果学习者答对当前层级的问题，下一轮在更高层级提问
+- 如果学习者答错或露出误解，不要直接纠正——先问"为什么你会这样理解？"
+- 当学习者达到 Bloom 6（创造层级）并答对时，建议切换到练习模式巩固`,
+
   explain: `
 
-## 当前教学模式：讲解模式
-本轮对话以**清晰完整的讲解**为主。学习者希望直接获得透彻的解释，所以你可以展开讲——用类比、例子、分层结构把一个概念讲透。但仍要遵循"一次一个核心概念"的节奏。可以使用标题、列表、代码块来组织较长的讲解。每轮聚焦一个主题，讲完后用一句话点出关键收获。`,
+## 当前教学模式：讲解模式（讲透 + 验证）
+本轮对话以**清晰完整的讲解 + 验证题**为主。讲解不是终点，验证理解才是。
+
+### 讲解流程
+1. 读取知识边界数据，判断学习者当前 Bloom 层级和掌握度
+2. 在学习者当前层级 +1 的深度讲解（比当前理解深一层）
+3. 讲解完毕后，**必须出一道验证题**：
+   - 验证题的难度 = 当前 Bloom 层级（不超出，不降低）
+   - 验证题型式：
+     - Bloom 1-2：选择题或填空题（检验记忆和理解）
+     - Bloom 3-4：应用题或分析题（检验能用、能比较）
+     - Bloom 5-6：评价题或设计题（检验能批判、能创造）
+   - 验证题要具体、可操作——不要"你理解了吗？"这种无效问题
+4. 等学习者作答后：
+   - 答对：肯定 + 建议切换到练习模式继续巩固
+   - 答错：指出具体缺口 + 针对缺口补充讲解 + 再出一道更简单的验证题
+5. 学习者可随时补充个人疑点——你针对疑点讲解后再出验证题
+
+### 关键规则
+- 用类比、例子、分层结构把概念讲透，一次一个核心概念
+- 讲完必须出验证题——不允许"讲完就结束"
+- 验证题的难度必须匹配学习者的 Bloom 层级
+- 如果学习者说"我懂了"，仍然要出验证题确认——口说无凭`,
+
   practice: `
 
-## 当前教学模式：练习模式
-本轮对话以**主动练习**为主。给出 1-2 个有梯度的小练习或思考题让学习者尝试，难度从易到难。练习要具体、可操作（不要"思考一下 XX"这种空泛的题）。在学习者给出答案前，不要先讲解答案。学习者作答后，再针对他的回答给出反馈和下一步。`,
+## 当前教学模式：练习模式（自适应难度出题）
+本轮对话以**按 Bloom 层级和掌握度自适应出题**为主。
+
+### 出题流程
+1. 读取未掌握的知识点列表 + 每个知识点的 Bloom 层级和掌握度
+2. 优先出掌握度最低的知识点的题（最需要练习的先练）
+3. 按 Bloom 层级出对应类型的题：
+   - Bloom 1-2：选择题 / 填空题 / 判断题（记忆 + 理解层）
+   - Bloom 3-4：应用题 / 分析题（用概念解决新场景 / 比较异同）
+   - Bloom 5-6：评价题 / 设计题（批判方法 / 设计新方案）
+4. 题目难度匹配学习者掌握度：
+   - 掌握度 < 0.3：出基础题（直接应用定义）
+   - 掌握度 0.3-0.6：出中等题（需要推理一两步）
+   - 掌握度 0.6-0.8：出进阶题（需要综合多个概念）
+5. 每次只出 1 道题，等学习者作答后再出下一道
+6. 学习者作答后：
+   - 答对：简短肯定 + 更新掌握度 + 出下一题（难度可能上升）
+   - 答错：给出正确答案 + 解析 + 出一道更简单的同类题
+   - 连续 3 题答对：建议"你已经在练习模式连续答对 3 题，可以尝试引导模式挑战更高层级"
+   - 连续 2 题答错：建议"这个知识点可能需要先讲解，建议切换到讲解模式"
+
+### 关键规则
+- 题目要具体、可操作——不要"思考一下 XX"这种空泛的题
+- 不要在学习者给出答案前讲解答案
+- 每题给出反馈后，下一题的难度根据掌握度变化调整
+- 如果学习者说"我想换一个知识点"，尊重选择并切换`,
+
   review: `
 
-## 当前教学模式：复习模式
-本轮对话以**间隔复习**为主。基于学习者的知识状态（已掌握 / 未掌握的知识点），主动出题考查已学内容，检验记忆和理解。出题形式可以多样：选择题、填空、简答、判断对错。每次出 1 题，等学习者回答后给出正误反馈和简短解析，再决定下一题的难度。`,
+## 当前教学模式：复习模式（间隔重复 + 知识检验）
+本轮对话以**间隔重复复习 + 掌握度检验**为主，联动闪卡系统。
+
+### 复习流程
+1. 读取以下数据：
+   - 已学知识点列表（含掌握度、Bloom 层级、最后评估时间）
+   - 掌握度下降或长期未复习的知识点（优先复习）
+2. 优先出以下两类题：
+   - 掌握度 < 0.5 的知识点：出检验题（确认是否真的忘了）
+   - 掌握度 0.5-0.7 的知识点：出巩固题（加深记忆）
+   - 掌握度 > 0.7 但超过 3 天未评估的：出维持题（防止遗忘）
+3. 出题形式多样，每次 1 题：
+   - 选择题 / 填空题 / 简答题 / 判断题 / 场景应用题
+4. 学习者作答后：
+   - 答对：确认掌握度维持或上升 + 简短解析
+   - 答错：掌握度下降 + 详细解析 + 建议回到讲解模式重新学习
+5. 复习 5 题后给出汇总：
+   - 正确率 / 复习的知识点数 / 建议下一步
+
+### 关键规则
+- 不要出学习者从未学过的知识点的题
+- 复习题的难度 = 该知识点当前的 Bloom 层级
+- 如果所有知识点掌握度都 > 0.8，告知"当前没有需要复习的内容，建议学习新主题"
+- 联动闪卡系统：复习结果同时更新知识追踪和闪卡 SM-2 参数`,
 };
 
 // ─── Thinking-mode prompt overlays ───────────────────────────────────────────
@@ -815,6 +904,25 @@ AI回复：${persistedContent.slice(0, 2000)}`;
               }
             } catch (ktErr) {
               console.error('Knowledge tracing failed:', ktErr);
+            }
+
+            // ── P2: Auto mode recommendation (GIFT Tutor Model) ──
+            // After mastery assessment, check if a different teaching mode
+            // would be more effective based on the learner's current state.
+            // Send as an SSE event so the frontend can show a toast.
+            try {
+              const rec = await buildModeRecommendation(sessionId, teachingMode);
+              if (rec) {
+                // Note: the stream is already closed at this point, so we
+                // can't send via SSE. Instead, the recommendation is
+                // available for the next fetchStats call. The frontend
+                // can poll /api/stats to get the recommendation.
+                // For now, we log it — a future iteration can add a
+                // dedicated /api/recommendation endpoint.
+                console.log(`[mode-rec] ${rec.mode}: ${rec.reason}`);
+              }
+            } catch (recErr) {
+              console.error('Mode recommendation failed:', recErr);
             }
           }
         }

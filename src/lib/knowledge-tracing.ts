@@ -342,8 +342,65 @@ export async function buildKnowledgeBoundaryContext(
   context += '- 对"正在学习"的概念，在当前 Bloom 层级提问，达标后升级\n';
   context += '- 对"尚未触及"的概念，如果是对话中出现的依赖，先教前置知识再教本体\n';
   context += '- 每轮回复后，系统会自动更新掌握度，你不需要手动标注\n';
+  context += '- 如果学习者掌握度 < 0.3，优先用讲解模式讲透基础\n';
+  context += '- 如果学习者掌握度 0.3-0.6，用引导模式通过提问深化理解\n';
+  context += '- 如果学习者掌握度 0.6-0.8，建议用练习模式巩固\n';
+  context += '- 如果学习者掌握度 > 0.8，建议用复习模式间隔重复维持\n';
 
   return context;
+}
+
+/**
+ * Recommend a teaching mode based on the learner's average mastery score.
+ * Based on GIFT framework's Tutor Model — the system selects the optimal
+ * instructional strategy based on learner state, rather than relying on
+ * the user to manually choose.
+ *
+ * Returns null if no recommendation (e.g., no data yet, or current mode
+ * is already optimal).
+ */
+export async function buildModeRecommendation(
+  sessionId: string,
+  currentMode: string,
+): Promise<{ mode: 'guide' | 'explain' | 'practice' | 'review'; reason: string } | null> {
+  const nodes = await db.knowledgeNode.findMany({
+    where: { sessionId },
+    select: { masteryScore: true, bloomLevel: true, mastered: true, updatedAt: true },
+  });
+
+  if (nodes.length === 0) return null;
+
+  const avgMastery = nodes.reduce((s, n) => s + (n.masteryScore || 0), 0) / nodes.length;
+
+  // GIFT-style strategy selection
+  let recommendedMode: 'guide' | 'explain' | 'practice' | 'review';
+  let reason: string;
+
+  if (avgMastery < 0.3) {
+    recommendedMode = 'explain';
+    reason = `平均掌握度 ${Math.round(avgMastery * 100)}%，建议先用讲解模式建立基础理解`;
+  } else if (avgMastery < 0.6) {
+    recommendedMode = 'guide';
+    reason = `平均掌握度 ${Math.round(avgMastery * 100)}%，建议用引导模式通过提问深化理解`;
+  } else if (avgMastery < 0.8) {
+    recommendedMode = 'practice';
+    reason = `平均掌握度 ${Math.round(avgMastery * 100)}%，建议用练习模式巩固已学知识`;
+  } else {
+    // Check if any nodes are stale (> 3 days since last assessment)
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    const staleCount = nodes.filter(n => n.updatedAt < threeDaysAgo).length;
+    if (staleCount > 0) {
+      recommendedMode = 'review';
+      reason = `平均掌握度 ${Math.round(avgMastery * 100)}%，有 ${staleCount} 个知识点超过 3 天未复习，建议进入复习模式`;
+    } else {
+      return null; // Everything is fresh and mastered — no recommendation needed
+    }
+  }
+
+  // Don't recommend if already in the recommended mode
+  if (recommendedMode === currentMode) return null;
+
+  return { mode: recommendedMode, reason };
 }
 
 export { BLOOM_LEVELS };

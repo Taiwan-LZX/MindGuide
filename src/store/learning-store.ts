@@ -723,8 +723,9 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       const decoder = new TextDecoder();
       let fullContent = '';
       let fullThinking = '';
+      let streamDone = false;
 
-      while (true) {
+      while (!streamDone) {
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -734,7 +735,13 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
-            if (data === '[DONE]') continue;
+            // FIX: break immediately on [DONE] instead of `continue`.
+            // Previously the loop kept calling reader.read() waiting for
+            // the upstream to close the stream, which could take 10+ seconds
+            // after the last token. During this wait the streaming bubble
+            // showed frozen content — the user perceived this as a "stuck"
+            // state followed by a sudden jump when the bubble finally exited.
+            if (data === '[DONE]') { streamDone = true; break; }
             try {
               const parsed = JSON.parse(data);
               // Phase signal — the server sends this once when reasoning

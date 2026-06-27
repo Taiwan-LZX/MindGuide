@@ -319,7 +319,7 @@ function buildMessageContext(
 // phase, not just the pre-first-token gap.
 function parseUpstreamSse(
   chunkStr: string,
-  bufferRef: { buf: string }
+  bufferRef: { buf: string; done?: boolean }
 ): Array<{ kind: 'thinking' | 'content'; text: string }> {
   bufferRef.buf += chunkStr;
   const pieces: Array<{ kind: 'thinking' | 'content'; text: string }> = [];
@@ -334,7 +334,10 @@ function parseUpstreamSse(
       const trimmed = line.trim();
       if (!trimmed.startsWith('data:')) continue;
       const data = trimmed.slice(5).trim();
-      if (!data || data === '[DONE]') continue;
+      // FIX: detect upstream [DONE] and set flag so the main loop can
+      // break immediately instead of waiting for the stream to close.
+      if (data === '[DONE]') { bufferRef.done = true; continue; }
+      if (!data) continue;
       try {
         const parsed = JSON.parse(data);
         const delta = parsed?.choices?.[0]?.delta;
@@ -438,7 +441,7 @@ export async function POST(req: NextRequest) {
     }
 
     const encoder = new TextEncoder();
-    const bufferRef = { buf: '' };
+    const bufferRef = { buf: '', done: false };
     let fullContent = '';
     let fullThinking = '';
     // Phase tracking — the model emits reasoning_content BEFORE content, so we
@@ -531,11 +534,15 @@ export async function POST(req: NextRequest) {
         // two chunks, first chunk's trailing bytes were dropped).
         const decoder = new TextDecoder();
         try {
-          while (true) {
+          let upstreamDone = false;
+          while (!upstreamDone) {
             const { done, value } = await reader.read();
             if (done) break;
             const chunkStr = decoder.decode(value, { stream: true });
             const pieces = parseUpstreamSse(chunkStr, bufferRef);
+            // FIX: check if parseUpstreamSse detected upstream [DONE].
+            // parseUpstreamSse sets bufferRef.done = true when it sees [DONE].
+            if (bufferRef.done) { upstreamDone = true; break; }
             for (const piece of pieces) {
               if (piece.kind === 'thinking') {
                 fullThinking += piece.text;

@@ -994,21 +994,30 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
         m.role === 'assistant' ? { ...m, content: stripEmoji(m.content || '') } : m
       );
       // SMART MERGE: if the current messages array has temp-ID entries (from
-      // the streaming-to-settled transition), replace them with the DB
-      // versions by matching on content + role. This avoids a visual flash
-      // caused by key changes when the full array is replaced.
+      // the streaming-to-settled transition), update them in-place WITHOUT
+      // changing the ID. Changing the ID would change React's key, causing
+      // unmount + remount + re-trigger of the msgVariants enter animation —
+      // the user perceives this as a "jump" or "flash" after content settles.
+      // Instead we keep the temp ID as the React key and only update the
+      // thinking field (which may have been enriched server-side).
       const current = get().messages;
       const hasTempIds = current.some(m => m.id.startsWith('temp-'));
       if (hasTempIds) {
-        // Match by role + content prefix (first 50 chars) to find temp entries
-        // and swap in the DB version with the real ID.
         const merged = cleaned.map((dbMsg: LearningMessage) => {
           const tempMatch = current.find(m =>
             m.id.startsWith('temp-') &&
             m.role === dbMsg.role &&
             m.content.slice(0, 50) === dbMsg.content.slice(0, 50)
           );
-          return tempMatch ? { ...dbMsg, id: dbMsg.id } : dbMsg;
+          // Keep the temp ID as React key — only merge in server-side fields
+          // (thinking may be richer than what we had locally).
+          if (tempMatch) {
+            return {
+              ...tempMatch,
+              thinking: dbMsg.thinking ?? tempMatch.thinking,
+            };
+          }
+          return dbMsg;
         });
         set({ messages: merged });
       } else {

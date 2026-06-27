@@ -89,13 +89,14 @@ const streamingBubbleVariants = {
     y: 0,
     transition: { type: 'spring' as const, stiffness: 320, damping: 28, mass: 0.7 },
   },
-  // FIX: exit in-place (no y movement) so the streaming bubble doesn't
-  // slide down and visually clash with the new assistant message entering
-  // from the messages array. A pure opacity fade-out reads as "settling
-  // into place" rather than "falling away".
+  // FIX: exit instantly (duration 0) so the streaming bubble vanishes the
+  // moment the settled message appears. Any exit duration > 0 leaves the
+  // bubble visible while the new message enters below it, causing a visual
+  // overlap that reads as a "jump" or "flash". With duration 0, the bubble
+  // is removed in the same frame the message settles — seamless.
   exit: {
     opacity: 0,
-    transition: { duration: 0.18, ease: [0.16, 1, 0.3, 1] as const },
+    transition: { duration: 0 },
   },
 };
 

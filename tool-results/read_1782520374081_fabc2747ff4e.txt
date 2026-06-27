@@ -1,0 +1,645 @@
+     1→import { NextRequest } from 'next/server';
+     2→import ZAI from 'z-ai-web-dev-sdk';
+     3→import { db } from '@/lib/db';
+     4→import { stripEmoji } from '@/lib/emoji-sanitize';
+     5→import { retrievePassages, buildKnowledgeBaseContext } from '@/lib/retrieval';
+     6→import { parseBody, chatSchema } from '@/lib/api-validator';
+     7→import { runMultiStepReasoning } from '@/lib/multi-step-reasoning';
+     8→
+     9→// The core AI teaching system prompt
+    10→const TEACHING_SYSTEM_PROMPT = `你是一位资深的教育者和学习导师，你的核心使命是通过对话式教学帮助学习者真正理解知识。
+    11→
+    12→## 你的教学哲学
+    13→
+    14→**核心前提：先理解学生在想什么，再引导学习。**
+    15→
+    16→你不只是一个问答机器。你是学习者的伙伴，你需要：
+    17→1. 理解学习者的当前状态、兴趣点和困惑
+    18→2. 通过追问来发掘学习者真正不懂的地方
+    19→3. 用科普式教学方法，从学习者已有的认知出发构建新知识
+    20→
+    21→## 三段式教学模型
+    22→
+    23→你的教学遵循三个阶段：
+    24→
+    25→### 阶段一：理解与记忆
+    26→- 了解学习者对这个话题知道什么
+    27→- 通过初步对话理解学习者的兴趣点和初步想法
+    28→- 建立学习者的知识基线
+    29→
+    30→### 阶段二：兴趣驱动探索
+    31→- 根据学习者的兴趣点展开深入讲解
+    32→- 使用类比、例子、故事来让抽象概念变得具体
+    33→- 每次只讲一个核心概念，讲透彻再继续
+    34→
+    35→### 阶段三：知识整合与巩固
+    36→- 帮助学习者将新知识与已有知识连接
+    37→- 通过提问检验理解程度
+    38→- 总结关键知识点，但不给空洞的总结——而是帮助学习者自己构建理解
+    39→
+    40→## 对话规则
+    41→
+    42→1. **主动追问**：当学习者提到一个概念时，不要急着给答案。先问"你对XX是怎么理解的？"或"你之前有接触过这个概念吗？"
+    43→2. **场景化教学**：用具体场景和例子来解释，而不是抽象定义
+    44→3. **适度引导**：如果学习者明显走偏，温和地拉回来，但不要打断学习者的思路
+    45→4. **识别困惑**：当学习者的表述暴露出误解时，不要直接纠正。先问"为什么你会这样理解？"然后引导思考
+    46→5. **鼓励思考**：经常使用"你觉得...？""你认为...？""如果我们换个角度想..."来激发思考
+    47→6. **及时反馈**：当学习者理解正确时给予肯定，但要用具体的反馈而非空洞的表扬
+    48→7. **控制节奏**：一次只讲一个核心概念，信息密度要适中
+    49→
+    50→## 输出格式
+    51→
+    52→你的回复应该是自然的对话式语言，可以适当使用：
+    53→- 简短的段落
+    54→- 列表来组织复杂信息
+    55→- 代码块来展示代码示例（如果涉及编程）
+    56→- 用**加粗**来标记关键术语
+    57→
+    58→## 绝对不要做的事
+    59→
+    60→- 不要使用 emoji 或装饰性符号（如 ✨🎉🔥💡✓★●→ 等），保持克制的书面语风格。所有强调一律用**加粗**或自然语言完成，不允许任何图形符号。
+    61→- 不要给出长篇大论的总结
+    62→- 不要像百科全书一样罗列知识点
+    63→- 不要在没有理解学习者状态的情况下就开始"教学"
+    64→- 不要用"很简单""你只需要..."这种轻视学习者困难的措辞
+    65→- 不要一次性塞入太多信息`;
+    66→
+    67→// ─── Teaching-mode prompt overlays ───────────────────────────────────────────
+    68→//
+    69→// The composer exposes a 4-way mode selector (the teaching analogue of ZCode's
+    70→// "effort / thinking-level" selector). Each mode prepends a short directive to
+    71→// the base system prompt so the same model behaves like four different teachers:
+    72→//
+    73→//   guide    — Socratic: ask before tell (default)
+    74→//   explain  — Direct: explain concepts clearly and completely
+    75→//   practice — Give exercises / problems, let the learner attempt first
+    76→//   review   — Spaced-repetition: quiz on previously-learned knowledge nodes
+    77→//
+    78→// These are additive overlays — they refine the base philosophy, never replace
+    79→// it. The no-emoji rule and conversational tone always apply.
+    80→const MODE_OVERLAYS: Record<string, string> = {
+    81→  guide: `
+    82→
+    83→## 当前教学模式：引导模式（默认）
+    84→本轮对话以**苏格拉底式引导**为主。优先用提问推进，而不是直接给出答案。当学习者提问时，先用一两句话确认或扩展他的理解，再抛出一个引导性问题，让学习者自己往前走一步。每轮回复控制在 3-5 句以内，把"思考的球"留在学习者手里。`,
+    85→  explain: `
+    86→
+    87→## 当前教学模式：讲解模式
+    88→本轮对话以**清晰完整的讲解**为主。学习者希望直接获得透彻的解释，所以你可以展开讲——用类比、例子、分层结构把一个概念讲透。但仍要遵循"一次一个核心概念"的节奏。可以使用标题、列表、代码块来组织较长的讲解。每轮聚焦一个主题，讲完后用一句话点出关键收获。`,
+    89→  practice: `
+    90→
+    91→## 当前教学模式：练习模式
+    92→本轮对话以**主动练习**为主。给出 1-2 个有梯度的小练习或思考题让学习者尝试，难度从易到难。练习要具体、可操作（不要"思考一下 XX"这种空泛的题）。在学习者给出答案前，不要先讲解答案。学习者作答后，再针对他的回答给出反馈和下一步。`,
+    93→  review: `
+    94→
+    95→## 当前教学模式：复习模式
+    96→本轮对话以**间隔复习**为主。基于学习者的知识状态（已掌握 / 未掌握的知识点），主动出题考查已学内容，检验记忆和理解。出题形式可以多样：选择题、填空、简答、判断对错。每次出 1 题，等学习者回答后给出正误反馈和简短解析，再决定下一题的难度。`,
+    97→};
+    98→
+    99→// ─── Thinking-mode prompt overlays ───────────────────────────────────────────
+   100→//
+   101→// The composer exposes a 4-way thinking selector (the teaching analogue of
+   102→// "reasoning effort / thinking budget"). Each mode maps to two things:
+   103→//
+   104→//   1. A `thinking` config flag sent to the ZAI Chat Completions API:
+   105→//        off        → { type: 'disabled' }  (no reasoning, fast direct answer)
+   106→//        standard   → { type: 'enabled'  }  (model's built-in deep reasoning)
+   107→//        deep       → { type: 'enabled'  }  + strong-reasoning prompt overlay
+   108→//        structured → { type: 'enabled'  }  + advanced reasoning structure overlay
+   109→//
+   110→//   2. An additive reasoning-style prompt overlay (THINK_OVERLAYS) that nudges
+   111→//      the model toward a particular reasoning shape — multi-angle analysis,
+   112→//      chain + self-critique + multi-path, etc. These overlays refine HOW the
+   113→//      model reasons internally; they never change the teaching mode.
+   114→//
+   115→// `off` still uses the model normally — modern models are capable of solid
+   116→// direct answers; the user opts INTO deeper reasoning explicitly.
+   117→const THINK_OVERLAYS: Record<string, string> = {
+   118→  off: '',
+   119→
+   120→  standard: `
+   121→
+   122→## 推理强度：标准思考
+   123→本轮对话允许模型在内部进行常规深度推理后再回答。无需展示推理过程，直接给出经过深思的答案。`,
+   124→
+   125→  deep: `
+   126→
+   127→## 推理强度：深度推理
+   128→本轮对话要求模型在内部进行**高强度多角度推理**后再回答。请在内部思考中覆盖：
+   129→- 至少 2 个不同的解题路径或解释角度
+   130→- 主动构造反例与边界情况（极端值、空集、退化情形）
+   131→- 检查结论是否在每种情况下都成立，若不成立明确指出适用边界
+   132→- 对关键步骤做反向验证（把结论代回条件）
+   133→回答时不必展示上述推理过程，但答案必须体现这种深度思考的结果——更严谨、更全面、更有边界感。`,
+   134→
+   135→  structured: `
+   136→
+   137→## 推理强度：结构化推理（先进推理结构）
+   138→本轮对话要求模型在内部使用**结构化推理框架**，依次完成：
+   139→1. **链式推理**：把问题拆成有序的子问题，逐个推导，每一步显式依赖上一步的结论
+   140→2. **自我批评**：在得到初步结论后，主动质疑至少一个薄弱环节（"这一步真的总是成立吗？"），并尝试修复
+   141→3. **多路径探索**：至少考虑 2 条不同的推理路径，比较它们的结论是否一致；若不一致，分析分歧来源并选择更可靠的一条
+   142→4. **收敛输出**：把经过上述三轮检验的结论作为最终答案
+   143→回答时不必展示完整推理链，但答案必须经过这套结构化检验——优先给出经过自我批评后存活的结论，并对存疑处明确标注不确定性。`,
+   144→};
+   145→
+   146→// Map a UI thinking-mode key to the ZAI API `thinking` config object.
+   147→// `standard` / `deep` / `structured` all enable the model's built-in reasoning;
+   148→// the difference is purely the prompt overlay above. `off` disables reasoning
+   149→// for the fastest direct answer.
+   150→function thinkingConfig(mode: string): { type: 'enabled' | 'disabled' } {
+   151→  return mode === 'off' ? { type: 'disabled' } : { type: 'enabled' };
+   152→}
+   153→
+   154→function buildMessageContext(
+   155→  userMessages: Array<{ role: string; content: string; type?: string }>,
+   156→  knowledgeNodes: Array<{ title: string; content: string; category?: string; mastered: boolean }>,
+   157→  kbContext: string,
+   158→  teachingMode: string = 'guide',
+   159→  thinkingMode: string = 'standard'
+   160→) {
+   161→  const contextParts: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
+   162→
+   163→  const thinkOverlay = THINK_OVERLAYS[thinkingMode] || '';
+   164→  contextParts.push({
+   165→    role: 'system',
+   166→    content: TEACHING_SYSTEM_PROMPT + (MODE_OVERLAYS[teachingMode] || MODE_OVERLAYS.guide) + thinkOverlay,
+   167→  });
+   168→
+   169→  if (knowledgeNodes.length > 0) {
+   170→    const masteredNodes = knowledgeNodes.filter((n) => n.mastered);
+   171→    const unmasteredNodes = knowledgeNodes.filter((n) => !n.mastered);
+   172→
+   173→    let knowledgeContext = '## 学习者的知识状态\n\n';
+   174→
+   175→    if (masteredNodes.length > 0) {
+   176→      knowledgeContext += '已掌握的知识点：\n';
+   177→      masteredNodes.forEach((n) => {
+   178→        knowledgeContext += `- ${n.title}: ${n.content.slice(0, 100)}...\n`;
+   179→      });
+   180→    }
+   181→
+   182→    if (unmasteredNodes.length > 0) {
+   183→      knowledgeContext += '\n正在学习/未掌握的知识点：\n';
+   184→      unmasteredNodes.forEach((n) => {
+   185→        knowledgeContext += `- ${n.title} (${n.category || '概念'}): ${n.content.slice(0, 100)}...\n`;
+   186→      });
+   187→    }
+   188→
+   189→    contextParts.push({
+   190→      role: 'system',
+   191→      content: knowledgeContext,
+   192→    });
+   193→  }
+   194→
+   195→  // ─── Knowledge base: RAG-retrieved passages ──────────────────────────────
+   196→  //
+   197→  // Instead of brute-force injecting the first 20k chars of all materials,
+   198→  // we retrieve the top-K passages most relevant to the learner's latest
+   199→  // message. This gives the model focused, cited context (Lost in the Middle
+   200→  // mitigation — Liu et al. 2023).
+   201→  if (kbContext) {
+   202→    contextParts.push({
+   203→      role: 'system',
+   204→      content: kbContext,
+   205→    });
+   206→  }
+   207→
+   208→  // ─── Token-budget-aware history compression ──────────────────────────────
+   209→  //
+   210→  // Older versions just took the last 20 messages verbatim. That overflows
+   211→  // the context window on long conversations (each turn can be 1-4k tokens),
+   212→  // causing the API to truncate silently or reject the request. We now:
+   213→  //
+   214→  //   1. Estimate tokens per message (~chars/4 for CJK + ASCII mix).
+   215→  //   2. Walk from the MOST RECENT message backwards, accumulating until we
+   216→  //      hit a soft budget (RESERVED_TOKENS for system+KB+reply headroom).
+   217→  //   3. If even the recent messages overflow, we keep the most recent N
+   218→  //      fully and FOLD older messages into a one-line summary each
+   219→  //      ("用户问了 X，助教回答了 Y 的要点") so the thread stays coherent
+   220→  //      without blowing the budget.
+   221→  //   4. The very first user turn is ALWAYS kept in full (it sets the topic).
+   222→  //
+   223→  // This is a pragmatic middle ground between "drop everything old" (loses
+   224→  // topic context) and "keep everything" (overflows). RAG already handles
+   225→  // long-term knowledge retrieval; this compression only governs the
+   226→  // conversational thread.
+   227→
+   228→  const MODEL_CONTEXT_WINDOW = 200_000;
+   229→  const RESERVED_FOR_SYSTEM_KB_REPLY = 24_000; // headroom for system + KB + the new reply
+   230→  const historyBudget = MODEL_CONTEXT_WINDOW - RESERVED_FOR_SYSTEM_KB_REPLY;
+   231→
+   232→  // Rough token estimator: CJK chars ≈ 1 token each, ASCII ≈ 0.25 tokens/char.
+   233→  const estTokens = (s: string) => {
+   234→    let cjk = 0, other = 0;
+   235→    for (const ch of s) {
+   236→      const code = ch.codePointAt(0) || 0;
+   237→      if ((code >= 0x3000 && code <= 0x9fff) || (code >= 0xff00 && code <= 0xffef)) cjk++;
+   238→      else other++;
+   239→    }
+   240→    return cjk + Math.ceil(other / 4);
+   241→  };
+   242→
+   243→  // Pre-compute per-message token estimates.
+   244→  const tagged = userMessages.map((m, i) => ({ msg: m, idx: i, tokens: estTokens(m.content) }));
+   245→
+   246→  // Always keep the first user turn (topic anchor) — it's almost always short.
+   247→  const firstUserTurn = tagged.find(t => t.msg.role === 'user');
+   248→  const firstKeepIds = new Set<number>(firstUserTurn ? [firstUserTurn.idx] : []);
+   249→
+   250→  // Walk backwards from the latest, accumulating full messages until budget.
+   251→  const keptFull: typeof tagged = [];
+   252→  let usedTokens = firstUserTurn ? firstUserTurn.tokens : 0;
+   253→  for (let i = tagged.length - 1; i >= 0; i--) {
+   254→    const t = tagged[i];
+   255→    if (firstKeepIds.has(i)) continue; // already counted
+   256→    if (usedTokens + t.tokens > historyBudget) break;
+   257→    keptFull.unshift(t);
+   258→    usedTokens += t.tokens;
+   259→  }
+   260→  // Ensure first turn is in the kept set (at the front).
+   261→  if (firstUserTurn) keptFull.unshift(firstUserTurn);
+   262→
+   263→  // Anything older than keptFull that isn't the first turn gets folded.
+   264→  const keptIdx = new Set(keptFull.map(t => t.idx));
+   265→  const folded = tagged.filter(t => !keptIdx.has(t.idx));
+   266→
+   267→  // Build a single system summary of folded turns (if any).
+   268→  if (folded.length > 0) {
+   269→    const summaryLines = folded.map(t => {
+   270→      const role = t.msg.role === 'assistant' ? '助教' : '学习者';
+   271→      const snippet = t.msg.content.replace(/\s+/g, ' ').slice(0, 60);
+   272→      return `- ${role}：${snippet}`;
+   273→    });
+   274→    contextParts.push({
+   275→      role: 'system',
+   276→      content: `## 更早的对话摘要（已折叠以节省上下文）\n${summaryLines.join('\n')}`,
+   277→    });
+   278→  }
+   279→
+   280→  // Normalize roles, then MERGE consecutive same-role messages into one.
+   281→  // The ZAI Chat Completions API rejects message arrays where two adjacent
+   282→  // turns share the same role (error code 1214 "messages 参数非法").
+   283→  // This happens naturally when the learner sends two messages in a row, or
+   284→  // when an assistant turn was saved in two pieces — so we coalesce them
+   285→  // with a blank-line separator before sending.
+   286→  for (const t of keptFull) {
+   287→    const role = (t.msg.role === 'assistant' ? 'assistant' : t.msg.role === 'system' ? 'system' : 'user') as
+   288→      | 'system'
+   289→      | 'user'
+   290→      | 'assistant';
+   291→    const last = contextParts[contextParts.length - 1];
+   292→    if (last && last.role === role) {
+   293→      last.content = `${last.content}\n\n${t.msg.content}`;
+   294→    } else {
+   295→      contextParts.push({ role, content: t.msg.content });
+   296→    }
+   297→  }
+   298→
+   299→  // Guarantee the conversation ends with a user turn — the API requires the
+   300→  // final message to be from the user when requesting a completion.
+   301→  while (contextParts.length > 1 && contextParts[contextParts.length - 1].role !== 'user') {
+   302→    // Drop trailing assistant/system turns that have no user follow-up
+   303→    // (rare, but avoids "messages must end with user" errors).
+   304→    if (contextParts[contextParts.length - 1].role === 'system') break;
+   305→    contextParts.pop();
+   306→  }
+   307→
+   308→  return contextParts;
+   309→}
+   310→
+   311→// Parse an upstream SSE byte chunk and extract delta content pieces.
+   312→// Buffers incomplete lines and returns them via the carried-over buffer string.
+   313→//
+   314→// Returns an array of { kind: 'thinking' | 'content', text } tokens — the GLM
+   315→// chat-completions stream emits `delta.reasoning_content` during the model's
+   316→// internal reasoning phase (only when thinking is enabled) and
+   317→// `delta.content` during the answer phase. Surfacing both lets the client
+   318→// render a proper "思考中" animation that persists for the WHOLE reasoning
+   319→// phase, not just the pre-first-token gap.
+   320→function parseUpstreamSse(
+   321→  chunkStr: string,
+   322→  bufferRef: { buf: string }
+   323→): Array<{ kind: 'thinking' | 'content'; text: string }> {
+   324→  bufferRef.buf += chunkStr;
+   325→  const pieces: Array<{ kind: 'thinking' | 'content'; text: string }> = [];
+   326→  // SSE events are separated by a blank line (\n\n)
+   327→  const events = bufferRef.buf.split('\n\n');
+   328→  // The last element is the incomplete tail (no trailing \n\n yet)
+   329→  bufferRef.buf = events.pop() || '';
+   330→
+   331→  for (const evt of events) {
+   332→    const lines = evt.split('\n');
+   333→    for (const line of lines) {
+   334→      const trimmed = line.trim();
+   335→      if (!trimmed.startsWith('data:')) continue;
+   336→      const data = trimmed.slice(5).trim();
+   337→      if (!data || data === '[DONE]') continue;
+   338→      try {
+   339→        const parsed = JSON.parse(data);
+   340→        const delta = parsed?.choices?.[0]?.delta;
+   341→        if (!delta || typeof delta !== 'object') continue;
+   342→        // Reasoning content (the model's internal chain-of-thought). Present
+   343→        // only when thinking is enabled. We forward it as a separate token
+   344→        // kind so the client can drive a thinking-phase animation.
+   345→        const reasoning = delta.reasoning_content;
+   346→        if (typeof reasoning === 'string' && reasoning.length > 0) {
+   347→          pieces.push({ kind: 'thinking', text: reasoning });
+   348→        }
+   349→        // Answer content (the visible reply).
+   350→        const content = delta.content;
+   351→        if (typeof content === 'string' && content.length > 0) {
+   352→          pieces.push({ kind: 'content', text: content });
+   353→        }
+   354→      } catch {
+   355→        // skip malformed JSON
+   356→      }
+   357→    }
+   358→  }
+   359→  return pieces;
+   360→}
+   361→
+   362→export async function POST(req: NextRequest) {
+   363→  try {
+   364→    const parsed = await parseBody(req, chatSchema);
+   365→    if (!parsed.ok) return parsed.response;
+   366→    const { sessionId, message, messages: historyMessages, knowledgeNodes, teachingMode, thinkingMode, selectedModel } = parsed.data;
+   367→
+   368→    // Save user message to database
+   369→    await db.learningMessage.create({
+   370→      data: {
+   371→        sessionId,
+   372→        role: 'user',
+   373→        content: message,
+   374→        type: 'dialogue',
+   375→      },
+   376→    });
+   377→
+   378→    // Update session timestamp
+   379→    await db.learningSession.update({
+   380→      where: { id: sessionId },
+   381→      data: { updatedAt: new Date() },
+   382→    });
+   383→
+   384→    // Prepare messages for AI
+   385→    const zai = await ZAI.create();
+   386→
+   387→    // ─── RAG retrieval: find passages most relevant to the learner's message ─
+   388→    //
+   389→    // We retrieve from the session's knowledge base (all uploaded materials
+   390→    // that have been parsed + chunked + embedded). This replaces the old
+   391→    // brute-force "inject first 20k chars of every material" approach.
+   392→    //
+   393→    // The learner's latest message is the natural query — it's what they're
+   394→    // asking about right now. We pass it through retrievePassages() which
+   395→    // embeds it, scans all chunk embeddings, and returns the top-K with
+   396→    // parent-section text attached.
+   397→    const passages = await retrievePassages(sessionId, message, 6);
+   398→    const kbContext = buildKnowledgeBaseContext(passages, 18_000);
+   399→
+   400→    const messageHistory = buildMessageContext(historyMessages || [], knowledgeNodes || [], kbContext, teachingMode, thinkingMode);
+   401→
+   402→    // Real streaming: SDK returns the upstream ReadableStream when stream:true
+   403→    const upstream = (await zai.chat.completions.create({
+   404→      messages: messageHistory,
+   405→      model: selectedModel,
+   406→      thinking: thinkingConfig(thinkingMode),
+   407→      stream: true,
+   408→    } as any)) as ReadableStream<Uint8Array> | undefined;
+   409→
+   410→    // Fallback: if the SDK didn't return a stream (unexpected), use non-streaming
+   411→    if (!upstream || typeof upstream.getReader !== 'function') {
+   412→      const completion = await zai.chat.completions.create({
+   413→        messages: messageHistory,
+   414→        model: selectedModel,
+   415→        thinking: thinkingConfig(thinkingMode),
+   416→      });
+   417→      const aiContent: string = stripEmoji(completion?.choices?.[0]?.message?.content || '');
+   418→      if (!aiContent) {
+   419→        return new Response(JSON.stringify({ error: 'Empty AI response' }), {
+   420→          status: 500,
+   421→          headers: { 'Content-Type': 'application/json' },
+   422→        });
+   423→      }
+   424→      await db.learningMessage.create({
+   425→        data: { sessionId, role: 'assistant', content: aiContent, type: 'dialogue' },
+   426→      });
+   427→      const encoder = new TextEncoder();
+   428→      const fallback = new ReadableStream({
+   429→        start(controller) {
+   430→          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: aiContent })}\n\n`));
+   431→          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+   432→          controller.close();
+   433→        },
+   434→      });
+   435→      return new Response(fallback, {
+   436→        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+   437→      });
+   438→    }
+   439→
+   440→    const encoder = new TextEncoder();
+   441→    const bufferRef = { buf: '' };
+   442→    let fullContent = '';
+   443→    let fullThinking = '';
+   444→    // Phase tracking — the model emits reasoning_content BEFORE content, so we
+   445→    // can send an explicit `phase: 'thinking'` event the moment the first
+   446→    // reasoning token arrives, and `phase: 'answering'` when the first content
+   447→    // token arrives. This lets the client render a thinking animation that
+   448→    // lasts the entire reasoning phase, not just the pre-first-token gap.
+   449→    let phaseSent: 'thinking' | 'answering' | null = null;
+   450→
+   451→    // Build a streaming response that:
+   452→    //   1. (deep/structured only) runs multi-step reasoning, emitting { step }
+   453→    //      events for each intermediate step
+   454→    //   2. reads from upstream SDK stream for the final answer
+   455→    //   3. parses OpenAI-style SSE deltas (content + reasoning_content)
+   456→    //   4. re-emits in our own SSE format:
+   457→    //        - { step: { index, total, label, result } } for each reasoning step
+   458→    //        - { phase: 'thinking' } once when reasoning starts
+   459→    //        - { thinking: string, full: true } on each reasoning chunk
+   460→    //        - { phase: 'answering' } once when content starts
+   461→    //        - { content: string, full: true } on each content chunk
+   462→    //   5. accumulates full content + persists to DB when the stream ends
+   463→    const stream = new ReadableStream<Uint8Array>({
+   464→      async start(controller) {
+   465→        // ── Phase 2/3: Multi-step reasoning for deep/structured modes ──
+   466→        //
+   467→        // Before streaming the final answer, run intermediate reasoning
+   468→        // steps (analyze → reason → ... ) and emit each as SSE events.
+   469→        //
+   470→        // Phase 3: steps now stream their tokens live via { stepStart } +
+   471→        // { stepToken } events, and citations are sent via { citations }.
+   472→        let multiStepContext: string | null = null;
+   473→        if (thinkingMode === 'deep' || thinkingMode === 'structured') {
+   474→          try {
+   475→            const result = await runMultiStepReasoning(
+   476→              {
+   477→                mode: thinkingMode,
+   478→                sessionId,
+   479→                message,
+   480→                messageHistory: historyMessages || [],
+   481→                knowledgeNodes: knowledgeNodes || [],
+   482→                teachingMode,
+   483→                selectedModel,
+   484→              },
+   485→              // onStep — called when a step completes with its full result
+   486→              (step) => {
+   487→                controller.enqueue(
+   488→                  encoder.encode(`data: ${JSON.stringify({ step })}\n\n`)
+   489→                );
+   490→              },
+   491→              // onStepStart — called when a step begins (frontend shows indicator)
+   492→              (index, total, label) => {
+   493→                controller.enqueue(
+   494→                  encoder.encode(`data: ${JSON.stringify({ stepStart: { index, total, label } })}\n\n`)
+   495→                );
+   496→              },
+   497→              // onStepToken — called for each token as it streams in
+   498→              (index, token) => {
+   499→                controller.enqueue(
+   500→                  encoder.encode(`data: ${JSON.stringify({ stepToken: { index, token } })}\n\n`)
+   501→                );
+   502→              },
+   503→            );
+   504→            multiStepContext = result?.finalThinking ?? null;
+   505→
+   506→            // Phase 3: send citations so the frontend can render [1] [2] refs
+   507→            if (result?.citations && result.citations.length > 0) {
+   508→              controller.enqueue(
+   509→                encoder.encode(`data: ${JSON.stringify({ citations: result.citations })}\n\n`)
+   510→              );
+   511→            }
+   512→
+   513→            // Phase 3: send reasoning metrics
+   514→            if (result?.metrics) {
+   515→              controller.enqueue(
+   516→                encoder.encode(`data: ${JSON.stringify({ metrics: result.metrics })}\n\n`)
+   517→              );
+   518→            }
+   519→          } catch (err) {
+   520→            console.error('Multi-step reasoning failed, falling back to single-step:', err);
+   521→          }
+   522→        }
+   523→
+   524→        const reader = upstream.getReader();
+   525→        try {
+   526→          while (true) {
+   527→            const { done, value } = await reader.read();
+   528→            if (done) break;
+   529→            const chunkStr = new TextDecoder().decode(value, { stream: true });
+   530→            const pieces = parseUpstreamSse(chunkStr, bufferRef);
+   531→            for (const piece of pieces) {
+   532→              if (piece.kind === 'thinking') {
+   533→                fullThinking += piece.text;
+   534→                // Emit phase signal once, on the first reasoning token.
+   535→                if (phaseSent !== 'thinking') {
+   536→                  phaseSent = 'thinking';
+   537→                  controller.enqueue(
+   538→                    encoder.encode(`data: ${JSON.stringify({ phase: 'thinking' })}\n\n`)
+   539→                  );
+   540→                }
+   541→                // Forward the accumulated thinking text (sanitized) so the
+   542→                // client COULD display a collapsible "reasoning" panel later.
+   543→                controller.enqueue(
+   544→                  encoder.encode(
+   545→                    `data: ${JSON.stringify({ thinking: stripEmoji(fullThinking), full: true })}\n\n`
+   546→                  )
+   547→                );
+   548→              } else {
+   549→                fullContent += piece.text;
+   550→                if (phaseSent !== 'answering') {
+   551→                  phaseSent = 'answering';
+   552→                  controller.enqueue(
+   553→                    encoder.encode(`data: ${JSON.stringify({ phase: 'answering' })}\n\n`)
+   554→                  );
+   555→                }
+   556→                // Re-emit the *sanitized* accumulated content as a single delta.
+   557→                // We strip emoji server-side too so even raw SSE consumers see a
+   558→                // monochrome stream; the client also strips as a belt-and-braces.
+   559→                const sanitizedAccum = stripEmoji(fullContent);
+   560→                controller.enqueue(
+   561→                  encoder.encode(`data: ${JSON.stringify({ content: sanitizedAccum, full: true })}\n\n`)
+   562→                );
+   563→              }
+   564→            }
+   565→          }
+   566→          // Flush any trailing buffered event
+   567→          if (bufferRef.buf.trim()) {
+   568→            const tail = parseUpstreamSse('\n\n', bufferRef);
+   569→            for (const piece of tail) {
+   570→              if (piece.kind === 'thinking') {
+   571→                fullThinking += piece.text;
+   572→              } else {
+   573→                fullContent += piece.text;
+   574→              }
+   575→            }
+   576→            if (fullContent) {
+   577→              const sanitizedAccum = stripEmoji(fullContent);
+   578→              controller.enqueue(
+   579→                encoder.encode(`data: ${JSON.stringify({ content: sanitizedAccum, full: true })}\n\n`)
+   580→              );
+   581→            }
+   582→          }
+   583→          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+   584→        } catch (err) {
+   585→          console.error('Stream read error:', err);
+   586→          // Try to send an error event then close gracefully
+   587→          controller.enqueue(
+   588→            encoder.encode(
+   589→              `data: ${JSON.stringify({ error: 'stream_interrupted' })}\n\n`
+   590→            )
+   591→          );
+   592→        } finally {
+   593→          controller.close();
+   594→          // Persist the accumulated AI message (only if we got something).
+   595→          // Sanitize once more before persisting so the stored historical
+   596→          // content is guaranteed emoji-free.
+   597→          const persistedContent = stripEmoji(fullContent);
+   598→          if (persistedContent.trim().length > 0) {
+   599→            try {
+   600→              await db.learningMessage.create({
+   601→                data: {
+   602→                  sessionId,
+   603→                  role: 'assistant',
+   604→                  content: persistedContent,
+   605→                  type: 'dialogue',
+   606→                  // Persist the reasoning trace alongside the answer so future
+   607→                  // turns can reference it (and the UI can show a "查看推理"
+   608→                  // collapsible on historical messages). For deep/structured
+   609→                  // modes, prepend the multi-step reasoning context.
+   610→                  thinking: [
+   611→                    multiStepContext ? `## 多步推理上下文\n${multiStepContext}` : '',
+   612→                    fullThinking ? `## 模型推理\n${stripEmoji(fullThinking)}` : '',
+   613→                  ].filter(Boolean).join('\n\n').slice(0, 8000) || null,
+   614→                },
+   615→              });
+   616→            } catch (dbErr) {
+   617→              console.error('Failed to persist AI message:', dbErr);
+   618→            }
+   619→          }
+   620→        }
+   621→      },
+   622→      cancel() {
+   623→        // Client navigated away; nothing more to do. The DB write in finally
+   624→        // still fires for whatever content was accumulated.
+   625→      },
+   626→    });
+   627→
+   628→    return new Response(stream, {
+   629→      headers: {
+   630→        'Content-Type': 'text/event-stream',
+   631→        'Cache-Control': 'no-cache',
+   632→        Connection: 'keep-alive',
+   633→        // Disable proxy buffering so chunks flush to the client immediately
+   634→        'X-Accel-Buffering': 'no',
+   635→      },
+   636→    });
+   637→  } catch (error) {
+   638→    console.error('Chat API error:', error);
+   639→    return new Response(JSON.stringify({ error: 'Failed to generate response' }), {
+   640→      status: 500,
+   641→      headers: { 'Content-Type': 'application/json' },
+   642→    });
+   643→  }
+   644→}
+   645→

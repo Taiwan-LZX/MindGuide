@@ -1614,3 +1614,249 @@ Stage Summary:
   · src/app/api/chat/route.ts (新 SSE 事件 + citations/metrics 发送)
   · src/store/learning-store.ts (streamingCurrentStep/streamingCitations/streamingMetrics 状态 + 事件解析)
   · src/components/learning/main-content.tsx (live step 卡片 + citations 列表 + metrics 展示 + handleStop 清空)
+
+---
+
+## Task: audit-quality-12b — 量化分析模型输出质量
+
+**Agent**: sub-agent (general-purpose)
+**Date**: 2026-06-27
+**Scope**: 对 SQLite (db/custom.db) 中已持久化的 LearningMessage / LearningSession / KnowledgeNode 等做全面量化审计
+
+### 调研方法
+- 直接用 `bun -e` + Prisma client 查询 db/custom.db（DATABASE_URL=file:../db/custom.db）
+- 全表 dump 到 /tmp/mindguide_dump.json（含 sessions + messages + knowledgeNodes + references + cards + tasks + notes + courseModules + materials）
+- 用脚本计算量化指标 + 系统化扫描 bug
+
+### 全局统计
+- 总会话数: **2**
+- 总消息数: **21**（user 11, assistant 10, system 0；user/assistant = 1.10）
+- thinking 字段非空: **4 条**（占 assistant 消息 40.0%）
+- assistant 回复长度: mean=343, median=85, min=33, max=1310, std=440（双峰分布：guide 短回复 vs explain 长回复）
+- user 消息长度: mean=9.5, median=9, min=2, max=19（用户输入极短，测试性质）
+- thinking 长度分布: 4 条非空，mean=460, min=177, max=802（均未触发 8000 字符截断）
+- 知识节点: **0**（无法计算知识覆盖率）
+- 参考资料 / 上传材料 / RAG chunks: **0 / 0 / 0**（RAG 管线未被使用）
+- cards: 1, tasks: 1, notes: 2（极少）
+
+### 每会话量化指标
+| 会话 | 消息数 | 苏格拉底式指数 | 推理深度(thinking 均长) | assistant 回复 mean/min/max | 知识覆盖率 |
+|---|---|---|---|---|---|
+| 测试动画调研消息 (cmqvi5xhv003tqdqgmf5mu5yk) | 4 | 100% (2/2) | 0 | 78 / 70 / 85 | N/A (0 nodes) |
+| 第二个测试会话 (cmqvie6f00046qdqgdpw07om1) | 17 | 100% (8/8) | 460 | 410 / 33 / 1310 | N/A (0 nodes) |
+
+### 推理模式推断（teachingMode/thinkingMode 未持久化，由 thinking 字段格式反推）
+- Session 1 两条 assistant: thinking=null → off 模式
+- Session 2 八条 assistant: 4 条 off / 4 条 deep-or-structured（thinking 以 `## 多步推理上下文` 开头）
+- 一条 (cmqvjafal004eqdqgo92oq6rd) thinking=177 但**缺 `## 模型推理` 前缀**，与 chat/route.ts:610-613 持久化逻辑不符（疑似旧版代码写入或写入路径异常）
+
+### 苏格拉底式指数解读
+- 全部 assistant 消息 100% 含问号 → 整体符合 guide 模式系统提示词
+- 但 Session 2 Msg #8 (cmqvkqia8004qqdqglqcyw80a) 长度 848 字符，是 explain 模式的典型长回复（用户原话 "你可以先为我讲解一下吗？"），仍以"你对这个解释有什么疑问吗？"结尾 → 模式切换正确
+- Session 2 Msg #12 (cmqvmbln7004yqgf42p2zce) 长度 1310，纯讲解式（用户原话 "什么是反向传播？请深度推理"），thinking=null 但用户要求"深度推理" → thinking 模式未生效
+
+### Bug 清单
+| ID | 严重度 | 类型 | 位置 | 详情 |
+|---|---|---|---|---|
+| B1 | CRITICAL | 流式字符丢失 | msg `cmqvkqia8004qqdqglqcyw80a` (Bayes 讲解) | "B生的概率" 缺"发"；"概率是多少这就是" 缺"？" |
+| B1 | CRITICAL | 流式字符丢失 | msg `cmqvmbln7004yqgf42p2zce` (Backprop 讲解) | "反向播是" 缺"传"；"log-sum-trick" 缺"exp "；"步骤2计算输出误差" 缺"：" |
+| B2 | HIGH | 重复用户消息 | msg `cmqvmd9zj0050qdqgy8f6924s` + `cmqvmdc980052qdqgdkdzk5ds` | 2.94 秒内连发两条相同 "测试多步推理"，前端 chat-composer 缺防抖 |
+| B3 | HIGH | thinking 推理幻觉 | msg `cmqvjafal004eqdqgo92oq6rd` | 用户原话仅 "引导我理解贝叶斯定理"，thinking 却称 "用户问的是贝叶斯定理和人工智能的关系，他提到了量化" — 用户未提 AI 也未提量化 |
+| B4 | MEDIUM | thinking 字段格式不一致 | msg `cmqvjafal004eqdqgo92oq6rd` | thinking 内容存在但缺 "## 模型推理\n" 前缀，与 chat/route.ts:610-613 持久化逻辑不符 |
+| B5 | MEDIUM | type 字段未使用 | 全部 21 条消息 | type 全为 "dialogue"；schema 定义的 question/explanation/summary/encouragement/follow_up 未实际生成 |
+| B6 | MEDIUM | 模式未持久化 | LearningMessage 表 | teachingMode / thinkingMode 仅在请求中传递，未入库 → 无法做模式-质量关联分析与回溯 |
+| B7 | LOW | 推理 token 浪费 | msg `cmqvmdevg0054qdqgxex84ksc` | "测试多步推理"(6 字符) 触发 415 字符 deep 推理，浪费比 7.28x |
+| B7 | LOW | 推理 token 浪费 | msg `cmqvmhbs20058qdqgq8atkl4w` | "hi"(2 字符) 触发 802 字符 structured 4 步推理，浪费比 7.23x |
+| B8 | LOW | 引用准确度不足 | msg `cmqvlwr83004uqdqg30ck6wuo` | thinking 提出 "盲人下山" 类比，content 改用 "站在山上往山谷走"，推理结论与回复对齐有缺口 |
+| B9 | INFO | 数据规模过小 | 全库 | 仅 2 会话 / 21 消息 / 0 知识节点 / 0 RAG chunks → 统计置信度低，无法计算知识覆盖率 |
+| — | INFO | 用户-用户相邻无 assistant | Session 2 Msg #13→#14 | 由 B2 引发的副作用 |
+
+### Bug 根因初判
+- **B1（流式字符丢失）**：最可疑路径是 `src/app/api/chat/route.ts` 的 `parseUpstreamSse` 在跨 chunk 边界 + `stripEmoji(fullContent)` 重发完整 snapshot 的组合下，部分 delta token 未进入 `fullContent`。需要检查 `delta.content` 与 `delta.reasoning_content` 是否在 `data:` 行被 split 后丢一段。也可能是 z-ai-web-dev-sdk 上游 SDK 在 SSE 分片时丢字节。
+- **B2（重复消息）**：`src/components/learning/chat-composer.tsx` 缺少发送按钮的 disabled-while-pending 保护，用户连击触发两次 POST /api/chat。
+- **B3（推理幻觉）**：GLM-4.6 在 reasoning_content 阶段对短 prompt 过度解读，把模型自身的内部规划（"我应该从量化场景切入"）反向"安"到用户身上。需要在系统提示词里加约束："推理中只能引用用户实际说过的原话"。
+
+### 改进建议（按优先级）
+1. **P0 修复 B1**：在 `parseUpstreamSse` 加 chunk-boundary 测试用例；考虑用 z-ai-web-dev-sdk 的非流式 fallback 校验关键消息完整性
+2. **P0 修复 B2**：chat-composer 发送按钮在 `isStreaming` 期间 `disabled`，并对相同内容做 3s 去重
+3. **P1 修复 B3**：在 `THINK_OVERLAYS` 加约束 "推理过程不得编造用户未提及的事实"
+4. **P1 修复 B4**：检查 `cmqvjafal004eqdqgo92oq6rd` 写入路径，确保所有 thinking 都按代码逻辑 prepend 前缀
+5. **P2 修复 B6**：在 LearningMessage 表新增 `teachingMode` `thinkingMode` 字段（Prisma migration），入库时持久化
+6. **P2 修复 B5**：让模型按场景生成 type（explanation/question/summary/...），或在 chat/route.ts 用规则推断 type
+7. **P3 修复 B7**：在 chat/route.ts 加 input-length-aware 模式降级：消息长度 < 10 字符且为问候/测试性输入时，强制 thinkingMode='off'
+8. **P3 修复 B8**：在 multi-step-reasoning 的最终步骤 prompt 加 "请在回答中体现推理阶段产出的关键类比/边界条件"
+
+### 结论
+- 数据库样本量过小（2 会话 / 21 消息），但已能识别出 1 个 CRITICAL 级流式 bug（B1，影响讲解类长回复的准确性）和 1 个 HIGH 级 UX bug（B2 重复发送）。
+- 苏格拉底式指数 100% 表明 guide 模式系统提示词生效；推理深度数据分布合理（deep/structured > standard > off）但样本不足以做统计显著性检验。
+- 知识节点 / RAG / 引用功能在采样数据中完全未被使用，建议补充端到端 RAG 测试样本（上传材料 → chunk → retrieve → 引用）后再做第二轮审计。
+
+---
+
+## Task ID: audit-algo-12a — Algorithm Utilization & Bug Audit
+**Agent**: sub (Explore / Algorithm Auditor)
+**Scope**: src/lib/{retrieval,sm2,multi-step-reasoning,document-chunker,text-embedding,
+        query-classifier,retrieval-boosts,role-boost,semantic-index,search-service}.ts
+
+### Utilization map (verified by grep across src/)
+- **retrieval.ts retrievePassages()** — HIGH. Called by /api/chat (line 397),
+  /api/sessions/[id]/retrieve (line 20), /api/course/generate (line 116),
+  multi-step-reasoning.ts (line 204). Every chat turn + every course gen + every
+  explicit retrieve call.
+- **retrieval.ts buildKnowledgeBaseContext()** — HIGH. Same callers.
+- **sm2.ts sm2Next()** — MEDIUM. Called only by PATCH /api/cards/[id] (line 37).
+  Fires once per flashcard review submission.
+- **multi-step-reasoning.ts runMultiStepReasoning()** — MEDIUM. Called by /api/chat
+  (line 475) but only when thinkingMode === 'deep' || 'structured'.
+- **document-chunker.ts chunkDocument()** — HIGH. Called by materials upload
+  (line 122) + reparse (line 59). Once per upload.
+- **document-chunker.ts classifyBlockType()** — DEAD CODE. Exported, never imported
+  anywhere. The chunker uses internal `dominantBlockType(buf)` instead.
+- **document-chunker.ts isTitleChunk()** — DEAD CODE (only called by dead
+  classifyBlockType).
+- **text-embedding.ts expandQueryWithHyDE()** — DEAD CODE. Exported, no callers.
+- **text-embedding.ts cosineSimilarity() / embed() / encode+decodeEmbedding()** — HIGH.
+- **semantic-index.ts buildSemanticIndex()** — MEDIUM. Called by materials upload
+  (line 139) + reparse (line 72), only when `enrich=true` (precision='high').
+- **semantic-index.ts mdToTree()** — HIGH. Called unconditionally by materials
+  upload (line 136) + reparse (line 69) — even without LLM enrichment.
+- **semantic-index.ts enrichTreeSummaries / enrichChunksSemantic /
+  generateDocumentSummary** — MEDIUM. All called via buildSemanticIndex (enrich=true).
+- **query-classifier.ts classifyQuery()** — HIGH. Called by applyRoleBoosts
+  (line 32 of retrieval-boosts.ts), which is called every retrieve + every search.
+- **role-boost.ts computeRoleBoost()** — HIGH. Called by applyRoleBoosts.
+- **retrieval-boosts.ts applyRoleBoosts / applyLexicalBoosts / buildSnippet()** — HIGH.
+  Called by retrieval.ts (lines 404-405) + search-service.ts (lines 198-199).
+- **search-service.ts globalSearch()** — MEDIUM. Called by /api/search route.
+
+### Bugs by severity
+
+#### [严重] multi-step-reasoning.ts:254-280 — SSE 流末尾 buffer 未 flush
+循环 `while (true)` 在 `done=true` 退出后，残留 `buffer` 中可能包含最后一个未以
+`\n\n` 结尾的 SSE 事件（合法 SSE 行为）。该事件被静默丢弃，模型最后一段 token
+丢失。对比 chat/route.ts:568 有 `parseUpstreamSse('\n\n', bufferRef)` 兜底，
+multi-step-reasoning 缺失。建议在 while 循环后添加：
+```ts
+if (buffer.trim()) {
+  const tailEvents = buffer.split('\n\n');
+  // process tailEvents[0] as a final event
+}
+```
+
+#### [严重] multi-step-reasoning.ts:236-305 — retry 重复发送已流式输出的 token
+步骤失败重试时，`stepContent/stepThinking/buffer` 在循环内重置，但**第一次尝试
+中已经通过 `onStepToken(i, delta.content)` 推送给前端的部分 token 无法撤回**。
+重试成功后，前端会看到「失败尝试的部分输出 + 重试的完整输出」拼接。要么在
+retry 时发一个 `{stepReset: i}` 事件让前端清空，要么在第一次尝试不流式输出
+（只在 success=true 后再发）。
+
+#### [严重] multi-step-reasoning.ts:262 — 多 data: 行事件仅取第一个
+`evt.split('\n').find(l => l.trim().startsWith('data:'))` 只读取事件中**第一个**
+`data:` 行。OpenAI SSE 规范允许单个事件跨多个 `data:` 行（用 `\n` 分隔，需拼接）。
+对比 chat/route.ts:331-357 的 `for (const line of lines)` 循环正确处理了多行。
+建议改为循环 + `data:` 行内容拼接。
+
+#### [中等] retrieval.ts:174-176 — tree-walk nodeId 跨 material 命中第一个
+`retrieveViaTreeWalk` 把所有 materials 的节点合并到 `allNodes`，但 LLM 看到的
+prompt 里只有 `nodeId`（无 materialId 前缀）。当多个 material 都有 nodeId="0.0"
+（极常见），`allNodes.find(n => ... n.nodeId === nodeId)` 总是返回第一个 material
+的节点，其余 materials 的同 nodeId 节点被忽略。代码里 `matId ? n.materialId === matId : true`
+的 `matId` 分支永远不触发（LLM 不会返回 `matId:nodeId` 格式）。建议在 prompt 里
+把 nodeId 改成 `materialIdx:nodeId` 全局唯一，或者按 material 分别发请求。
+
+#### [中等] retrieval.ts:344-359 — getParentText O(rows×topK) 未建索引
+`getParentText` 内部两次 `rows.find()`：一次按 `material.id`（命中 cache 后只走一次），
+一次按 `r.id === c.id`（每个 top-K chunk 都要扫一遍 rows）。对 500 chunk × 6 topK =
+3000 次比较；如果有 10 个 tree-walk-only 候选，总开销 ~16000 次。建议像
+search-service.ts:148 那样建 `chunkRowMap: Map<id, row>`。
+
+#### [中等] retrieval-boosts.ts:106 — boost 累加上限可达 0.86，可压制 BM25
+`Math.min(kwBoost, 0.36) + Math.min(cjkBoost, 0.5)` 两顶单独封顶，叠加后最高 0.86。
+加上 sectionBoost(0.15) + titleBoost(0.10) + treeBoost(0.5) + roleBoost(0.36) +
+BM25 cosine(~1.0)，单 chunk 最高可达 ~2.97。一个完全无 BM25 命中的 chunk 仅靠
+boost 就能压过 BM25≈1.0 的真实命中。建议合并 boost 上限到 ~0.4-0.5。
+
+#### [中等] document-chunker.ts:689-700 — cleanChunkContent 误删代码块注释
+`/^[ \t]*#{1,6}[ \t]+/gm` 会把代码块里的 `# 注释`（Python/bash/perl 等）也剥离。
+分块时 makeBlock 已经把 ``` 代码块标记为 atomic，但 cleanChunkContent 仍对全文应用
+正则。建议先检测是否在 ``` 范围内，或者只在「该 chunk 不含 ``` 」时才剥离。
+
+#### [中等] document-chunker.ts:286-292 — findParaEnd 第二循环 O(n²)
+当段落无 `\n\n` 时，第二个 for 循环对每个位置 `i` 都 `text.slice(i)` + 多个
+`startsWith`/regex 测试。对 50k 字符的长段落 = 50k × 50k/2 ≈ 1.25 亿次字符串
+操作。建议用单一全局 regex `/(```|<table|\[|\\\[|!\[|#{1,6}\s)/g.exec(text.slice(from))`
+一次扫描。
+
+#### [中等] text-embedding.ts:85-92 — FNV-1a 用 charCodeAt 而非 UTF-8 字节
+FNV-1a 规范按字节哈希。这里用 `charCodeAt(i)` 取 UTF-16 码元（CJK 字符是 16 位
+代理对，emoji 是双码元）。结果：相同字符串仍然一致（确定性 ✓），但哈希分布
+比字节版差，bucket 碰撞率略高。对 1024 桶 + 数千 token 影响有限，但与论文实现
+不一致。
+
+#### [中等] document-chunker.ts:755-776 — splitOn 空分隔符用 char 长度切 CJK
+`maxLen = o.maxTokens * 3`，对纯 CJK 文本，1 token ≈ 2 字符，所以 768-token
+预算应是 1536 字符，而代码切到 2304 字符，**超出 50% token 预算**。建议根据
+CJK 比例动态调整 `maxLen`。
+
+#### [次要] sm2.ts:73 — ease 两位小数四舍五入丢精度
+`Math.round(ease * 100) / 100` 每次 review 都会丢 0.005 的精度。10 次连续 review
+累计误差可达 0.05，影响长期 interval 增长率。建议保留 4 位小数或存储原始 float。
+
+#### [次要] sm2.ts:65 — ease 上限 3.0 偏离 SM-2 规范
+SM-2 规范只有下限 1.3，没有上限。MindGuide 加了 3.0 上限（注释里有说明），但
+这是文档化的偏离，不算 bug。可考虑放宽到 2.8（Anki 默认）或 3.5。
+
+#### [次要] sm2.ts:47 — q=0 时 interval=0 (1分钟) 偏离规范
+SM-2 规范对 lapse 后的 interval 没有明文，多数实现用 1 天。MindGuide 用 1 分钟
+是 Anki "Again" 风格，文档化了。可接受。
+
+#### [次要] multi-step-reasoning.ts:297-303 — 失败时无超时
+LLM 调用没有 AbortController/timeout。如果上游 hang，整个 chat 请求会阻塞。
+建议加 AbortSignal.timeout(60_000)。
+
+#### [次要] retrieval.ts:324 — 无 embedding 的 chunk 用零向量但仍有 boost
+`r.embedding ? decodeEmbedding(r.embedding) : new Float32Array(1024)` 兜底为零
+向量，cosine=0，但 sectionBoost/titleBoost/roleBoost/kwBoost 仍会作用。理论上
+一个未 embed 的 chunk 仅靠 boost 就可能进入 topK。建议过滤掉无 embedding 的 chunk。
+
+#### [次要] retrieval-boosts.ts:91-104 — CJK 短查询子串 boost 重复计入
+isShortCjkQuery 时既算 `cjkBoost` 又算 `kwBoost`（如果 keyword 包含查询子串）。
+对纯 CJK 短查询，kwBoost 来自 LLM 生成的 keywords，cjkBoost 来自子串匹配，
+两者都加，可能过度 boost。建议互斥或合并上限。
+
+#### [次要] text-embedding.ts:71-78 — 拉丁文 regex 漏带连字符/撇号的中等长度词
+`/[a-zA-Z][a-zA-Z0-9'-]*/g` 匹配 "don't"、"state-of-the-art" 整体作为单个 token。
+这会让 "state-of-the-art" 与 "state" / "art" 不冲突，但也意味着 "don't" 与
+"do" / "not" 不重叠。对 BM25 是好是坏取决于语料，非 bug。
+
+#### [次要] document-chunker.ts:885 — detectSectionRole 中文标点不全
+`cleaned.replace(/^(\d+\.?\d*\.?\s*|第[一二三四五六七八九十百]+章\s*)/, '')` 只剥离
+阿拉伯数字 + 「第N章」。漏掉「第一节」「第三章第二节」「附录A」等。建议补充
+`第[一二三四五六七八九十百]+[节部分]` 和 `附录[A-Z]`。
+
+#### [次要] semantic-index.ts:258 — tokensUsed 永远为 0
+`buildSemanticIndex` 返回 `tokensUsed: 0`，注释说「not tracked yet」。导致
+telemetry 失真，无法做成本审计。
+
+### 性能综述
+- **O(n²) 风险点**：document-chunker.findParaEnd 的第二循环（详见上面 [中等] bug）。
+- **未缓存重复计算**：retrieval.ts getParentText 内部 `rows.find(r => r.id === c.id)`
+  每个 top-K chunk 都重扫一遍（详见上面 [中等] bug）。
+- **每次对话都跑**：classifyQuery（35 个 regex × query 长度）+ applyRoleBoosts +
+  applyLexicalBoosts（对每个 scored chunk 扫 keywords + 子串）。对 6 chunk × 10
+  keyword × ~50 字符 query = ~3000 操作，<1ms。✓ 可接受。
+- **每次上传都跑**：chunkDocument（O(n) 文本扫描）+ embed（O(n) 哈希）+ 可选
+  buildSemanticIndex（N/5 次 LLM 调用）。✓ 可接受。
+
+### 改进建议优先级
+1. [P0] 修复 multi-step-reasoning SSE 末尾 buffer flush + 多 data: 行 + retry 重置。
+2. [P0] 修复 retrieval.ts tree-walk 跨 material nodeId 命中第一个的 bug。
+3. [P1] 给 retrieval.ts getParentText 加 Map<id, row> 缓存。
+4. [P1] 合并 retrieval-boosts 的总 boost 上限。
+5. [P1] 修复 document-chunker.cleanChunkContent 误删代码注释。
+6. [P1] 优化 document-chunker.findParaEnd 的 O(n²) 第二循环。
+7. [P2] 删除死代码：classifyBlockType, isTitleChunk, expandQueryWithHyDE。
+8. [P2] 修复 semantic-index.tokensUsed 一直为 0 的 telemetry。
+9. [P2] 给 multi-step-reasoning 加超时。
+10. [P3] sm2.ts ease 保留 4 位小数；detectSectionRole 补充中文编号模式。
+

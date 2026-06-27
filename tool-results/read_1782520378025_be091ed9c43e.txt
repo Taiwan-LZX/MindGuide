@@ -1,0 +1,943 @@
+     1→// ────────────────────────────────────────────────────────────────────────────
+     2→// document-chunker.ts — structural text packaging for model consumption
+     3→//
+     4→// Turns a ParsedDocument into a list of retrieval-sized chunks that preserve
+     5→// structural context. Implements a 3-level strategy (see docs/FILE-IMPORT.md §4):
+     6→//
+     7→//   Level 1 — section-aware splitting (markdown headers / paper sections /
+     8→//             page boundaries for PDF / slide boundaries for PPTX)
+     9→//   Level 2 — recursive character split with overlap
+    10→//             (paragraph → sentence → line → word, target 800 chars, 120 overlap)
+    11→//   Level 3 — token-aware truncation (hard cap 1500 chars per chunk)
+    12→//
+    13→// Each chunk records its enclosing section title so retrieval can apply a
+    14→// structural boost (Abstract / Introduction chunks rank higher) and so the
+    15→// model sees the section context when grounded.
+    16→//
+    17→// Token estimation: chars/4 for Latin, chars/2 for CJK (heuristic — avoids
+    18→// pulling in a full tokenizer; matches GPT-family averages well enough for
+    19→// budgeting).
+    20→// ────────────────────────────────────────────────────────────────────────────
+    21→
+    22→import type { ParsedDocument, DocSection } from './file-parser';
+    23→
+    24→// ─── v2 block-type taxonomy (Docling DocItemLabel, trimmed) ─────────────────
+    25→//
+    26→// Each chunk is classified into one of these types. The classifier is
+    27→// heuristic (regex-based) for now — Phase 2 will upgrade to VLM-emitted types.
+    28→// The taxonomy matches the GROBID/Docling/Marker consensus:
+    29→export type BlockType =
+    30→  | 'text'       // default prose paragraph
+    31→  | 'title'      // heading / section title
+    32→  | 'table'      // contains HTML <table> or markdown pipe table
+    33→  | 'figure'     // contains ![Figure: ...](...) image reference
+    34→  | 'formula'    // contains \[...\] or $$...$$ display math
+    35→  | 'list'       // bullet/numbered list (majority of lines start with - / 1.)
+    36→  | 'code'       // fenced code block (```...```)
+    37→  | 'caption'    // figure/table caption ("Figure 1:", "Table 2:")
+    38→  | 'reference'  // bibliography entry ([1] Author, Title, ...)
+    39→  | 'header'     // page header (running title)
+    40→  | 'footer';    // page footer (page number, copyright)
+    41→
+    42→// GROBID section taxonomy roles for academic papers.
+    43→export type SectionRole =
+    44→  | 'abstract'
+    45→  | 'introduction'
+    46→  | 'methods'
+    47→  | 'results'
+    48→  | 'discussion'
+    49→  | 'conclusion'
+    50→  | 'references'
+    51→  | 'appendix';
+    52→
+    53→/** Bounding box in normalised page coordinates [0,1]. */
+    54→export interface BBox {
+    55→  startX: number;
+    56→  startY: number;
+    57→  width: number;
+    58→  height: number;
+    59→}
+    60→
+    61→export interface Chunk {
+    62→  content: string;
+    63→  section: string;     // enclosing section title ("" if none) — legacy v1 field
+    64→  chunkIndex: number;  // ordinal within the material
+    65→  charStart: number;   // offset in original text
+    66→  charEnd: number;
+    67→  tokens: number;      // approximate
+    68→  metadata: {
+    69→    page?: number;     // 1-based PDF page (if applicable)
+    70→    level: number;     // section level (1=h1, 2=h2, ...)
+    71→    isTitle: boolean;  // chunk is mostly a heading
+    72→    sectionStart?: number; // charStart of the parent section (for parent retrieval)
+    73→  };
+    74→  // ── v2 fields (P1) ────────────────────────────────────────────────────────
+    75→  /** Block type classification (heuristic). See BlockType union. */
+    76→  blockType: BlockType;
+    77→  /** Slash-delimited breadcrumb of enclosing section titles, e.g. "3 Methods / 3.2 Training". */
+    78→  sectionPath: string;
+    79→  /** 1-based PDF page (mirrors metadata.page for convenience / direct DB column). */
+    80→  page?: number;
+    81→  /** Bounding box in normalised page coords [0,1]. Undefined for pure text. */
+    82→  bbox?: BBox;
+    83→  /** GROBID section role for academic papers (undefined for non-academic). */
+    84→  sectionRole?: SectionRole;
+    85→}
+    86→
+    87→// ─── HybridChunker options (P2 — token-aware, struct-aware) ────────────────
+    88→//
+    89→// Upgraded from char-based (800/120/1500) to token-based (512/768/64),
+    90→// synthesised from Docling HybridChunker + Marker block-atomicity.
+    91→// The chunker now:
+    92→//   1. Segments text into typed blocks (table/formula/figure/code/text/title/list)
+    93→//   2. Merges adjacent blocks into chunks up to `targetTokens` (512)
+    94→//   3. Treats table/formula/figure/code as ATOMIC — never splits mid-block
+    95→//   4. When a table exceeds `maxTokens`, splits it but repeats the <thead> header
+    96→//   5. Merges tiny peer chunks (< `minTokens` = 64) into neighbors
+    97→export interface ChunkOptions {
+    98→  /** Target chunk size in tokens (default 512 — Docling/Marker consensus). */
+    99→  targetTokens?: number;
+   100→  /** Hard cap per chunk in tokens (default 768). Atomic blocks exceeding this are split. */
+   101→  maxTokens?: number;
+   102→  /** Chunks below this token count merge with neighbors (default 64). */
+   103→  minTokens?: number;
+   104→  /** Overlap in tokens for recursive-split fallback (default 64). */
+   105→  overlapTokens?: number;
+   106→  // ── Legacy char-based fields (kept for backward-compat, ignored in v2) ──────
+   107→  /** @deprecated use targetTokens */
+   108→  targetSize?: number;
+   109→  /** @deprecated use overlapTokens */
+   110→  overlap?: number;
+   111→  /** @deprecated use maxTokens */
+   112→  maxChars?: number;
+   113→}
+   114→
+   115→const DEFAULTS: Required<Pick<ChunkOptions, 'targetTokens' | 'maxTokens' | 'minTokens' | 'overlapTokens'>> = {
+   116→  targetTokens: 512,
+   117→  maxTokens: 768,
+   118→  minTokens: 64,
+   119→  overlapTokens: 64,
+   120→};
+   121→
+   122→// ─── public API ─────────────────────────────────────────────────────────────
+   123→
+   124→/**
+   125→ * HybridChunker (P2) — struct-aware + token-aware document chunking.
+   126→ *
+   127→ * Algorithm (synthesised from Docling HybridChunker + Marker block-atomicity):
+   128→ *   1. `segmentIntoBlocks()` — walk text, split into typed atomic blocks
+   129→ *      (table / formula / figure / code / title / list / text).
+   130→ *   2. `mergeBlocksIntoChunks()` — greedily pack blocks into chunks up to
+   131→ *      `targetTokens` (512). Atomic blocks (table/formula/figure/code) are
+   132→ *      NEVER split mid-block unless they exceed `maxTokens` (768).
+   133→ *   3. When a table exceeds `maxTokens`, split it with `splitTableWithHeaderRepeat()`
+   134→ *      — each sub-chunk repeats the `<thead>` so it's self-describing.
+   135→ *   4. `mergeTinyPeers()` — chunks < `minTokens` (64) merge into neighbors.
+   136→ *
+   137→ * Each chunk records v2 fields: blockType, sectionPath, page, bbox, sectionRole.
+   138→ */
+   139→export function chunkDocument(doc: ParsedDocument, opts: ChunkOptions = {}): Chunk[] {
+   140→  const o = { ...DEFAULTS, ...opts };
+   141→  if (!doc.text || doc.text.trim().length === 0) return [];
+   142→
+   143→  // Sort sections by charStart so we can binary-search for the enclosing one.
+   144→  const sections = [...doc.sections].sort((a, b) => a.charStart - b.charStart);
+   145→
+   146→  // Section stack resolver: for any char offset, compute the slash-delimited
+   147→  // breadcrumb of enclosing section titles + the GROBID role of the deepest section.
+   148→  const sectionPathAt = (pos: number): { path: string; role?: SectionRole } => {
+   149→    const stack: DocSection[] = [];
+   150→    for (const s of sections) {
+   151→      if (s.charStart <= pos) {
+   152→        while (stack.length && stack[stack.length - 1].level >= s.level) stack.pop();
+   153→        stack.push(s);
+   154→      } else break;
+   155→    }
+   156→    const path = stack.map((s) => s.title).join(' / ');
+   157→    const role = stack.length ? detectSectionRole(stack[stack.length - 1].title) : undefined;
+   158→    return { path, role };
+   159→  };
+   160→
+   161→  // 1. Segment into typed blocks.
+   162→  const blocks = segmentIntoBlocks(doc.text);
+   163→
+   164→  // 2. Merge blocks into token-aware chunks (block-atomic).
+   165→  const rawChunks = mergeBlocksIntoChunks(blocks, doc, sections, sectionPathAt, o);
+   166→
+   167→  // 3. Merge tiny peer chunks into neighbors.
+   168→  const merged = mergeTinyPeers(rawChunks, o);
+   169→
+   170→  // 4. Re-index after merging.
+   171→  merged.forEach((c, i) => (c.chunkIndex = i));
+   172→
+   173→  return merged;
+   174→}
+   175→
+   176→// ─── block segmentation ─────────────────────────────────────────────────────
+   177→//
+   178→// Walks the text and splits it into typed blocks. Atomic block types
+   179→// (table / formula / figure / code) are detected by their delimiters and kept
+   180→// intact. Non-atomic types (title / list / text) are split at paragraph
+   181→// boundaries (\n\n).
+   182→
+   183→interface Block {
+   184→  type: BlockType;
+   185→  text: string;
+   186→  charStart: number;
+   187→  charEnd: number;
+   188→  tokens: number;
+   189→}
+   190→
+   191→function makeBlock(type: BlockType, text: string, start: number, end: number): Block {
+   192→  const slice = text.slice(start, end);
+   193→  return { type, text: slice, charStart: start, charEnd: end, tokens: estimateTokens(slice) };
+   194→}
+   195→
+   196→/**
+   197→ * Segment text into typed blocks. Atomic types (table/formula/figure/code)
+   198→ * are detected by delimiters and kept intact. Non-atomic types are split at
+   199→ * paragraph (\n\n) boundaries.
+   200→ */
+   201→function segmentIntoBlocks(text: string): Block[] {
+   202→  const blocks: Block[] = [];
+   203→  let i = 0;
+   204→  const len = text.length;
+   205→
+   206→  while (i < len) {
+   207→    // Skip leading whitespace/newlines.
+   208→    while (i < len && /\s/.test(text[i])) i++;
+   209→    if (i >= len) break;
+   210→
+   211→    const rest = text.slice(i);
+   212→
+   213→    // 1. Code fence ```...```
+   214→    if (rest.startsWith('```')) {
+   215→      const closeIdx = text.indexOf('```', i + 3);
+   216→      const blockEnd = closeIdx === -1 ? len : closeIdx + 3;
+   217→      blocks.push(makeBlock('code', text, i, blockEnd));
+   218→      i = blockEnd;
+   219→      continue;
+   220→    }
+   221→
+   222→    // 2. HTML table <table>...</table>
+   223→    const tableOpen = rest.match(/<table[\s>]/i);
+   224→    if (tableOpen && tableOpen.index === 0) {
+   225→      const closeMatch = rest.match(/<\/table>\s*/i);
+   226→      const blockEnd = closeMatch ? i + closeMatch.index! + closeMatch[0].length : findParaEnd(text, i);
+   227→      blocks.push(makeBlock('table', text, i, blockEnd));
+   228→      i = blockEnd;
+   229→      continue;
+   230→    }
+   231→
+   232→    // 3. Display math \[...\]
+   233→    if (rest.startsWith('\\[')) {
+   234→      const closeIdx = text.indexOf('\\]', i + 2);
+   235→      const blockEnd = closeIdx === -1 ? len : closeIdx + 2;
+   236→      blocks.push(makeBlock('formula', text, i, blockEnd));
+   237→      i = blockEnd;
+   238→      continue;
+   239→    }
+   240→
+   241→    // 4. Figure ![Figure:...](...) or generic image
+   242→    const figMatch = rest.match(/^!\[(?:Figure:)?[^\]]*\]\([^)]*\)\s*/im);
+   243→    if (figMatch && figMatch.index === 0) {
+   244→      const blockEnd = i + figMatch[0].length;
+   245→      blocks.push(makeBlock('figure', text, i, blockEnd));
+   246→      i = blockEnd;
+   247→      continue;
+   248→    }
+   249→
+   250→    // 5. Heading ## / ### / # (title block — also a section boundary)
+   251→    const headMatch = rest.match(/^(#{1,6})\s+.+\s*$/m);
+   252→    if (headMatch && headMatch.index === 0) {
+   253→      const lineEnd = text.indexOf('\n', i);
+   254→      const blockEnd = lineEnd === -1 ? len : lineEnd + 1;
+   255→      blocks.push(makeBlock('title', text, i, blockEnd));
+   256→      i = blockEnd;
+   257→      continue;
+   258→    }
+   259→
+   260→    // 6. Default: text paragraph until next \n\n or next special block.
+   261→    const paraEnd = findParaEnd(text, i);
+   262→    const paraText = text.slice(i, paraEnd);
+   263→
+   264→    // Check if paragraph is a markdown pipe table (|---| separator line).
+   265→    if (/^\s*\|[-:\s|]+\|\s*$/m.test(paraText)) {
+   266→      blocks.push(makeBlock('table', text, i, paraEnd));
+   267→    } else if (isListParagraph(paraText)) {
+   268→      blocks.push(makeBlock('list', text, i, paraEnd));
+   269→    } else {
+   270→      blocks.push(makeBlock('text', text, i, paraEnd));
+   271→    }
+   272→    i = paraEnd;
+   273→  }
+   274→
+   275→  return blocks;
+   276→}
+   277→
+   278→/** Find the end of the paragraph starting at `from` (next \n\n or EOF). */
+   279→function findParaEnd(text: string, from: number): number {
+   280→  const len = text.length;
+   281→  // Look for \n\n.
+   282→  for (let i = from; i < len - 1; i++) {
+   283→    if (text[i] === '\n' && text[i + 1] === '\n') return i + 2;
+   284→  }
+   285→  // Also break at code fence / table / heading starts to keep blocks clean.
+   286→  for (let i = from; i < len; i++) {
+   287→    const rest = text.slice(i);
+   288→    if (rest.startsWith('```') || /^<table[\s>]/i.test(rest) || rest.startsWith('\\[') ||
+   289→        /^!\[(?:Figure:)?[^\]]*\]\(/.test(rest) || /^#{1,6}\s/.test(rest)) {
+   290→      return i;
+   291→    }
+   292→  }
+   293→  return len;
+   294→}
+   295→
+   296→/** Check if a paragraph is predominantly a list (≥60% lines start with - / * / N.). */
+   297→function isListParagraph(text: string): boolean {
+   298→  const lines = text.split('\n').filter((l) => l.trim().length > 0);
+   299→  if (lines.length < 2) return false;
+   300→  const listLines = lines.filter((l) => /^\s*([-*•]|\d+[.)])\s+\S/.test(l)).length;
+   301→  return listLines / lines.length >= 0.6;
+   302→}
+   303→
+   304→// ─── block → chunk merging (token-aware, block-atomic) ─────────────────────
+   305→
+   306→/**
+   307→ * Greedily pack blocks into chunks up to `targetTokens`. Atomic blocks
+   308→ * (table / formula / figure / code) are flushed as standalone chunks and
+   309→ * never merged with neighbors. Oversized atomic blocks are split via
+   310→ * `splitTableWithHeaderRepeat` (tables) or `recursiveSplit` (others).
+   311→ */
+   312→function mergeBlocksIntoChunks(
+   313→  blocks: Block[],
+   314→  doc: ParsedDocument,
+   315→  sections: DocSection[],
+   316→  sectionPathAt: (pos: number) => { path: string; role?: SectionRole },
+   317→  o: Required<Pick<ChunkOptions, 'targetTokens' | 'maxTokens' | 'minTokens' | 'overlapTokens'>>
+   318→): Chunk[] {
+   319→  const chunks: Chunk[] = [];
+   320→  let chunkIndex = 0;
+   321→  let buf: Block[] = [];
+   322→  let bufTokens = 0;
+   323→  let bufStart = 0;
+   324→
+   325→  const flushBuffer = () => {
+   326→    if (buf.length === 0) return;
+   327→    const rawText = buf.map((b) => b.text).join('');
+   328→    const content = cleanChunkContent(rawText);
+   329→    if (content.length < 20) {
+   330→      buf = [];
+   331→      bufTokens = 0;
+   332→      return;
+   333→    }
+   334→    const charStart = bufStart;
+   335→    const charEnd = buf[buf.length - 1].charEnd;
+   336→    const section = findEnclosingSection(sections, charStart);
+   337→    const page = findPage(doc, charStart);
+   338→    const { path: sectionPath, role: sectionRole } = sectionPathAt(charStart);
+   339→    const blockType = dominantBlockType(buf);
+   340→    chunks.push({
+   341→      content,
+   342→      section: section?.title ?? '',
+   343→      chunkIndex: chunkIndex++,
+   344→      charStart,
+   345→      charEnd,
+   346→      tokens: estimateTokens(content),
+   347→      metadata: {
+   348→        page,
+   349→        level: section?.level ?? 0,
+   350→        isTitle: blockType === 'title',
+   351→        sectionStart: section?.charStart,
+   352→      },
+   353→      blockType,
+   354→      sectionPath,
+   355→      page,
+   356→      sectionRole,
+   357→    });
+   358→    buf = [];
+   359→    bufTokens = 0;
+   360→  };
+   361→
+   362→  for (const block of blocks) {
+   363→    const isAtomic = block.type === 'table' || block.type === 'formula' ||
+   364→                     block.type === 'figure' || block.type === 'code';
+   365→
+   366→    if (isAtomic) {
+   367→      // Flush any accumulated text/list blocks first.
+   368→      flushBuffer();
+   369→
+   370→      if (block.tokens > o.maxTokens) {
+   371→        // Oversized atomic block — must split.
+   372→        if (block.type === 'table') {
+   373→          // Tables: split with header repeat so each sub-chunk is self-describing.
+   374→          for (const sub of splitTableWithHeaderRepeat(block, o)) {
+   375→            const section = findEnclosingSection(sections, sub.charStart);
+   376→            const page = findPage(doc, sub.charStart);
+   377→            const { path: sectionPath, role: sectionRole } = sectionPathAt(sub.charStart);
+   378→            chunks.push({
+   379→              content: sub.content,
+   380→              section: section?.title ?? '',
+   381→              chunkIndex: chunkIndex++,
+   382→              charStart: sub.charStart,
+   383→              charEnd: sub.charEnd,
+   384→              tokens: sub.tokens,
+   385→              metadata: { page, level: section?.level ?? 0, isTitle: false, sectionStart: section?.charStart },
+   386→              blockType: 'table',
+   387→              sectionPath,
+   388→              page,
+   389→              sectionRole,
+   390→            });
+   391→          }
+   392→        } else {
+   393→          // Formula / figure / code: hard split via recursiveSplit.
+   394→          const tempChunk: Chunk = {
+   395→            content: cleanChunkContent(block.text),
+   396→            section: findEnclosingSection(sections, block.charStart)?.title ?? '',
+   397→            chunkIndex,
+   398→            charStart: block.charStart,
+   399→            charEnd: block.charEnd,
+   400→            tokens: block.tokens,
+   401→            metadata: { page: findPage(doc, block.charStart), level: 0, isTitle: false },
+   402→            blockType: block.type,
+   403→            sectionPath: sectionPathAt(block.charStart).path,
+   404→            page: findPage(doc, block.charStart),
+   405→            sectionRole: sectionPathAt(block.charStart).role,
+   406→          };
+   407→          chunks.push(...recursiveSplit(tempChunk, o));
+   408→          chunkIndex = chunks.length;
+   409→        }
+   410→      } else {
+   411→        // Fits within maxTokens — emit as standalone chunk.
+   412→        const content = cleanChunkContent(block.text);
+   413→        if (content.length >= 10) {
+   414→          const section = findEnclosingSection(sections, block.charStart);
+   415→          const page = findPage(doc, block.charStart);
+   416→          const { path: sectionPath, role: sectionRole } = sectionPathAt(block.charStart);
+   417→          chunks.push({
+   418→            content,
+   419→            section: section?.title ?? '',
+   420→            chunkIndex: chunkIndex++,
+   421→            charStart: block.charStart,
+   422→            charEnd: block.charEnd,
+   423→            tokens: block.tokens,
+   424→            metadata: { page, level: section?.level ?? 0, isTitle: block.type === 'title', sectionStart: section?.charStart },
+   425→            blockType: block.type,
+   426→            sectionPath,
+   427→            page,
+   428→            sectionRole,
+   429→          });
+   430→        }
+   431→      }
+   432→      continue;
+   433→    }
+   434→
+   435→    // Non-atomic (text / title / list): accumulate into buffer.
+   436→    if (buf.length === 0) bufStart = block.charStart;
+   437→
+   438→    // If adding this block would exceed maxTokens, flush first.
+   439→    if (buf.length > 0 && bufTokens + block.tokens > o.maxTokens) {
+   440→      flushBuffer();
+   441→      bufStart = block.charStart;
+   442→    }
+   443→
+   444→    buf.push(block);
+   445→    bufTokens += block.tokens;
+   446→
+   447→    // If we've hit the target, flush to produce a chunk of ~targetTokens.
+   448→    if (bufTokens >= o.targetTokens) {
+   449→      flushBuffer();
+   450→    }
+   451→  }
+   452→  flushBuffer();
+   453→
+   454→  return chunks;
+   455→}
+   456→
+   457→/**
+   458→ * Determine the dominant block type in a buffer of mixed blocks.
+   459→ * Returns 'text' unless a non-text type has > 30% of the buffer's tokens
+   460→ * (so a heading mixed with paragraphs doesn't get misclassified as 'title').
+   461→ */
+   462→function dominantBlockType(buf: Block[]): BlockType {
+   463→  const totalTokens = buf.reduce((s, b) => s + b.tokens, 0);
+   464→  if (totalTokens === 0) return 'text';
+   465→  const counts = new Map<BlockType, number>();
+   466→  for (const b of buf) counts.set(b.type, (counts.get(b.type) ?? 0) + b.tokens);
+   467→  let best: BlockType = 'text';
+   468→  let bestTokens = 0;
+   469→  for (const [type, tok] of counts) {
+   470→    // Non-text types must have > 30% share to dominate (avoids a single
+   471→    // heading line misclassifying a whole text paragraph as 'title').
+   472→    if (type !== 'text' && tok > bestTokens && tok / totalTokens > 0.3) {
+   473→      best = type;
+   474→      bestTokens = tok;
+   475→    }
+   476→  }
+   477→  return best;
+   478→}
+   479→
+   480→// ─── table split with header repeat (Marker convention) ─────────────────────
+   481→//
+   482→// When a table exceeds maxTokens, we split it into row-batches. Each sub-chunk
+   483→// repeats the <thead> (or first row) so the table is self-describing in
+   484→// retrieval — a chunk with only <td> cells and no headers is useless.
+   485→//
+   486→// For markdown pipe tables, the first 2 lines (header + separator) are repeated.
+   487→
+   488→interface TableSubChunk {
+   489→  content: string;
+   490→  charStart: number;
+   491→  charEnd: number;
+   492→  tokens: number;
+   493→}
+   494→
+   495→function splitTableWithHeaderRepeat(block: Block, o: Required<Pick<ChunkOptions, 'maxTokens' | 'overlapTokens'>>): TableSubChunk[] {
+   496→  const text = block.text;
+   497→  const maxTok = o.maxTokens;
+   498→
+   499→  // Detect HTML table.
+   500→  if (/<table[\s>]/i.test(text)) {
+   501→    return splitHtmlTable(block, maxTok);
+   502→  }
+   503→
+   504→  // Markdown pipe table: split by rows, repeat header + separator.
+   505→  const lines = text.split('\n');
+   506→  if (lines.length < 3) {
+   507→    // Can't split a tiny table — return as-is.
+   508→    return [{ content: cleanChunkContent(text), charStart: block.charStart, charEnd: block.charEnd, tokens: block.tokens }];
+   509→  }
+   510→  const header = lines.slice(0, 2); // header row + |---| separator
+   511→  const headerText = header.join('\n') + '\n';
+   512→  const headerTokens = estimateTokens(headerText);
+   513→  const bodyLines = lines.slice(2);
+   514→
+   515→  const subs: TableSubChunk[] = [];
+   516→  let buf = headerText;
+   517→  let bufStart = block.charStart;
+   518→  let bufTokens = headerTokens;
+   519→  let lineOffset = block.charStart + lines.slice(0, 2).join('\n').length + 1;
+   520→
+   521→  for (const line of bodyLines) {
+   522→    const lineTokens = estimateTokens(line + '\n');
+   523→    if (bufTokens + lineTokens > maxTok && buf.trim() !== headerText.trim()) {
+   524→      // Flush current batch.
+   525→      subs.push({
+   526→        content: cleanChunkContent(buf),
+   527→        charStart: bufStart,
+   528→        charEnd: lineOffset,
+   529→        tokens: bufTokens,
+   530→      });
+   531→      // Start new batch with repeated header.
+   532→      buf = headerText;
+   533→      bufStart = lineOffset;
+   534→      bufTokens = headerTokens;
+   535→    }
+   536→    buf += line + '\n';
+   537→    bufTokens += lineTokens;
+   538→    lineOffset += line.length + 1;
+   539→  }
+   540→  if (buf.trim() !== headerText.trim()) {
+   541→    subs.push({
+   542→      content: cleanChunkContent(buf),
+   543→      charStart: bufStart,
+   544→      charEnd: block.charEnd,
+   545→      tokens: bufTokens,
+   546→    });
+   547→  }
+   548→  return subs.length > 0 ? subs : [{ content: cleanChunkContent(text), charStart: block.charStart, charEnd: block.charEnd, tokens: block.tokens }];
+   549→}
+   550→
+   551→/** Split an HTML <table> by <tr> rows, repeating <thead> in each sub-chunk. */
+   552→function splitHtmlTable(block: Block, maxTok: number): TableSubChunk[] {
+   553→  const text = block.text;
+   554→  // Extract <thead>...</thead> if present.
+   555→  const theadMatch = text.match(/<thead>[\s\S]*?<\/thead>/i);
+   556→  const thead = theadMatch ? theadMatch[0] : '';
+   557→
+   558→  // Extract the table open tag + optional thead + body rows.
+   559→  const openTagMatch = text.match(/<table[^>]*>/i);
+   560→  const openTag = openTagMatch ? openTagMatch[0] : '<table>';
+   561→
+   562→  // Split body by <tr>...</tr>.
+   563→  const bodyStart = text.search(/<tbody[\s>]/i) !== -1
+   564→    ? text.search(/<tbody[\s>]/i)
+   565→    : (theadMatch ? (theadMatch.index ?? 0) + theadMatch[0].length : openTag.length);
+   566→  const bodyText = text.slice(bodyStart);
+   567→  const rowMatches = [...bodyText.matchAll(/<tr[\s\S]*?<\/tr>/gi)];
+   568→
+   569→  if (rowMatches.length === 0) {
+   570→    return [{ content: cleanChunkContent(text), charStart: block.charStart, charEnd: block.charEnd, tokens: block.tokens }];
+   571→  }
+   572→
+   573→  const subs: TableSubChunk[] = [];
+   574→  let buf = `${openTag}${thead}`;
+   575→  let bufStart = block.charStart;
+   576→  let bufTokens = estimateTokens(buf);
+   577→  let rowOffset = bodyStart;
+   578→
+   579→  for (const rowMatch of rowMatches) {
+   580→    const rowText = rowMatch[0];
+   581→    const rowTokens = estimateTokens(rowText);
+   582→    if (bufTokens + rowTokens > maxTok && buf !== `${openTag}${thead}`) {
+   583→      // Flush with closing tag.
+   584→      const flushed = buf + '</table>';
+   585→      subs.push({
+   586→        content: cleanChunkContent(flushed),
+   587→        charStart: bufStart,
+   588→        charEnd: block.charStart + rowOffset,
+   589→        tokens: bufTokens,
+   590→      });
+   591→      // New batch with repeated header.
+   592→      buf = `${openTag}${thead}`;
+   593→      bufStart = block.charStart + rowOffset;
+   594→      bufTokens = estimateTokens(buf);
+   595→    }
+   596→    buf += rowText;
+   597→    bufTokens += rowTokens;
+   598→    rowOffset = rowMatch.index! + rowText.length;
+   599→  }
+   600→  if (buf !== `${openTag}${thead}`) {
+   601→    subs.push({
+   602→      content: cleanChunkContent(buf + '</table>'),
+   603→      charStart: bufStart,
+   604→      charEnd: block.charEnd,
+   605→      tokens: bufTokens,
+   606→    });
+   607→  }
+   608→  return subs.length > 0 ? subs : [{ content: cleanChunkContent(text), charStart: block.charStart, charEnd: block.charEnd, tokens: block.tokens }];
+   609→}
+   610→
+   611→// ─── peer merging (HybridChunker post-pass) ─────────────────────────────────
+   612→//
+   613→// Chunks smaller than `minTokens` (64) are merged into the previous chunk
+   614→// (if same section) or the next chunk (if same section). Tiny chunks in
+   615→// different sections are left alone — merging across section boundaries
+   616→// would corrupt the sectionPath metadata.
+   617→
+   618→function mergeTinyPeers(
+   619→  chunks: Chunk[],
+   620→  o: Required<Pick<ChunkOptions, 'minTokens'>>
+   621→): Chunk[] {
+   622→  if (chunks.length <= 1) return chunks;
+   623→  const out: Chunk[] = [];
+   624→
+   625→  for (const c of chunks) {
+   626→    if (c.tokens < o.minTokens && out.length > 0) {
+   627→      const prev = out[out.length - 1];
+   628→      // Only merge if same sectionPath (don't cross section boundaries).
+   629→      if (prev.sectionPath === c.sectionPath) {
+   630→        prev.content = prev.content + '\n' + c.content;
+   631→        prev.charEnd = c.charEnd;
+   632→        prev.tokens = estimateTokens(prev.content);
+   633→        // Keep prev's blockType (dominant type stays).
+   634→        continue;
+   635→      }
+   636→    }
+   637→    out.push(c);
+   638→  }
+   639→
+   640→  // Second pass: if the LAST chunk is tiny and same section as previous, merge back.
+   641→  if (out.length > 1) {
+   642→    const last = out[out.length - 1];
+   643→    const prev = out[out.length - 2];
+   644→    if (last.tokens < o.minTokens && prev.sectionPath === last.sectionPath) {
+   645→      prev.content = prev.content + '\n' + last.content;
+   646→      prev.charEnd = last.charEnd;
+   647→      prev.tokens = estimateTokens(prev.content);
+   648→      out.pop();
+   649→    }
+   650→  }
+   651→
+   652→  return out;
+   653→}
+   654→
+   655→// ─── section lookup ─────────────────────────────────────────────────────────
+   656→
+   657→function findEnclosingSection(sections: DocSection[], pos: number): DocSection | undefined {
+   658→  // Binary search for the last section whose charStart <= pos.
+   659→  let lo = 0, hi = sections.length - 1, ans: DocSection | undefined;
+   660→  while (lo <= hi) {
+   661→    const mid = (lo + hi) >> 1;
+   662→    if (sections[mid].charStart <= pos) {
+   663→      ans = sections[mid];
+   664→      lo = mid + 1;
+   665→    } else {
+   666→      hi = mid - 1;
+   667→    }
+   668→  }
+   669→  return ans;
+   670→}
+   671→
+   672→function findPage(doc: ParsedDocument, pos: number): number | undefined {
+   673→  if (!doc.pages || doc.pages.length === 0) return undefined;
+   674→  let page = 1;
+   675→  for (let i = 0; i < doc.pages.length; i++) {
+   676→    if (doc.pages[i] <= pos) page = i + 1;
+   677→    else break;
+   678→  }
+   679→  return page;
+   680→}
+   681→
+   682→// ─── chunk content cleaning ─────────────────────────────────────────────────
+   683→//
+   684→// Strips markdown ATX header markers (#, ##, ###) from the start of lines so
+   685→// the chunk content is clean prose for the model. The section title is
+   686→// already preserved in the `section` field, so we don't lose structure.
+   687→//
+   688→// Also collapses runs of whitespace and trims.
+   689→function cleanChunkContent(raw: string): string {
+   690→  let s = raw;
+   691→  // Remove leading `#` markers from each line (but keep the heading text).
+   692→  // E.g. "## Methods\nWe analyse..." → "Methods\nWe analyse..."
+   693→  s = s.replace(/^[ \t]*#{1,6}[ \t]+/gm, '');
+   694→  // Collapse runs of spaces/tabs (but preserve newlines).
+   695→  s = s.replace(/[ \t]+/g, ' ');
+   696→  // Trim trailing spaces on each line.
+   697→  s = s.replace(/ *\n */g, '\n');
+   698→  // Collapse 3+ newlines to 2.
+   699→  s = s.replace(/\n{3,}/g, '\n\n');
+   700→  return s.trim();
+   701→}
+   702→
+   703→// ─── title-chunk detection ──────────────────────────────────────────────────
+   704→
+   705→function isTitleChunk(content: string, section: DocSection | undefined, cursor: number): boolean {
+   706→  if (!section) return false;
+   707→  // A chunk is a "title chunk" if it starts at the section start and is short.
+   708→  if (section.charStart !== cursor) return false;
+   709→  if (content.length > 200) return false;
+   710→  // And matches the heading text (allowing for trailing whitespace/blank).
+   711→  const head = content.trim();
+   712→  if (head.length < 2) return false;
+   713→  return section.title.startsWith(head.slice(0, 20)) || head.startsWith(section.title.slice(0, 20));
+   714→}
+   715→
+   716→// ─── recursive split (LangChain-style) ──────────────────────────────────────
+   717→
+   718→function recursiveSplit(c: Chunk, o: Required<Pick<ChunkOptions, 'targetTokens' | 'overlapTokens' | 'maxTokens' | 'minTokens'>>): Chunk[] {
+   719→  const out: Chunk[] = [];
+   720→  const text = c.content;
+   721→  const separators = ['\n\n', '\n', '. ', '。', '; ', '；', ', ', '，', ' ', ''];
+   722→  let pieces = [text];
+   723→
+   724→  // Convert token budget to char budget for splitOn (heuristic: 1 tok ≈ 3 chars mixed).
+   725→  const maxChars = o.maxTokens * 3;
+   726→
+   727→  for (const sep of separators) {
+   728→    if (pieces.every((p) => p.length <= maxChars)) break;
+   729→    pieces = pieces.flatMap((p) =>
+   730→      p.length <= maxChars ? [p] : splitOn(p, sep, maxChars)
+   731→    );
+   732→  }
+   733→
+   734→  // Re-assemble pieces into chunks of ~targetTokens with overlap.
+   735→  const targetChars = o.targetTokens * 3;
+   736→  const overlapChars = o.overlapTokens * 3;
+   737→  let buf = '';
+   738→  let bufStart = c.charStart;
+   739→  let idx = 0;
+   740→  for (const p of pieces) {
+   741→    if (buf.length + p.length + 1 > targetChars && buf.length > 0) {
+   742→      out.push(makeChunk(buf, c, bufStart, idx++, o));
+   743→      // Overlap: keep last `overlapChars` chars of buf.
+   744→      const tail = buf.slice(-overlapChars);
+   745→      bufStart = c.charStart + (c.content.indexOf(buf) + buf.length - tail.length);
+   746→      buf = tail + (tail.endsWith('\n') ? '' : '\n') + p;
+   747→    } else {
+   748→      buf += (buf && !buf.endsWith('\n') ? '\n' : '') + p;
+   749→    }
+   750→  }
+   751→  if (buf.trim()) out.push(makeChunk(buf, c, bufStart, idx++, o));
+   752→  return out;
+   753→}
+   754→
+   755→function splitOn(text: string, sep: string, maxLen: number): string[] {
+   756→  if (!sep) {
+   757→    // Final fallback: hard split by maxLen.
+   758→    const out: string[] = [];
+   759→    for (let i = 0; i < text.length; i += maxLen) out.push(text.slice(i, i + maxLen));
+   760→    return out;
+   761→  }
+   762→  const parts = text.split(sep);
+   763→  const out: string[] = [];
+   764→  let buf = '';
+   765→  for (let i = 0; i < parts.length; i++) {
+   766→    const candidate = buf ? buf + sep + parts[i] : parts[i];
+   767→    if (candidate.length > maxLen && buf) {
+   768→      out.push(buf);
+   769→      buf = parts[i];
+   770→    } else {
+   771→      buf = candidate;
+   772→    }
+   773→  }
+   774→  if (buf) out.push(buf);
+   775→  return out;
+   776→}
+   777→
+   778→function makeChunk(content: string, parent: Chunk, charStart: number, idx: number, _o: Required<Pick<ChunkOptions, 'targetTokens' | 'overlapTokens' | 'maxTokens' | 'minTokens'>>): Chunk {
+   779→  return {
+   780→    content: content.trim(),
+   781→    section: parent.section,
+   782→    chunkIndex: idx,
+   783→    charStart,
+   784→    charEnd: charStart + content.length,
+   785→    tokens: estimateTokens(content),
+   786→    metadata: { ...parent.metadata, isTitle: false },
+   787→    // v2: inherit from parent split
+   788→    blockType: parent.blockType,
+   789→    sectionPath: parent.sectionPath,
+   790→    page: parent.page,
+   791→    bbox: parent.bbox,
+   792→    sectionRole: parent.sectionRole,
+   793→  };
+   794→}
+   795→
+   796→// ─── v2 block-type + section-role heuristic classifiers ─────────────────────
+   797→//
+   798→// These are deliberately cheap (regex-based) so they run at chunking time
+   799→// without another LLM call. Phase 2 will replace `classifyBlockType` with
+   800→// VLM-emitted types when available (precision='high' mode), falling back to
+   801→// these heuristics for fast mode.
+   802→
+   803→/**
+   804→ * Classify a chunk into one of the BlockType categories based on its content.
+   805→ *
+   806→ * Priority order (first match wins):
+   807→ *   1. title     — chunk is mostly a heading (detected by isTitleChunk)
+   808→ *   2. table     — contains HTML <table> or markdown pipe |---| table
+   809→ *   3. figure    — contains ![Figure: ...](...) image reference
+   810→ *   4. formula   — contains \[...\] display math
+   811→ *   5. code      — contains ``` fenced code block
+   812→ *   6. reference — starts with [N] bibliography pattern
+   813→ *   7. caption   — starts with "Figure N:" / "Table N:" / "图 N" / "表 N"
+   814→ *   8. list      — majority of non-empty lines start with - / * / N.
+   815→ *   9. text      — default
+   816→ */
+   817→export function classifyBlockType(
+   818→  content: string,
+   819→  section: DocSection | undefined,
+   820→  cursor: number
+   821→): BlockType {
+   822→  // 1. Title — delegate to existing heuristic.
+   823→  if (isTitleChunk(content, section, cursor)) return 'title';
+   824→
+   825→  // 2. Table — HTML <table> or markdown pipe table (|---| separator line).
+   826→  if (/<table[\s>]/i.test(content) || /^\s*\|[-:\s|]+\|\s*$/m.test(content)) {
+   827→    return 'table';
+   828→  }
+   829→
+   830→  // 3. Figure — markdown image with "Figure:" alt text (olmOCR v2 convention)
+   831→  //    or generic ![...](...) image reference.
+   832→  if (/!\[Figure:/i.test(content) || /!\[[^\]]*\]\([^)]+\)/.test(content)) {
+   833→    return 'figure';
+   834→  }
+   835→
+   836→  // 4. Formula — display math \[...\] (olmOCR v2) or legacy $$...$$.
+   837→  if (/\\\[[\s\S]*?\\\]/.test(content) || /\$\$[\s\S]*?\$\$/.test(content)) {
+   838→    return 'formula';
+   839→  }
+   840→
+   841→  // 5. Code — fenced code block.
+   842→  if (/```[\s\S]*?```/.test(content)) {
+   843→    return 'code';
+   844→  }
+   845→
+   846→  // 6. Reference — bibliography entry pattern: "[1] Author, Title..." or
+   847→  //    "(Author, 2020)" style at line start.
+   848→  if (/^\s*\[\d+\]\s+\S/m.test(content) || /^\s*\([A-Z][a-z]+,\s*\d{4}\)/m.test(content)) {
+   849→    return 'reference';
+   850→  }
+   851→
+   852→  // 7. Caption — "Figure 1:", "Table 2:", "图 1", "表 2".
+   853→  if (/^\s*(Figure|Table|图|表|Eq\.|方程)\s*\d+/im.test(content)) {
+   854→    return 'caption';
+   855→  }
+   856→
+   857→  // 8. List — majority of non-empty lines start with bullet/number marker.
+   858→  const lines = content.split('\n').filter((l) => l.trim().length > 0);
+   859→  if (lines.length >= 2) {
+   860→    const listLines = lines.filter((l) => /^\s*([-*•]|\d+[.)])\s+\S/.test(l)).length;
+   861→    if (listLines / lines.length >= 0.6) return 'list';
+   862→  }
+   863→
+   864→  // 9. Default.
+   865→  return 'text';
+   866→}
+   867→
+   868→/**
+   869→ * Detect GROBID section role from a section title.
+   870→ * Handles both English and Chinese academic paper conventions.
+   871→ *
+   872→ * Examples that map to each role:
+   873→ *   abstract      → "Abstract", "摘要"
+   874→ *   introduction  → "1. Introduction", "引言", "绪论"
+   875→ *   methods       → "Methods", "Methodology", "方法", "实验设计"
+   876→ *   results       → "Results", "Experiments", "结果", "实验结果"
+   877→ *   discussion    → "Discussion", "讨论"
+   878→ *   conclusion    → "Conclusion", "Conclusions", "结论", "总结"
+   879→ *   references     → "References", "Bibliography", "参考文献"
+   880→ *   appendix      → "Appendix", "附录"
+   881→ */
+   882→export function detectSectionRole(title: string): SectionRole | undefined {
+   883→  const t = title.toLowerCase().trim();
+   884→  // Strip leading numbering like "1." / "3.2" / "第一章"
+   885→  const cleaned = t.replace(/^(\d+\.?\d*\.?\s*|第[一二三四五六七八九十百]+章\s*)/, '').trim();
+   886→
+   887→  if (/^abstract|^摘要|^摘\s*要/.test(cleaned)) return 'abstract';
+   888→  if (/^introduction|^引言|^绪论|^背景/.test(cleaned)) return 'introduction';
+   889→  if (/^method|^methodology|^实验设计|^方法|^模型|^模型设计|^研究方法/.test(cleaned)) return 'methods';
+   890→  if (/^result|^experiment|^实验结果|^结果|^评估|^evaluation/.test(cleaned)) return 'results';
+   891→  if (/^discussion|^讨论/.test(cleaned)) return 'discussion';
+   892→  if (/^conclusion|^conclusions|^结论|^总结/.test(cleaned)) return 'conclusion';
+   893→  if (/^reference|^bibliography|^参考文献|^引用文献/.test(cleaned)) return 'references';
+   894→  if (/^appendix|^附录/.test(cleaned)) return 'appendix';
+   895→  return undefined;
+   896→}
+   897→
+   898→// ─── token estimation ───────────────────────────────────────────────────────
+   899→
+   900→export function estimateTokens(text: string): number {
+   901→  if (!text) return 0;
+   902→  const han = (text.match(/\p{Script=Han}/gu) || []).length;
+   903→  const other = text.length - han;
+   904→  // CJK ≈ 1 token per 2 chars (clp-like), Latin ≈ 1 token per 4 chars (BPE).
+   905→  return Math.ceil(han / 2 + other / 4);
+   906→}
+   907→
+   908→// ─── structural outline (for UI display) ────────────────────────────────────
+   909→
+   910→export interface OutlineNode {
+   911→  title: string;
+   912→  charStart: number;
+   913→  charEnd: number;
+   914→  level: number;
+   915→  children: OutlineNode[];
+   916→}
+   917→
+   918→/**
+   919→ * Build a hierarchical outline from flat sections. Useful for the UI's
+   920→ * "document outline" panel. Sections with no children are leaves.
+   921→ */
+   922→export function buildOutline(sections: DocSection[]): OutlineNode[] {
+   923→  const sorted = [...sections].sort((a, b) => a.charStart - b.charStart);
+   924→  const root: OutlineNode[] = [];
+   925→  const stack: OutlineNode[] = [];
+   926→
+   927→  for (const s of sorted) {
+   928→    const node: OutlineNode = {
+   929→      title: s.title,
+   930→      charStart: s.charStart,
+   931→      charEnd: s.charEnd,
+   932→      level: s.level,
+   933→      children: [],
+   934→    };
+   935→    // Pop stack until we find a parent with strictly smaller level.
+   936→    while (stack.length && stack[stack.length - 1].level >= s.level) stack.pop();
+   937→    if (stack.length) stack[stack.length - 1].children.push(node);
+   938→    else root.push(node);
+   939→    stack.push(node);
+   940→  }
+   941→  return root;
+   942→}
+   943→

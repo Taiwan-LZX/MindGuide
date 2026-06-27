@@ -14,6 +14,7 @@ import {
   X,
   Grid2X2,
   User,
+  PanelLeftClose,
 } from 'lucide-react';
 import { useLearningStore, type LearningSession } from '@/store/learning-store';
 import { UnifiedSearch } from './unified-search';
@@ -270,6 +271,7 @@ function FullSidebar() {
     deleteSession,
     updateSessionTitle,
     setCreateNewPanelOpen,
+    setSidebarOpen,
   } = useLearningStore();
 
   const [search, setSearch] = useState('');
@@ -321,12 +323,23 @@ function FullSidebar() {
         initial="hidden"
         animate="visible"
       >
-        {/* Brand */}
-        <motion.div className="flex items-center gap-2.5 px-1" variants={childVariants}>
-          <div className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral-200 text-neutral-700 dark:border-neutral-700 dark:text-neutral-300">
-            <MessagesSquare className="h-3.5 w-3.5" strokeWidth={1.6} />
+        {/* Brand + collapse button */}
+        <motion.div className="flex items-center justify-between px-1" variants={childVariants}>
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md border border-neutral-200 text-neutral-700 dark:border-neutral-700 dark:text-neutral-300">
+              <MessagesSquare className="h-3.5 w-3.5" strokeWidth={1.6} />
+            </div>
+            <span className="font-serif text-[15px] font-medium tracking-tight text-neutral-800 dark:text-neutral-100">MindGuide</span>
           </div>
-          <span className="font-serif text-[15px] font-medium tracking-tight text-neutral-800 dark:text-neutral-100">MindGuide</span>
+          <MouseFollowTooltip content="收起侧边栏">
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="flex h-6 w-6 items-center justify-center rounded-md text-neutral-400 transition-colors hover:bg-neutral-200/60 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+              aria-label="收起侧边栏"
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </button>
+          </MouseFollowTooltip>
         </motion.div>
 
         {/* Tab Navigation */}

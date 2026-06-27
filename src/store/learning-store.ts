@@ -145,6 +145,17 @@ interface LearningStore {
   // is emitted as an SSE { step } event before the final answer streams.
   // The frontend Reasoning panel shows "Step 1/N: Analyzing..." progress.
   streamingSteps: Array<{ index: number; total: number; label: string; result: string }>;
+  // Phase 3: Live step state — which step is currently running and its
+  // partial text as tokens stream in. stepStart sets the label + index;
+  // stepToken appends to the live text; step finalizes with the full result.
+  streamingCurrentStep: { index: number; total: number; label: string; liveText: string } | null;
+  // Phase 3: Citations from RAG retrieval (deep/structured modes). Each
+  // citation has an id, material title, section, and content snippet.
+  // The frontend renders [1] [2] ... refs that link to these.
+  streamingCitations: Array<{ id: number; materialTitle: string; section: string; page?: number; content: string }>;
+  // Phase 3: Reasoning metrics — total duration, per-step durations, step count.
+  // Sent once after all steps complete, before the final answer streams.
+  streamingMetrics: { totalDurationMs: number; stepCount: number; stepDurations: number[] } | null;
   // Last stream error message (null when no error). Set when the SSE stream
   // emits an error event or the fetch fails mid-stream. The UI surfaces a
   // toast when this transitions from null → string, then clears it after a
@@ -379,6 +390,9 @@ const initialState = {
   streamingThinking: '',
   streamingPhase: null,
   streamingSteps: [] as Array<{ index: number; total: number; label: string; result: string }>,
+  streamingCurrentStep: null as { index: number; total: number; label: string; liveText: string } | null,
+  streamingCitations: [] as Array<{ id: number; materialTitle: string; section: string; page?: number; content: string }>,
+  streamingMetrics: null as { totalDurationMs: number; stepCount: number; stepDurations: number[] } | null,
   lastStreamError: null,
   knowledgeNodes: [] as KnowledgeNode[],
   references: [] as Reference[],
@@ -644,6 +658,9 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       streamingThinking: '',
       streamingPhase: null,
       streamingSteps: [],
+      streamingCurrentStep: null,
+      streamingCitations: [],
+      streamingMetrics: null,
       lastStreamError: null,
     }));
 
@@ -733,12 +750,47 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
               // We append it to streamingSteps so the frontend Reasoning panel
               // can render "Step 1/N: Analyzing..." with live progress.
               if (parsed.step && typeof parsed.step === 'object') {
-                const step = parsed.step as { index: number; total: number; label: string; result: string };
+                const step = parsed.step as { index: number; total: number; label: string; result: string; durationMs?: number };
                 set((state) => ({
                   streamingSteps: [...state.streamingSteps, step],
+                  // Clear the live step since this one is now complete.
+                  streamingCurrentStep: null,
                   // Ensure we're in the thinking phase while steps are running.
                   streamingPhase: 'thinking',
                 }));
+              }
+              // Phase 3: stepStart — a new step is beginning. Set the live
+              // step state so the frontend can show "Step i/N: Label..." with
+              // a typing indicator while tokens stream in.
+              if (parsed.stepStart && typeof parsed.stepStart === 'object') {
+                const { index, total, label } = parsed.stepStart as { index: number; total: number; label: string };
+                set({
+                  streamingCurrentStep: { index, total, label, liveText: '' },
+                  streamingPhase: 'thinking',
+                });
+              }
+              // Phase 3: stepToken — a token from the current step's stream.
+              // Append to the live step's text for real-time display.
+              if (parsed.stepToken && typeof parsed.stepToken === 'object') {
+                const { index, token } = parsed.stepToken as { index: number; token: string };
+                set((state) => {
+                  if (!state.streamingCurrentStep || state.streamingCurrentStep.index !== index) return state;
+                  return {
+                    streamingCurrentStep: {
+                      ...state.streamingCurrentStep,
+                      liveText: state.streamingCurrentStep.liveText + token,
+                    },
+                  };
+                });
+              }
+              // Phase 3: citations — RAG passage refs for [1] [2] rendering.
+              if (parsed.citations && Array.isArray(parsed.citations)) {
+                set({ streamingCitations: parsed.citations });
+              }
+              // Phase 3: metrics — reasoning duration + step count.
+              if (parsed.metrics && typeof parsed.metrics === 'object') {
+                const m = parsed.metrics as { totalDurationMs: number; stepCount: number; stepDurations: number[] };
+                set({ streamingMetrics: { totalDurationMs: m.totalDurationMs, stepCount: m.stepCount, stepDurations: m.stepDurations } });
               }
               // Reasoning trace (only sent while thinking is enabled). We
               // accumulate it for a future "查看推理" panel; the thinking
@@ -814,6 +866,9 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
         streamingThinking: '',
         streamingPhase: null,
         streamingSteps: [],
+        streamingCurrentStep: null,
+        streamingCitations: [],
+        streamingMetrics: null,
       });
       // Accumulate model usage estimate for this session — every assistant
       // turn adds input + output tokens. We approximate with message length
@@ -846,6 +901,9 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
         streamingThinking: '',
         streamingPhase: null,
         streamingSteps: [],
+        streamingCurrentStep: null,
+        streamingCitations: [],
+        streamingMetrics: null,
         lastStreamError: friendly,
       });
     }

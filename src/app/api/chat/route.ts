@@ -462,16 +462,17 @@ export async function POST(req: NextRequest) {
     //   5. accumulates full content + persists to DB when the stream ends
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        // ── Phase 2: Multi-step reasoning for deep/structured modes ──
+        // ── Phase 2/3: Multi-step reasoning for deep/structured modes ──
         //
         // Before streaming the final answer, run intermediate reasoning
-        // steps (analyze → reason → ... ) and emit each as an SSE { step }
-        // event. The frontend Reasoning panel shows live step progress.
-        // The final step uses the accumulated context to enhance the answer.
+        // steps (analyze → reason → ... ) and emit each as SSE events.
+        //
+        // Phase 3: steps now stream their tokens live via { stepStart } +
+        // { stepToken } events, and citations are sent via { citations }.
         let multiStepContext: string | null = null;
         if (thinkingMode === 'deep' || thinkingMode === 'structured') {
           try {
-            multiStepContext = (await runMultiStepReasoning(
+            const result = await runMultiStepReasoning(
               {
                 mode: thinkingMode,
                 sessionId,
@@ -481,13 +482,40 @@ export async function POST(req: NextRequest) {
                 teachingMode,
                 selectedModel,
               },
+              // onStep — called when a step completes with its full result
               (step) => {
-                // Emit each intermediate step as an SSE event.
                 controller.enqueue(
                   encoder.encode(`data: ${JSON.stringify({ step })}\n\n`)
                 );
               },
-            ))?.finalThinking ?? null;
+              // onStepStart — called when a step begins (frontend shows indicator)
+              (index, total, label) => {
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({ stepStart: { index, total, label } })}\n\n`)
+                );
+              },
+              // onStepToken — called for each token as it streams in
+              (index, token) => {
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({ stepToken: { index, token } })}\n\n`)
+                );
+              },
+            );
+            multiStepContext = result?.finalThinking ?? null;
+
+            // Phase 3: send citations so the frontend can render [1] [2] refs
+            if (result?.citations && result.citations.length > 0) {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ citations: result.citations })}\n\n`)
+              );
+            }
+
+            // Phase 3: send reasoning metrics
+            if (result?.metrics) {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ metrics: result.metrics })}\n\n`)
+              );
+            }
           } catch (err) {
             console.error('Multi-step reasoning failed, falling back to single-step:', err);
           }

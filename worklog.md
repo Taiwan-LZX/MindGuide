@@ -1561,3 +1561,56 @@ Stage Summary:
   · src/store/learning-store.ts (streamingSteps 状态 + step 事件解析)
   · src/components/learning/main-content.tsx (分步进度展示 + handleStop 清空)
 - 新增依赖: ai@7.0.2, @ai-sdk/openai@4.0.0 (备用)
+
+---
+Task ID: impl-phase3-streaming-12
+Agent: main (Z.ai Code)
+Task: Phase 3 完善 — 中间步骤流式化 + Citation 引用 + 监控指标 + 重试机制
+
+Work Log:
+- P3-a 中间步骤流式化:
+  · multi-step-reasoning.ts: runMultiStepReasoning 新增 onStepStart + onStepToken 回调
+  · 每步改用 stream:true 调用模型，解析 SSE delta 实时转发 token
+  · 非流式 fallback 保留（SDK 不返回 stream 时）
+  · chat API: 新增 { stepStart } + { stepToken } SSE 事件
+  · store: 新增 streamingCurrentStep 状态（liveText 实时更新）
+  · 前端: live step 卡片用 brand 色边框高亮 + 打字光标 + 脉冲指示器
+- P3-b 轻量推理监控:
+  · multi-step-reasoning.ts: 新增 ReasoningMetrics（totalDurationMs/stepCount/stepDurations）
+  · 每步计时 stepStart → Date.now()，管道总计时 pipelineStart
+  · chat API: 多步完成后发送 { metrics } SSE 事件
+  · store: 新增 streamingMetrics 状态
+  · 前端: Reasoning 面板底部显示"推理耗时 Ns · N步 · 平均 Ns/步"
+- P3-c Citation 引用模式:
+  · multi-step-reasoning.ts: buildCitedContext() 给每个 RAG 段落加 [1] [2] 编号
+  · 系统提示告知模型"如引用某片段，请在对应处标注 [编号]"
+  · 返回 citations 数组（id/materialTitle/section/page/content）
+  · chat API: 发送 { citations } SSE 事件
+  · store: 新增 streamingCitations 状态
+  · 前端: Reasoning 面板底部"引用资料"列表，每个 [N] 显示资料名+章节+页码
+- P3-d 推理中断恢复 + 单步重试:
+  · multi-step-reasoning.ts: 每步最多重试 2 次（attempt 0 + 1）
+  · 第一次失败 console.warn + 重试，第二次失败 console.error + 记录"步骤执行失败"
+  · 不中断整个流程——后续步骤继续执行
+- 清理: 移除未使用的 buildKnowledgeBaseContext import
+
+Stage Summary:
+- `bun run lint` 通过（0 errors / 0 warnings）
+- dev server HTTP 200 稳定
+- curl 直接测试 chat API 确认 SSE 流:
+  · { stepStart: { index:0, total:3, label:"分析问题" } } ✅
+  · { stepToken: { index:0, token:"1" } } { stepToken: { index:0, token:"." } } ... ✅ (逐 token 流式)
+  · { stepStart: { index:1, total:3, label:"深度推理" } } ✅
+- DB 持久化: thinking 字段 415 字符，包含"## 多步推理上下文"+"### 分析问题"+"### 深度推理"
+- VLM 确认: "显示了多步推理上下文，分析问题和深度推理两个步骤均有详细内容，清晰展示了 AI 的分步推理过程"
+- Phase 3 新增 SSE 事件类型:
+  · { stepStart: { index, total, label } } — 步骤开始
+  · { stepToken: { index, token } } — 步骤 token 流
+  · { step: { index, total, label, result, durationMs } } — 步骤完成
+  · { citations: [...] } — RAG 引用列表
+  · { metrics: { totalDurationMs, stepCount, stepDurations } } — 推理指标
+- 修改文件:
+  · src/lib/multi-step-reasoning.ts (流式化 + citation + retry + metrics)
+  · src/app/api/chat/route.ts (新 SSE 事件 + citations/metrics 发送)
+  · src/store/learning-store.ts (streamingCurrentStep/streamingCitations/streamingMetrics 状态 + 事件解析)
+  · src/components/learning/main-content.tsx (live step 卡片 + citations 列表 + metrics 展示 + handleStop 清空)

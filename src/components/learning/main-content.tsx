@@ -3,7 +3,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MoreVertical, BookOpen, GraduationCap, ArrowDown, Copy, Check, RefreshCw, Compass, Dumbbell, RotateCw } from 'lucide-react';
-import { MOTION } from '@/lib/motion-tokens';
 import { useLearningStore } from '@/store/learning-store';
 import { KnowledgeInline } from '@/components/learning/knowledge-inline';
 import { MarkdownRenderer } from '@/components/learning/markdown-renderer';
@@ -90,11 +89,13 @@ const streamingBubbleVariants = {
     y: 0,
     transition: { type: 'spring' as const, stiffness: 320, damping: 28, mass: 0.7 },
   },
-  // EXIT = ENTER reversed: same target (hidden) + same spring. Symmetric.
+  // FIX: exit in-place (no y movement) so the streaming bubble doesn't
+  // slide down and visually clash with the new assistant message entering
+  // from the messages array. A pure opacity fade-out reads as "settling
+  // into place" rather than "falling away".
   exit: {
     opacity: 0,
-    y: 10,
-    transition: MOTION.enter,
+    transition: { duration: 0.18, ease: [0.16, 1, 0.3, 1] as const },
   },
 };
 
@@ -638,19 +639,21 @@ export function MainContent() {
                   )}
                 </div>
                 {/* Body swaps between reasoning panel and streaming content.
-                    REASONING UPGRADE: replaced the decorative ThreadThinkingAnim
-                    (3 bouncing dots) with a real <Reasoning> panel that renders
-                    the model's actual reasoning_content text via FlowToken's
-                    AnimatedMarkdown (token-arrival fade-in animation). Now the
-                    "thinking" animation reflects the REAL reasoning process. */}
-                <AnimatePresence mode="wait" initial={false}>
+                    FIX: mode="wait" caused a white-screen flash — the old
+                    body fully exited (0.2s fade-out) BEFORE the new body
+                    mounted (0.2s fade-in), leaving a ~200ms visual gap.
+                    Now mode="popLayout" lets both coexist briefly: the
+                    thinking body fades out + slides up while the streaming
+                    body fades in + slides up from below, giving a smooth
+                    directional cross-fade with no empty frame. */}
+                <AnimatePresence mode="popLayout" initial={false}>
                   {streamingPhase === 'thinking' || (!streamingContent && !streamingPhase) ? (
                     <motion.div
                       key="thinking-body"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.2 }}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                     >
                       <Reasoning isStreaming={streamingPhase === 'thinking'}>
                         {/* Phase 2: Multi-step reasoning progress.
@@ -736,7 +739,7 @@ export function MainContent() {
                                   animate={{ opacity: [1, 0.3, 1] }}
                                   transition={{ repeat: Infinity, duration: 1, ease: 'easeInOut' }}
                                 />
-                                正在准备推理…
+                                正在准备回复…
                               </motion.div>
                             )}
                           </div>
@@ -748,7 +751,7 @@ export function MainContent() {
                           <AnimatedMarkdown content={streamingThinking} />
                         ) : streamingSteps.length === 0 && !streamingCurrentStep ? (
                           <span className="text-neutral-400 dark:text-neutral-500">
-                            正在准备推理…
+                            正在准备回复…
                           </span>
                         ) : null}
                         {/* Phase 3: Citations — RAG passage refs rendered as
@@ -796,10 +799,10 @@ export function MainContent() {
                   ) : (
                     <motion.div
                       key="streaming-body"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.2 }}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
                       className="min-w-0 text-[13.5px] leading-[1.7] text-neutral-800 dark:text-neutral-200"
                     >
                       <MarkdownRenderer content={streamingContent} streaming />

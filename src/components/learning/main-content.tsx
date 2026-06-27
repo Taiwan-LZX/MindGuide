@@ -133,6 +133,7 @@ export function MainContent() {
     isStreaming,
     streamingContent,
     streamingThinking,
+    streamingSteps,
     streamingPhase,
     lastStreamError,
     knowledgeNodes,
@@ -360,6 +361,7 @@ export function MainContent() {
       streamingContent: '',
       streamingThinking: '',
       streamingPhase: null,
+      streamingSteps: [],
     });
   }, []);
 
@@ -623,13 +625,63 @@ export function MainContent() {
                       transition={{ duration: 0.2 }}
                     >
                       <Reasoning isStreaming={streamingPhase === 'thinking'}>
+                        {/* Phase 2: Multi-step reasoning progress.
+                            When streamingSteps is non-empty (deep/structured
+                            modes), show each step with its label + result.
+                            Each step animates in as it arrives. */}
+                        {streamingSteps.length > 0 && (
+                          <div className="mb-3 space-y-2">
+                            {streamingSteps.map((step, i) => (
+                              <motion.div
+                                key={step.index}
+                                initial={{ opacity: 0, x: -8 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: i * 0.05, type: 'spring', stiffness: 380, damping: 28 }}
+                                className="rounded-md border border-neutral-200/60 bg-white/60 p-2 dark:border-neutral-700/60 dark:bg-neutral-800/40"
+                              >
+                                <div className="mb-1 flex items-center gap-1.5">
+                                  <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[var(--brand)] text-[9px] font-bold text-[var(--brand-foreground)]">
+                                    {step.index + 1}
+                                  </span>
+                                  <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-300">
+                                    {step.label}
+                                  </span>
+                                  <span className="text-[9px] text-neutral-400">
+                                    {step.index + 1}/{step.total}
+                                  </span>
+                                </div>
+                                <p className="text-[11.5px] leading-relaxed text-neutral-500 dark:text-neutral-400">
+                                  {step.result}
+                                </p>
+                              </motion.div>
+                            ))}
+                            {/* "正在执行下一步…" indicator while steps are running */}
+                            {streamingPhase === 'thinking' && (
+                              <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                className="flex items-center gap-1.5 px-1 text-[10.5px] text-neutral-400"
+                              >
+                                <motion.span
+                                  className="h-1 w-1 rounded-full bg-[var(--brand)]"
+                                  animate={{ opacity: [1, 0.3, 1] }}
+                                  transition={{ repeat: Infinity, duration: 1, ease: 'easeInOut' }}
+                                />
+                                {streamingSteps.length > 0 ? '正在执行下一步…' : '正在准备推理…'}
+                              </motion.div>
+                            )}
+                          </div>
+                        )}
+                        {/* Model's live reasoning_content (from the final
+                            streaming step). Shown below the multi-step
+                            results when available. */}
                         {streamingThinking ? (
                           <AnimatedMarkdown content={streamingThinking} />
-                        ) : (
+                        ) : streamingSteps.length === 0 ? (
                           <span className="text-neutral-400 dark:text-neutral-500">
                             正在准备推理…
                           </span>
-                        )}
+                        ) : null}
                       </Reasoning>
                     </motion.div>
                   ) : (

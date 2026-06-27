@@ -1510,3 +1510,54 @@ Stage Summary:
   · src/components/learning/reasoning.tsx (新建: 自建 Reasoning 组件 + bug 修复)
   · src/components/learning/main-content.tsx (接入 streamingThinking + 替换装饰动画 + MsgBubble 加推理面板)
 - 新增依赖: flowtoken@1.0.40
+
+---
+Task ID: impl-phase2-multistep-11
+Agent: main (Z.ai Code)
+Task: Phase 2 多步推理引擎 — deep/structured 模式变成真 ReAct agent
+
+Work Log:
+- 调研当前架构: z-ai-web-dev-sdk 已能流式返回 reasoning_content，Phase 1 已展示真实推理文本。Phase 2 核心价值是让 thinkingMode: deep/structured 从 prompt overlay 变成真正的多步推理。
+- @ai-sdk/zai 不存在于 npm，改为在现有 z-ai-web-dev-sdk 基础上实现多步推理引擎（风险最低，不破坏现有 SSE 管道）
+- 安装 ai@7.0.2 + @ai-sdk/openai@4.0.0（备用，当前未直接使用）
+- 创建 src/lib/multi-step-reasoning.ts:
+  · DEEP_STEPS: 3 步（分析问题 → 深度推理 → 组织回答）
+  · STRUCTURED_STEPS: 4 步（链式推理 → 自我批评 → 多路径探索 → 收敛输出）
+  · runMultiStepReasoning(): 对 deep/structured 模式，逐步调用模型，每步非流式获取中间结果
+  · 每步通过 onStep 回调发送到前端，最后一步用现有流式管道输出最终回答
+  · RAG 检索只在第一步执行（分析阶段需要知识库上下文）
+  · 累积上下文 accumulatedContext 传递给后续步骤
+- chat API 集成 (src/app/api/chat/route.ts):
+  · 在 ReadableStream start 函数内、读取 upstream 之前，先跑多步推理
+  · 每步通过 SSE { step: { index, total, label, result } } 事件发送
+  · 多步推理上下文持久化到 thinking 字段（"## 多步推理上下文" + "## 模型推理"）
+  · deep/structured 失败时 fallback 到单步（不影响现有功能）
+- store 适配 (src/store/learning-store.ts):
+  · 新增 streamingSteps 状态: Array<{ index, total, label, result }>
+  · SSE 解析新增 step 事件处理: 追加到 streamingSteps + 保持 thinking phase
+  · sendMessage/handleStop/错误结束都清空 streamingSteps
+- 前端展示 (src/components/learning/main-content.tsx):
+  · 从 store 解构 streamingSteps
+  · thinking-body 的 Reasoning 面板新增分步进度展示:
+    - 每步一个卡片（编号 + 标签 + 进度 + 结果文本）
+    - 步骤卡片用 motion 入场动画（fade + slide）
+    - "正在执行下一步…"脉冲指示器
+    - 多步结果下方继续展示模型的 reasoning_content（AnimatedMarkdown）
+  · 已有消息的 Reasoning 面板也会展示持久化的多步推理上下文
+
+Stage Summary:
+- `bun run lint` 通过（0 errors / 0 warnings）
+- dev server HTTP 200 稳定
+- Agent Browser + VLM 验证:
+  · 多步推理执行: ✅ thinking 字段 446 字符，包含"## 多步推理上下文"+"### 分析问题"+"### 深度推理"
+  · 前端展示: ✅ Reasoning 面板展开后显示分步推理内容
+  · VLM 确认: "显示了多步推理上下文，存在分析问题和深度推理两个步骤，每步有具体内容（问题类型/认知水平/多角度推理），清晰展示了 AI 多步推理过程"
+- 核心改进:
+  · Before: thinkingMode: deep/structured 只是给 system prompt 加文字 overlay，模型内部推理无差异
+  · After: deep 模式真正执行 3 步推理（分析→推理→回答），structured 模式 4 步（链式→批评→多路径→收敛），每步独立调用模型，中间结果流式展示
+- 修改文件:
+  · src/lib/multi-step-reasoning.ts (新建: 多步推理引擎 + 步骤定义)
+  · src/app/api/chat/route.ts (集成多步推理 + SSE step 事件 + thinking 持久化)
+  · src/store/learning-store.ts (streamingSteps 状态 + step 事件解析)
+  · src/components/learning/main-content.tsx (分步进度展示 + handleStop 清空)
+- 新增依赖: ai@7.0.2, @ai-sdk/openai@4.0.0 (备用)

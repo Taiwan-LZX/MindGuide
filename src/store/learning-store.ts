@@ -141,6 +141,10 @@ interface LearningStore {
   // sends `phase:'thinking'` the moment the first reasoning token arrives,
   // even before any reasoning text has been forwarded.
   streamingPhase: 'thinking' | 'answering' | null;
+  // Phase 2: Multi-step reasoning steps (deep/structured modes). Each step
+  // is emitted as an SSE { step } event before the final answer streams.
+  // The frontend Reasoning panel shows "Step 1/N: Analyzing..." progress.
+  streamingSteps: Array<{ index: number; total: number; label: string; result: string }>;
   // Last stream error message (null when no error). Set when the SSE stream
   // emits an error event or the fetch fails mid-stream. The UI surfaces a
   // toast when this transitions from null → string, then clears it after a
@@ -374,6 +378,7 @@ const initialState = {
   streamingContent: '',
   streamingThinking: '',
   streamingPhase: null,
+  streamingSteps: [] as Array<{ index: number; total: number; label: string; result: string }>,
   lastStreamError: null,
   knowledgeNodes: [] as KnowledgeNode[],
   references: [] as Reference[],
@@ -638,6 +643,7 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
       streamingContent: '',
       streamingThinking: '',
       streamingPhase: null,
+      streamingSteps: [],
       lastStreamError: null,
     }));
 
@@ -722,6 +728,18 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
               if (parsed.phase === 'thinking' && !phaseHeld) {
                 set({ streamingPhase: 'thinking' });
               }
+              // Phase 2: Multi-step reasoning step (deep/structured modes).
+              // Each { step } event carries an intermediate reasoning result.
+              // We append it to streamingSteps so the frontend Reasoning panel
+              // can render "Step 1/N: Analyzing..." with live progress.
+              if (parsed.step && typeof parsed.step === 'object') {
+                const step = parsed.step as { index: number; total: number; label: string; result: string };
+                set((state) => ({
+                  streamingSteps: [...state.streamingSteps, step],
+                  // Ensure we're in the thinking phase while steps are running.
+                  streamingPhase: 'thinking',
+                }));
+              }
               // Reasoning trace (only sent while thinking is enabled). We
               // accumulate it for a future "查看推理" panel; the thinking
               // animation itself is driven by streamingPhase.
@@ -795,6 +813,7 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
         streamingContent: '',
         streamingThinking: '',
         streamingPhase: null,
+        streamingSteps: [],
       });
       // Accumulate model usage estimate for this session — every assistant
       // turn adds input + output tokens. We approximate with message length
@@ -826,6 +845,7 @@ export const useLearningStore = create<LearningStore>((set, get) => ({
         streamingContent: '',
         streamingThinking: '',
         streamingPhase: null,
+        streamingSteps: [],
         lastStreamError: friendly,
       });
     }

@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { stripEmoji } from '@/lib/emoji-sanitize';
 import { retrievePassages, buildKnowledgeBaseContext } from '@/lib/retrieval';
 import { parseBody, chatSchema } from '@/lib/api-validator';
+import { runMultiStepReasoning } from '@/lib/multi-step-reasoning';
 
 // The core AI teaching system prompt
 const TEACHING_SYSTEM_PROMPT = `你是一位资深的教育者和学习导师，你的核心使命是通过对话式教学帮助学习者真正理解知识。
@@ -448,16 +449,50 @@ export async function POST(req: NextRequest) {
     let phaseSent: 'thinking' | 'answering' | null = null;
 
     // Build a streaming response that:
-    //   1. reads from upstream SDK stream
-    //   2. parses OpenAI-style SSE deltas (content + reasoning_content)
-    //   3. re-emits in our own SSE format:
+    //   1. (deep/structured only) runs multi-step reasoning, emitting { step }
+    //      events for each intermediate step
+    //   2. reads from upstream SDK stream for the final answer
+    //   3. parses OpenAI-style SSE deltas (content + reasoning_content)
+    //   4. re-emits in our own SSE format:
+    //        - { step: { index, total, label, result } } for each reasoning step
     //        - { phase: 'thinking' } once when reasoning starts
     //        - { thinking: string, full: true } on each reasoning chunk
     //        - { phase: 'answering' } once when content starts
     //        - { content: string, full: true } on each content chunk
-    //   4. accumulates full content + persists to DB when the stream ends
+    //   5. accumulates full content + persists to DB when the stream ends
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
+        // ── Phase 2: Multi-step reasoning for deep/structured modes ──
+        //
+        // Before streaming the final answer, run intermediate reasoning
+        // steps (analyze → reason → ... ) and emit each as an SSE { step }
+        // event. The frontend Reasoning panel shows live step progress.
+        // The final step uses the accumulated context to enhance the answer.
+        let multiStepContext: string | null = null;
+        if (thinkingMode === 'deep' || thinkingMode === 'structured') {
+          try {
+            multiStepContext = (await runMultiStepReasoning(
+              {
+                mode: thinkingMode,
+                sessionId,
+                message,
+                messageHistory: historyMessages || [],
+                knowledgeNodes: knowledgeNodes || [],
+                teachingMode,
+                selectedModel,
+              },
+              (step) => {
+                // Emit each intermediate step as an SSE event.
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({ step })}\n\n`)
+                );
+              },
+            ))?.finalThinking ?? null;
+          } catch (err) {
+            console.error('Multi-step reasoning failed, falling back to single-step:', err);
+          }
+        }
+
         const reader = upstream.getReader();
         try {
           while (true) {
@@ -542,8 +577,12 @@ export async function POST(req: NextRequest) {
                   type: 'dialogue',
                   // Persist the reasoning trace alongside the answer so future
                   // turns can reference it (and the UI can show a "查看推理"
-                  // collapsible on historical messages).
-                  thinking: fullThinking ? stripEmoji(fullThinking).slice(0, 8000) : null,
+                  // collapsible on historical messages). For deep/structured
+                  // modes, prepend the multi-step reasoning context.
+                  thinking: [
+                    multiStepContext ? `## 多步推理上下文\n${multiStepContext}` : '',
+                    fullThinking ? `## 模型推理\n${stripEmoji(fullThinking)}` : '',
+                  ].filter(Boolean).join('\n\n').slice(0, 8000) || null,
                 },
               });
             } catch (dbErr) {
